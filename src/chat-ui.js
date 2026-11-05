@@ -292,6 +292,8 @@
       controller.signal.throwIfAborted();
       if (sequence !== sendSequence || !visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
       navigatingHistory = false; render(started); byId("chat-input").value = ""; busy = false; controls();
+      const container = byId("chat-messages"); container.scrollTop = container.scrollHeight;
+      updateMessageNavigation();
       if (visible && !byId("chat-input").disabled) byId("chat-input").focus({ preventScroll: true });
       status("応答を生成しています…");
       const response = await globalThis.OshaberiNoteOllama.chat(endpoint, model, started.messages, controller.signal, async answer => {

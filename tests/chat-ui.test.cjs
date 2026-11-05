@@ -393,6 +393,22 @@ test('前後の発言へ自分・AIの順で移動し、手動スクロール後
   await n.get('chat-new').onclick();await flush();assert.equal(previous.disabled,true);assert.equal(next.disabled,true);assert.equal(n.get('chat-message-position').textContent,'発言なし');
 });
 
+test('過去を閲覧中でも自分の送信受付後は最終発言へ移動し、入力中や送信拒否時は位置を保つ',async t=>{
+  const f=await fixture(t),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
+  container.clientHeight=200;container.getBoundingClientRect=()=>({top:0});
+  Object.defineProperty(container,'scrollHeight',{get:()=>Math.max(200,container.querySelectorAll('article').length*80+120)});
+  let top=0;Object.defineProperty(container,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(value,container.scrollHeight-container.clientHeight));}});
+  f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-container.scrollTop,height:60});return node;};
+  n.get('connect-ollama').onclick();await flush();
+  for(const text of ['最初','2回目']){n.get('chat-input').value=text;n.get('chat-form').fire('submit');await flush();}
+  n.get('chat-previous-message').onclick();assert.equal(container.scrollTop,160);
+  n.get('chat-input').value='下書き';n.get('chat-input').fire('input');await flush();assert.equal(container.scrollTop,160);
+  n.get('chat-input').value=' ';n.get('chat-form').fire('submit');await flush();assert.equal(container.scrollTop,160);
+  n.get('chat-input').value='3回目';n.get('chat-form').fire('submit');await flush();
+  assert.equal(container.scrollTop,400);assert.equal(n.get('chat-message-position').textContent,'6 / 6 発言');
+  assert.equal(n.get('chat-next-message').disabled,true);assert.equal(f.document.activeElement,n.get('chat-input'));
+});
+
 test('前の発言を読んでいる間は生成更新・完了で末尾へ引き戻さない',async t=>{
   let finish;const encoder=new TextEncoder();
   const f=await fixture(t,{stream:()=>new Response(new ReadableStream({start(controller){
