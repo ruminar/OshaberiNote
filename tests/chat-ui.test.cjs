@@ -270,7 +270,11 @@ test('完了したAI回答のタグだけをボタン化し、検索と実際の
   assert.equal(groups[1].disabled,true);assert.match(groups[1].textContent,/登録済み/);
   n.get('chat-tag-close').onclick();buttons[1].onclick();
   assert.equal(n.get('chat-tag-search').href,'https://note.com/search?q=%23a%2Fb%3F%20x&context=note&mode=search&sort=new');
-  n.get('chat-tag-search').onclick();assert.equal(n.get('chat-tag-dialog').open,false);
+  n.get('chat-tag-search').fire('click');assert.equal(n.get('chat-tag-dialog').open,true);
+  assert.equal(n.get('chat-tag-heading').textContent,'#a/b? x');
+  groups[2].onclick();await flush();assert.deepEqual((await f.settings()).tagGroups[2].tags,['a/b? x']);
+  assert.equal(n.get('chat-tag-dialog').open,true);
+  n.get('chat-tag-close').onclick();assert.equal(n.get('chat-tag-dialog').open,false);
 });
 test('生成途中と中断した応答はボタン化せず、完了応答のHTMLも実行しない',async t=>{
   const f=await fixture(t,{stream:init=>new Response(new ReadableStream({start(controller){

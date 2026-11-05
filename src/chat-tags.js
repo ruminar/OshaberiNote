@@ -61,7 +61,6 @@
       byId("chat-tag-groups").append(button); buttons.push(button);
     }
     byId("chat-tag-close").onclick = () => dialog.close();
-    byId("chat-tag-search").onclick = () => dialog.close();
     dialog.addEventListener("close", () => { selected?.trigger.setAttribute("aria-expanded", "false"); selected = undefined; });
     function render(node, content, valid) {
       const parsed = parts(content);
