@@ -159,13 +159,13 @@
     updateMessageNavigation();
     controls();
   }
-  async function sync() {
+  async function sync(restoreSelection = false) {
     settings = await platform.getState();
     byId("chat-endpoint").textContent = `接続先：${settings.ollamaUrl}`;
     if (document.activeElement !== byId("ollama-url")) byId("ollama-url").value = settings.ollamaUrl;
     if (!promptDirty) { byId("system-prompt").value = settings.ollamaSystemPrompt; promptBaseline = settings.ollamaSystemPrompt; }
     renderModels();
-    render(await call("get"));
+    render(await call(restoreSelection ? "restore" : "get"));
   }
   function patch(extra = {}) { return { epoch: state.epoch, endpoint: settings.ollamaUrl, ...extra }; }
   const tabs = [{ id: "chat", title: "通常の会話" }, ...globalThis.OshaberiNoteChatActions.definitions];
@@ -391,7 +391,7 @@
     try {
       connection = api.runtime.connect({ name: `oshaberi-chat:${owner}` });
       connection.onDisconnect.addListener(() => { abort(); ready = false; blocked = true; status("背景処理との接続が切れました。再読み込みして状態を確認してください。"); controls(); });
-      await sync();
+      await sync(true);
       if ((visible || llmVisible) && state.approvedUrl === settings.ollamaUrl && settings.enabled) await probe(false);
     } catch (error) { blocked = true; status(error.message); controls(); }
   }

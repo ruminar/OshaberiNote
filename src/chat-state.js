@@ -18,7 +18,8 @@
     return { ...structuredClone(raw), actionId: raw.actionId ?? "chat", droppedTurns: raw.droppedTurns ?? 0, contextTrimmedTurns: raw.contextTrimmedTurns ?? 0 };
   }
   const validAction = id => id === "chat" || Boolean(globalThis.OshaberiNoteChatActions?.find(id));
-  function freshStore(endpoint) { return { schemaVersion: 2, endpoint, approvedUrl: "", conversations: {} }; }
+  const preferredAction = raw => validAction(raw?.selectedActionId) ? raw.selectedActionId : "chat";
+  function freshStore(endpoint) { return { schemaVersion: 2, endpoint, selectedActionId: "chat", approvedUrl: "", conversations: {} }; }
   function readStore(raw, endpoint, resetId) {
     if (raw === undefined) return freshStore(endpoint);
     if (raw?.schemaVersion === 1) {
@@ -34,7 +35,7 @@
     if (!raw || raw.schemaVersion !== 2 || raw.endpoint !== endpoint || !["", endpoint].includes(raw.approvedUrl) ||
         !raw.conversations || typeof raw.conversations !== "object" || Array.isArray(raw.conversations) ||
         Object.keys(raw.conversations).some(id => !validAction(id))) throw new Error("会話の保存データに異常があります。状態を確認してください。");
-    const store = freshStore(endpoint); store.approvedUrl = raw.approvedUrl;
+    const store = freshStore(endpoint); store.approvedUrl = raw.approvedUrl; store.selectedActionId = preferredAction(raw);
     for (const [id, value] of Object.entries(raw.conversations)) {
       if (id === resetId) continue;
       const state = readConversation(value, endpoint);
@@ -99,16 +100,17 @@
     }
     return Object.freeze({ execute: (operation, patch = {}) => run(async () => {
       if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("会話の要求が不正です。");
-      const settings = await load(), id = patch.actionId ?? "chat";
-      if (!validAction(id)) throw new Error("未対応の会話の種類です。");
+      const settings = await load(), requestedId = patch.actionId ?? "chat";
+      if (!validAction(requestedId)) throw new Error("未対応の会話の種類です。");
       const raw = await port.load();
-      const store = readStore(raw, settings.ollamaUrl, operation === "reset" ? id : undefined);
+      const store = readStore(raw, settings.ollamaUrl, operation === "reset" ? requestedId : undefined);
+      const id = operation === "restore" ? store.selectedActionId : requestedId;
       let state = select(store, id);
       if (operation === "reset") {
         state = fresh(settings.ollamaUrl, id); state.approvedUrl = store.approvedUrl;
         return save(store, state);
       }
-      if (operation === "get") {
+      if (operation === "get" || operation === "restore") {
         let orphan = false;
         for (const item of Object.values(store.conversations)) {
           if (item.active && port.isOwnerConnected && !port.isOwnerConnected(item.active.owner)) { interrupt(item); orphan = true; }
@@ -124,6 +126,7 @@
           if (item.active && (item.active.owner === patch.owner || (port.isOwnerConnected && !port.isOwnerConnected(item.active.owner)))) interrupt(item);
         }
         if (state.active?.owner === patch.owner) interrupt(state);
+        store.selectedActionId = id;
         await save(store, state);
         const action = globalThis.OshaberiNoteChatActions.find(id);
         return { ...state, ...(first && action ? { initialMessage: action.initialMessage } : {}) };
@@ -158,5 +161,5 @@
       return save(store, state);
     }) });
   }
-  globalThis.OshaberiNoteChatState = Object.freeze({ key, limits, bytes, fresh, freshStore, read, readStore, interrupt, interruptStore, retainRecent, createController });
+  globalThis.OshaberiNoteChatState = Object.freeze({ key, limits, bytes, fresh, freshStore, preferredAction, read, readStore, interrupt, interruptStore, retainRecent, createController });
 })();

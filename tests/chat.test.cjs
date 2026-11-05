@@ -307,6 +307,25 @@ test('一方のタブが壊れた場合は送信を拒否し、そのタブだ�
   await f.chat('reset',{actionId:tag.actionId});assert.equal((await f.chat('get')).turns[0].user,'保持する通常会話');
 });
 
+test('最後に選んだタブを復元し、通常設定の変更や個別初期化でも選択を保持する',async()=>{
+  const {f}=await ready(),tag=await beginTags(f);
+  assert.equal((await f.chat('restore')).actionId,tag.actionId);assert.equal((await f.chat('restore')).initialMessage,undefined);
+  await f.chat('get');assert.equal((await f.chat('restore')).actionId,tag.actionId);
+  await f.chat('reset',{actionId:tag.actionId});assert.equal((await f.chat('restore')).actionId,tag.actionId);
+  await f.save({ollamaSystemPrompt:'通常の条件'});assert.equal((await f.chat('restore')).actionId,tag.actionId);
+  await f.save({ollamaUrl:'http://192.168.1.8:11434'});
+  const restored=await f.chat('restore');assert.equal(restored.actionId,tag.actionId);assert.deepEqual(restored.turns,[]);assert.equal(restored.approvedUrl,'');
+});
+
+test('選択情報がない旧データや不正な選択値は通常タブで開き、保存失敗では最後の選択を保持する',async()=>{
+  const {f}=await ready(),api=f.context.OshaberiNoteChatState;
+  delete f.data[api.key].selectedActionId;assert.equal((await f.chat('restore')).actionId,'chat');
+  f.data[api.key].selectedActionId='unknown';assert.equal((await f.chat('restore')).actionId,'chat');
+  const before=structuredClone(f.data);f.fail=true;await assert.rejects(beginTags(f),/storage failed/);f.fail=false;assert.deepEqual(f.data,before);
+  await beginTags(f);const store=structuredClone(f.data[api.key]);
+  await f.chat('get');assert.equal(f.data[api.key].selectedActionId,store.selectedActionId);
+});
+
 function client(chunks, options = {}) {
   let request;
   const c = vm.createContext({ URL, TextDecoder, TextEncoder, console, fetch: async (url, init) => {

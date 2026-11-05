@@ -5,6 +5,7 @@ const flush = async () => { for (let i = 0; i < 8; i++) await new Promise(resolv
 async function fixture(t, options = {}) {
   const f = backend(), c = f.context, requests = [], grants = [], events = new Map(), confirmations = [], copies = [];
   await f.save({ ollamaModel: 'local' });
+  if (options.storedChat) f.data[f.context.OshaberiNoteChatState.key] = structuredClone(options.storedChat);
   const document = documentFromHtml(source('home.html'));
   const timers = new Set();
   Object.assign(c, { document, location: { hash: options.hash ?? '', assign() {} }, AbortController, AbortSignal, TextDecoder,
@@ -47,6 +48,21 @@ test('ホームはおしゃべり初期表示、歯車の#settingsは設定を�
     assert.equal(f.nodes.has('note-logo-browser-back'), false);
   }
 });
+test('開き直すと最後の会話タブと履歴を復元し、初回質問を再送しない',async t=>{
+  const f=await fixture(t,{reply:'保存されたタグ回答'}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();await n.get('chat-actions').children[1].onclick();await flush();
+  n.get('chat-input').value='保存しない下書き';
+  const key=f.c.OshaberiNoteChatState.key,reopened=await fixture(t,{storedChat:f.data[key]}),r=reopened.nodes;
+  assert.equal(r.get('chat-actions').children[1].getAttribute('aria-selected'),'true');
+  assert.match(r.get('chat-heading').textContent,/タグの提案/);assert.match(r.get('chat-messages').textContent,/保存されたタグ回答/);
+  assert.equal(r.get('chat-input').value,'');assert.equal(reopened.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);
+  reopened.connect('other-page');await reopened.chat('select',{actionId:'chat',owner:'other-page'});await flush();
+  assert.equal(r.get('chat-actions').children[1].getAttribute('aria-selected'),'true');
+  const normal=await fixture(t,{storedChat:reopened.data[key]});
+  assert.equal(normal.nodes.get('chat-actions').children[0].getAttribute('aria-selected'),'true');
+  assert.equal(normal.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);
+});
+
 test('接続・モデル・送信を通して実モジュールで会話し、HTMLを文字として表示する', async t => {
   const f = await fixture(t), n = f.nodes;
   n.get('connect-ollama').onclick(); await flush();

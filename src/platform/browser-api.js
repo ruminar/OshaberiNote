@@ -56,7 +56,10 @@
       const previous = globalThis.OshaberiNote.readSettings((await api.storage.local.get(key))[key]);
       const chat = globalThis.OshaberiNoteChatState;
       let nextChat;
-      if (settings.ollamaUrl !== previous.ollamaUrl) nextChat = chat.freshStore(settings.ollamaUrl);
+      if (settings.ollamaUrl !== previous.ollamaUrl) {
+        nextChat = chat.freshStore(settings.ollamaUrl);
+        nextChat.selectedActionId = chat.preferredAction((await api.storage.local.get(chatKey))[chatKey]);
+      }
       else if (settings.ollamaSystemPrompt !== previous.ollamaSystemPrompt) {
         nextChat = chat.readStore((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl, "chat");
         nextChat.conversations.chat = chat.fresh(settings.ollamaUrl);
