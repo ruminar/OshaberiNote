@@ -32,6 +32,9 @@ port.onMessage((message, sender, respond) => {
     if (message?.type === "chat-operation") operation = chatController.execute(message.operation, message.patch);
     else if (message?.type === "get-state") operation = controller.getState();
     else if (message?.type === "save-settings") operation = controller.save(message.patch);
+    else if (message?.type === "save-llm-settings") operation = typeof message.patch?.expectedToken === "string"
+      ? controller.save(message.patch.settings, message.patch.expectedToken)
+      : Promise.reject(new Error("LLM設定の保存要求が正しくありません。"));
     else if (message?.type === "import-settings") operation = controller.importSettings(message.patch);
     else if (message?.type === "author-operation") operation = controller.author(message.patch, { requireExisting: true });
     else if (message?.type === "tag-operation") operation = controller.tag(message.patch);

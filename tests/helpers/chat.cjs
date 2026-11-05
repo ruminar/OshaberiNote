@@ -21,7 +21,7 @@ module.exports = function backend() {
   for (const file of ['src/common.js', 'src/chat-state.js', 'src/platform/browser-api.js', 'src/routing.js', 'src/background.js']) vm.runInContext(source(file), context, { filename: file });
   const sender = { id: 'test', url: 'chrome-extension://test/home.html', frameId: 0, tab: { id: 1 } };
   const send = (message, from = sender) => new Promise((resolve, reject) => {
-    const handled = handlers.message[0](message, from, result => result.ok ? resolve(copy(result.settings)) : reject(new Error(result.error)));
+    const handled = handlers.message[0](message, from, result => result.ok ? resolve(copy(result.settings)) : reject(Object.assign(new Error(result.error), { code: result.code })));
     if (!handled) resolve(undefined);
   });
   function connect(owner = 'owner') {

@@ -23,6 +23,7 @@ class Element {
   addEventListener(type,listener){(this.listeners[type]??=[]).push(listener);}
   removeEventListener(type,listener){this.listeners[type]=(this.listeners[type]??[]).filter(fn=>fn!==listener);}
   dispatchEvent(event){this.fire(event.type,event);return !event.defaultPrevented;}
+  requestSubmit(){this.fire('submit');}
   fire(type,event={}){event.target??=this;event.preventDefault??=()=>{event.defaultPrevented=true;};event.stopPropagation??=()=>{};for(const fn of this.listeners[type]??[])fn(event);this[`on${type}`]?.(event);return event;}
   focus(){this.ownerDocument.activeElement=this;this.focused=true;}
   getBoundingClientRect(){return {width:this.width,x:0,top:0,height:40};}

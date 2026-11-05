@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>おしゃべりnote</title>
   <link rel="stylesheet" href="src/home.css">
   <script defer src="src/common.js"></script>
@@ -24,6 +25,7 @@
           <button type="button" id="nav-chat" aria-controls="panel-chat">おしゃべり</button>
           <button type="button" id="nav-tags" aria-controls="panel-tags">お気に入り</button>
           <button type="button" id="nav-authors" aria-controls="panel-authors">ユーザーの表示管理</button>
+          <button type="button" id="nav-llm" aria-controls="panel-llm">LLMの設定</button>
           <button type="button" id="nav-settings" aria-controls="panel-settings">設定</button>
           <button type="button" id="nav-transfer" aria-controls="panel-transfer">設定の移行</button>
         </nav>
@@ -37,7 +39,7 @@
       <div class="home-content">
         <section id="panel-chat" aria-labelledby="chat-heading" hidden>
           <h2 id="chat-heading">おしゃべり</h2>
-          <p class="muted">入力したメッセージと完了済みの会話だけを、設定したOllamaへ送ります。noteの記事や認証情報は送りません。</p>
+          <p class="muted">入力したメッセージ・完了済みの会話・保存したシステムプロンプトを、設定したOllamaへ送ります。noteの記事や認証情報を自動で収集・送信しません。</p>
           <p id="chat-endpoint" class="muted"></p>
           <div class="chat-toolbar">
             <button type="button" id="connect-ollama">接続・再試行</button>
@@ -54,10 +56,12 @@
             <p>起動後、この画面の「接続・再試行」から試してください。他のWebサイトや拡張まで一括で許可しないでください。既に許可済みの場合は、接続先の認証・プロキシ設定も確認してください。</p>
           </div>
           <p class="muted">未接続の場合はOllamaの起動、接続URL、モデルの登録を確認してください。クラウドモデルではOllama側から外部へ通信します。詳細は同梱の導入手順をご覧ください。</p>
+          <p id="chat-history-info" class="muted" role="status">履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。</p>
           <div id="chat-messages" role="log" aria-label="会話履歴" aria-live="off"></div>
           <form id="chat-form">
             <label for="chat-input">メッセージ</label>
-            <textarea id="chat-input" rows="4" maxlength="8000" placeholder="メッセージを入力（Enterで改行）" disabled></textarea>
+            <textarea id="chat-input" rows="4" maxlength="200000" aria-describedby="chat-input-help" placeholder="メッセージを入力（Ctrl+Enterで送信、Enterで改行）" disabled></textarea>
+            <p id="chat-input-help" class="muted">最大200,000文字。記事本文も貼り付けられます。長文や過去の会話は、Ollamaのコンテキスト長によって一部が参照されない場合があります。</p>
             <div class="settings-actions">
               <button id="chat-send" type="submit" disabled>送信</button>
               <button id="chat-stop" type="button" class="secondary" disabled>中止</button>
@@ -85,16 +89,27 @@
           <p id="tags-empty" class="muted">お気に入りは未登録です。タグ名を入力するか、作者ページから追加できます。</p>
           <ul id="edit-tags" class="tag-editor"></ul>
         </section>
-        <section id="panel-settings" aria-labelledby="settings-heading" hidden>
-          <h2 id="settings-heading">設定</h2>
+        <section id="panel-llm" aria-labelledby="llm-heading" hidden>
+          <h2 id="llm-heading">LLMの設定</h2>
           <form id="ollama-settings">
             <label for="ollama-url">Ollama接続URL</label>
             <input id="ollama-url" type="url" maxlength="2048" value="http://127.0.0.1:11434" autocomplete="off" spellcheck="false" required>
-            <p class="muted">接続先変更時は会話と入力を削除します。HTTP接続は暗号化されません。信頼できるネットワーク内でご利用ください。</p>
+            <p class="muted">接続先変更時は会話・入力・モデル選択・システムプロンプトを初期化します。HTTP接続は暗号化されません。信頼できるネットワーク内でご利用ください。</p>
             <button type="submit" id="save-ollama-url">接続先を保存</button>
             <p id="ollama-settings-status" role="status"></p>
           </form>
           <hr>
+          <form id="system-prompt-settings">
+            <label for="system-prompt">システムプロンプト</label>
+            <textarea id="system-prompt" rows="8" maxlength="8000" spellcheck="false" autocomplete="off" aria-describedby="system-prompt-help" placeholder="例：あなたは簡潔な日本語で回答するアシスタントです。" disabled></textarea>
+            <p id="system-prompt-help" class="muted">8,000文字以内。保存した内容を会話の先頭にシステムメッセージとして送信します。空欄で保存すると追加しません。効き方はモデルによります。設定JSONにも含まれます。</p>
+            <p class="muted">変更を保存すると、調査条件を揃えるため会話と未送信入力を初期化します。接続先を変更するとシステムプロンプトも空に戻ります。</p>
+            <button type="submit" id="save-system-prompt" disabled>システムプロンプトを保存</button>
+            <p id="system-prompt-status" role="status" aria-live="polite"></p>
+          </form>
+        </section>
+        <section id="panel-settings" aria-labelledby="settings-heading" hidden>
+          <h2 id="settings-heading">設定</h2>
           <form id="settings">
             <label for="note-user">noteユーザー名 または 公開プロフィールURL</label>
             <input id="note-user" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="例：ruminar または https://note.com/ruminar" disabled>

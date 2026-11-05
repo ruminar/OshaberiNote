@@ -23,7 +23,7 @@ async function fixture(t, options = {}) {
   c.chrome.permissions.request = async permission => { grants.push(structuredClone(permission)); return options.grant !== false; };
   c.chrome.runtime.sendMessage = async message => {
     try { return { ok: true, settings: await f.send(message) }; }
-    catch (error) { return { ok: false, error: error.message }; }
+    catch (error) { return { ok: false, error: error.message, code: error.code }; }
   };
   c.chrome.runtime.connect = ({ name }) => {
     const disconnect = f.connect(name.slice('oshaberi-chat:'.length));
@@ -61,6 +61,33 @@ test('権限拒否時にはAPIへ接続せず、既存の設定・お気に入�
   n.get('connect-ollama').onclick(); await flush();
   assert.equal(f.requests.length, 0); assert.equal(n.get('chat-send').disabled, true);
   n.get('nav-tags').onclick(); assert.equal(n.get('panel-tags').hidden, false); assert.equal(n.get('add-tag').disabled, false);
+});
+test('Ctrl+Enterは送信ボタンと同じ処理で送信し、連続操作で二重送信しない', async t => {
+  const f = await fixture(t), n = f.nodes;
+  n.get('connect-ollama').onclick(); await flush();
+  n.get('chat-input').value = 'こんにちは\n改行も維持';
+  const event = n.get('chat-input').fire('keydown', { key: 'Enter', ctrlKey: true });
+  n.get('chat-input').fire('keydown', { key: 'Enter', ctrlKey: true });
+  await flush();
+  assert.equal(event.defaultPrevented, true);
+  const requests = f.requests.filter(item => item.url.endsWith('/api/chat'));
+  assert.equal(requests.length, 1);
+  assert.equal(JSON.parse(requests[0].init.body).messages[0].content, 'こんにちは\n改行も維持');
+  assert.equal((await f.chat('get')).turns[0].status, 'complete');
+});
+test('Enter・IME変換中・キーリピート・別の修飾キーでは送信せず、未接続時にも送信しない', async t => {
+  const f = await fixture(t), n = f.nodes, input = n.get('chat-input');
+  input.value = '入力途中';
+  assert.equal(input.fire('keydown', { key: 'Enter', ctrlKey: true }).defaultPrevented, undefined);
+  n.get('connect-ollama').onclick(); await flush();
+  for (const event of [
+    { key: 'Enter' }, { key: 'Enter', shiftKey: true },
+    { key: 'Enter', ctrlKey: true, isComposing: true }, { key: 'Enter', ctrlKey: true, keyCode: 229 },
+    { key: 'Enter', ctrlKey: true, repeat: true }, { key: 'Enter', metaKey: true },
+    { key: 'Enter', ctrlKey: true, altKey: true }, { key: 'Enter', ctrlKey: true, shiftKey: true }
+  ]) assert.equal(input.fire('keydown', event).defaultPrevented, undefined);
+  assert.equal(f.requests.filter(item => item.url.endsWith('/api/chat')).length, 0);
+  assert.equal(input.value, '入力途中');
 });
 test('モデル一覧200・会話403を区別し、正確な拡張Originの許可手順を表示する', async t => {
   const f = await fixture(t, { postStatus: 403 }), n = f.nodes;
@@ -112,4 +139,81 @@ test('生成中に設定へ移動すると通信を中断し、戻っても自�
   n.get('nav-settings').onclick(); await flush(); assert.equal(wasAborted, true);
   assert.equal((await f.chat('get')).turns[0].status, 'interrupted');
   n.get('nav-chat').onclick(); await flush(); assert.equal(f.requests.filter(item => item.url.endsWith('/api/chat')).length, 1);
+});
+test('LLMの設定を通常の設定と分離し、接続URLとシステムプロンプトを配置する', async t => {
+  const f = await fixture(t, { hash: '#llm' }), n = f.nodes;
+  assert.equal(n.get('panel-llm').hidden, false); assert.equal(n.get('panel-settings').hidden, true);
+  assert.equal(n.get('panel-llm').contains(n.get('ollama-settings')), true);
+  assert.equal(n.get('panel-llm').contains(n.get('system-prompt-settings')), true);
+  assert.equal(n.get('panel-settings').contains(n.get('ollama-url')), false);
+  n.get('nav-settings').onclick(); assert.equal(n.get('panel-llm').hidden, true); assert.equal(n.get('panel-settings').hidden, false);
+  n.get('nav-llm').onclick(); assert.equal(n.get('panel-llm').hidden, false);
+});
+test('プロンプト保存後の送信にsystemメッセージを付け、空欄保存で解除する', async t => {
+  const f = await fixture(t), n = f.nodes;
+  n.get('connect-ollama').onclick(); await flush(); n.get('nav-llm').onclick();
+  n.get('system-prompt').value = '日本語で回答する。\nそのまま保存'; n.get('system-prompt').fire('input');
+  n.get('system-prompt-settings').fire('submit'); await flush();
+  assert.equal((await f.settings()).ollamaSystemPrompt, '日本語で回答する。\nそのまま保存');
+  assert.match(n.get('system-prompt-status').textContent, /保存し、会話を初期化/);
+  n.get('nav-chat').onclick(); n.get('chat-input').value = 'hi'; n.get('chat-form').fire('submit'); await flush();
+  let messages = JSON.parse(f.requests.find(item => item.url.endsWith('/api/chat')).init.body).messages;
+  assert.deepEqual(messages, [{ role: 'system', content: '日本語で回答する。\nそのまま保存' }, { role: 'user', content: 'hi' }]);
+  n.get('nav-llm').onclick(); n.get('system-prompt').value = ''; n.get('system-prompt').fire('input');
+  n.get('system-prompt-settings').fire('submit'); await flush(); assert.deepEqual((await f.chat('get')).turns, []);
+  n.get('nav-chat').onclick(); n.get('chat-input').value = 'new'; n.get('chat-form').fire('submit'); await flush();
+  messages = JSON.parse(f.requests.filter(item => item.url.endsWith('/api/chat')).at(-1).init.body).messages;
+  assert.deepEqual(messages, [{ role: 'user', content: 'new' }]);
+});
+test('プロンプト保存の取消では履歴・入力・設定を変更せず、未保存のプロンプトも送信しない', async t => {
+  const f = await fixture(t, { confirm: false }), n = f.nodes;
+  n.get('connect-ollama').onclick(); await flush();
+  n.get('chat-input').value = 'draft'; n.get('nav-llm').onclick();
+  n.get('system-prompt').value = 'unsaved'; n.get('system-prompt').fire('input');
+  n.get('system-prompt-settings').fire('submit'); await flush();
+  assert.equal((await f.settings()).ollamaSystemPrompt, ''); assert.equal(n.get('chat-input').value, 'draft');
+  n.get('nav-chat').onclick(); n.get('chat-form').fire('submit'); await flush();
+  assert.deepEqual(JSON.parse(f.requests.find(item => item.url.endsWith('/api/chat')).init.body).messages, [{ role: 'user', content: 'draft' }]);
+});
+test('別タブのプロンプト変更で未保存入力を上書きせず、そのままの再保存も拒否する', async t => {
+  const f = await fixture(t), n = f.nodes;
+  n.get('nav-llm').onclick(); n.get('system-prompt').value = 'local draft'; n.get('system-prompt').fire('input');
+  await f.save({ ollamaSystemPrompt: 'other tab' }); await flush();
+  assert.equal(n.get('system-prompt').value, 'local draft');
+  n.get('system-prompt-settings').fire('submit'); await flush();
+  assert.equal((await f.settings()).ollamaSystemPrompt, 'other tab'); assert.match(n.get('system-prompt-status').textContent, /別の画面/);
+});
+test('接続先変更で保存済みと編集中のプロンプトを消し、旧接続先の指示を持ち越さない', async t => {
+  const f = await fixture(t), n = f.nodes;
+  await f.save({ ollamaSystemPrompt: 'old private instruction' }); await flush();
+  n.get('nav-llm').onclick(); n.get('system-prompt').value = 'old draft'; n.get('system-prompt').fire('input');
+  n.get('ollama-url').value = 'http://192.168.1.10:11434'; n.get('ollama-settings').fire('submit'); await flush();
+  assert.equal((await f.settings()).ollamaSystemPrompt, ''); assert.equal(n.get('system-prompt').value, '');
+  assert.equal(n.get('system-prompt-status').textContent.includes('未保存'), false);
+  assert.equal(f.requests.length, 0);
+});
+test('設定JSONの明示読込では未保存のプロンプトを破棄して読込値を表示する', async t => {
+  const f = await fixture(t), n = f.nodes;
+  n.get('nav-llm').onclick(); n.get('system-prompt').value = 'unsaved'; n.get('system-prompt').fire('input');
+  n.get('nav-transfer').onclick(); n.get('settings-json').value = JSON.stringify({ format: 'oshaberi-note-settings', schemaVersion: 1, settings: { ollamaSystemPrompt: 'imported' } });
+  n.get('settings-json').oninput(); n.get('import-settings').onclick(); await flush();
+  assert.equal((await f.settings()).ollamaSystemPrompt, 'imported');
+  assert.equal(n.get('system-prompt').value, 'imported'); assert.equal(n.get('system-prompt-status').textContent, '');
+});
+test('長い記事を送信でき、入力上限超過の後も短く直せば再読み込みなしで送信できる', async t => {
+  const f=await fixture(t),n=f.nodes;n.get('connect-ollama').onclick();await flush();
+  n.get('chat-input').value='a'.repeat(200001);n.get('chat-form').fire('submit');await flush();
+  assert.equal(n.get('chat-send').disabled,false);assert.equal(n.get('chat-input').value.length,200001);
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);
+  const article='長い記事の本文です。'.repeat(18000);
+  n.get('chat-input').value=article;n.get('chat-form').fire('submit');await flush();
+  assert.equal((await f.chat('get')).turns[0].status,'complete');
+  assert.equal(JSON.parse(f.requests.find(item=>item.url.endsWith('/api/chat')).init.body).messages.at(-1).content,article);
+});
+test('10往復を超えてもUIから会話を続け、履歴を外した件数を表示する', async t => {
+  const f=await fixture(t),n=f.nodes;n.get('connect-ollama').onclick();await flush();
+  for(let i=0;i<12;i++){n.get('chat-input').value='turn-'+i;n.get('chat-form').fire('submit');await flush();}
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,12);
+  assert.equal((await f.chat('get')).turns.length,10);assert.match(n.get('chat-history-info').textContent,/2往復を保存から外し/);
+  assert.equal(n.get('chat-send').disabled,false);
 });

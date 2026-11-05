@@ -85,3 +85,22 @@ test('接続URLはオリジンだけ許可し、認証・経路・クエリ・�
   assert.equal(core.normalizeOllamaUrl('https://example.test'), 'https://example.test');
   for (const url of ['file:///tmp', 'http://@localhost', 'http://user:pass@localhost', 'http://localhost/a/..', 'http://localhost/?', 'http://localhost/#', 'http://localhost/api', 'http://localhost\\evil', 'http://localhost\n']) assert.throws(() => core.normalizeOllamaUrl(url));
 });
+test('システムプロンプトを自製JSONで往復し、省略時は保持・旧製品の同名項目は破棄する', async () => {
+  const f = backend(), core = f.context.OshaberiNote;
+  await f.save({ ollamaSystemPrompt: 'system\n調査用' }); const state = await f.settings();
+  const json = core.exportSettings(state); assert.equal(JSON.parse(json).settings.ollamaSystemPrompt, 'system\n調査用');
+  assert.equal(core.parseSettingsExport(json).ollamaSystemPrompt, 'system\n調査用');
+  assert.equal(core.parseSettingsExport(own({}), state).ollamaSystemPrompt, state.ollamaSystemPrompt);
+  assert.equal(core.parseSettingsExport(legacy({ ollamaSystemPrompt: 'ignored' }), state).ollamaSystemPrompt, state.ollamaSystemPrompt);
+  assert.equal(core.parseSettingsExport(own({ ollamaSystemPrompt: '' }), state).ollamaSystemPrompt, '');
+  for (const value of [null, false, {}, 'x'.repeat(8001)]) assert.throws(() => core.parseSettingsExport(own({ ollamaSystemPrompt: value }), state));
+});
+test('JSONからのプロンプト変更でも履歴を初期化し、接続許可は解除する', async () => {
+  const f = backend(); f.connect(); await f.save({ ollamaModel: 'local' });
+  const state = await f.chat('get'), patch = { epoch: state.epoch, endpoint: state.endpoint, owner: 'owner', model: 'local' };
+  await f.chat('approve', patch); await f.chat('start', { ...patch, text: 'old' });
+  const settings = await f.settings();
+  await f.send({ type: 'import-settings', patch: { json: own({ ollamaSystemPrompt: 'new system' }), expectedToken: f.context.OshaberiNote.settingsToken(settings) } });
+  const next = await f.chat('get'); assert.deepEqual(next.turns, []); assert.equal(next.approvedUrl, '');
+  assert.equal((await f.settings()).ollamaSystemPrompt, 'new system');
+});

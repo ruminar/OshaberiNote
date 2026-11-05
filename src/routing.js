@@ -50,9 +50,9 @@
         await port.setRules(rules(settings.enabled, settings.dashboardDisabled, core.modeOf(settings)));
         return settings;
       }),
-      save: patch => run(async () => {
+      save: (patch, expectedToken) => run(async () => {
         if (!patch || typeof patch !== "object" || Array.isArray(patch) ||
-            Object.keys(patch).some(key => !["enabled", "noteUserId", "dashboardDisabled", "ollamaUrl", "ollamaModel", "hideArticleRecommendations", "hidePaidArticles", "hideLikeCounts", "noteLogoBrowserBack", "keepNoteHeaderVisible"].includes(key))) {
+            Object.keys(patch).some(key => !["enabled", "noteUserId", "dashboardDisabled", "ollamaUrl", "ollamaModel", "ollamaSystemPrompt", "hideArticleRecommendations", "hidePaidArticles", "hideLikeCounts", "noteLogoBrowserBack", "keepNoteHeaderVisible"].includes(key))) {
           throw new Error("設定の形式が正しくありません。");
         }
         if (Object.hasOwn(patch, "enabled") && typeof patch.enabled !== "boolean") {
@@ -60,6 +60,7 @@
         }
         const raw = await port.load();
         const previous = core.readSettings(raw);
+        if (expectedToken !== undefined && (typeof expectedToken !== "string" || expectedToken !== core.settingsToken(previous))) throw failure("別の画面で設定が変更されました。保存せずに入力を保持しました。ページを再読み込みして最新の設定を確認してください。", "CONFLICT");
         if (Object.hasOwn(patch, "dashboardDisabled") && typeof patch.dashboardDisabled !== "boolean") {
           throw new Error("ダッシュボード設定の値が正しくありません。");
         }
@@ -72,7 +73,8 @@
         const next = { ...previous, ...patch };
         next.ollamaUrl = core.normalizeOllamaUrl(next.ollamaUrl);
         next.ollamaModel = core.validateModel(next.ollamaModel);
-        if (next.ollamaUrl !== previous.ollamaUrl) next.ollamaModel = "";
+        next.ollamaSystemPrompt = core.validateSystemPrompt(next.ollamaSystemPrompt);
+        if (next.ollamaUrl !== previous.ollamaUrl) { next.ollamaModel = ""; next.ollamaSystemPrompt = ""; }
         next.noteUserId = core.normalizeUserId(next.noteUserId);
         await port.setRules(rules(next.enabled, next.dashboardDisabled, core.modeOf(next)));
         try { await port.store(storedValue(raw, next)); }
@@ -91,7 +93,7 @@
         const next = { ...imported, tagSchemaVersion: core.favoriteSchema(imported.tagGroups),
           groupSelectionRevision: increment(previous.groupSelectionRevision), tagGroupsRevision: increment(previous.tagGroupsRevision), authorDisplayRevision: increment(previous.authorDisplayRevision) };
         delete next.mode;
-        if (next.ollamaUrl !== previous.ollamaUrl) next.ollamaModel = "";
+        if (next.ollamaUrl !== previous.ollamaUrl) { next.ollamaModel = ""; next.ollamaSystemPrompt = ""; }
         await port.setRules(rules(next.enabled, next.dashboardDisabled, core.modeOf(next)));
         try { await port.store(next, { importing: true }); }
         catch (error) {

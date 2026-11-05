@@ -3,7 +3,7 @@
   const core = globalThis.OshaberiNote;
   const platform = globalThis.OshaberiNotePlatform;
   const byId = id => document.getElementById(id);
-  const views = ["chat", "tags", "authors", "settings", "transfer"];
+  const views = ["chat", "tags", "authors", "llm", "settings", "transfer"];
   const fields = { hideLikeCounts: "hide-like-counts", hidePaidArticles: "hide-paid-articles", noteUserId: "note-user", dashboardDisabled: "dashboard-disabled", hideArticleRecommendations: "hide-article-recommendations", noteLogoBrowserBack: "note-logo-browser-back", keepNoteHeaderVisible: "keep-note-header-visible" };
   const drafts = new Map();
   function draft(id) { if (!drafts.has(id)) drafts.set(id, { tag: "", name: "", nameDirty: false, expectedName: "" }); return drafts.get(id); }
@@ -63,6 +63,7 @@
     for (const row of byId("edit-tags").children) row.draggable = !tagBlocked;
     byId("edit-tags").querySelectorAll("select").forEach(select => { select.disabled = tagBlocked; });
     byId("retry").disabled = busy;
+    byId("nav-llm").disabled = !state;
     byId("nav-transfer").disabled = !state;
     byId("nav-authors").disabled = !state;
     const authorBlocked = blocked || !state?.noteUserId || Boolean(state?.authorWarning);
@@ -243,6 +244,7 @@
       if (options.kind === "settings" || options.kind === "import") dirty.clear();
       if (options.kind === "import") {
         drafts.clear(); dragTag = null; byId("tag-input").value = "";
+        await globalThis.OshaberiNoteChatUI?.settingsImported();
       }
       if (options.addInput !== undefined) {
         const savedDraft = draft(options.groupId);
@@ -357,7 +359,7 @@
     if (byId("import-settings").disabled) return;
     const json = byId("settings-json").value, expectedToken = core.settingsToken(state);
     const incoming = core.parseSettingsExport(json, state);
-    const warning = incoming.ollamaUrl !== state.ollamaUrl ? " 接続先が変わるため会話履歴と未送信入力を削除し、モデル選択も解除します。" : "";
+    const warning = incoming.ollamaUrl !== state.ollamaUrl ? " 接続先が変わるため会話履歴と未送信入力を削除し、モデル選択・システムプロンプトも初期化します。" : incoming.ollamaSystemPrompt !== state.ollamaSystemPrompt ? " システムプロンプトが変わるため、会話履歴と未送信入力を削除します。" : "";
     if (!confirm(`入力JSONに存在する対応項目を適用します。未保存の設定入力は破棄します。${warning}読み込みますか？`)) return;
     void perform(() => platform.importSettings({ json, expectedToken }), { kind: "import" });
   };

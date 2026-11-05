@@ -42,6 +42,7 @@
     },
     getState: () => request("get-state"),
     save: patch => request("save-settings", patch),
+    saveLLM: (settings, expectedToken) => request("save-llm-settings", { settings, expectedToken }),
     importSettings: patch => request("import-settings", patch),
     author: operation => request("author-operation", operation),
     currentAuthor: (operation, source) => request("current-author-operation", { operation, source, pageUrl: globalThis.location.href }),
@@ -68,6 +69,11 @@
       const chat = globalThis.OshaberiNoteChatState;
       let nextChat;
       if (settings.ollamaUrl !== previous.ollamaUrl) nextChat = chat.fresh(settings.ollamaUrl);
+      else if (settings.ollamaSystemPrompt !== previous.ollamaSystemPrompt) {
+        const previousChat = chat.read((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl);
+        nextChat = chat.fresh(settings.ollamaUrl);
+        if (!options.importing) nextChat.approvedUrl = previousChat.approvedUrl;
+      }
       else if (settings.enabled === false || settings.ollamaModel !== previous.ollamaModel || options.importing) {
         nextChat = chat.interrupt(chat.read((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl));
         if (options.importing) nextChat.approvedUrl = "";

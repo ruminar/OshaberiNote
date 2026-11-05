@@ -6,6 +6,7 @@
   const owner = crypto.randomUUID(), chatKey = globalThis.OshaberiNoteChatState.key;
   let settings, state, connection, requestAbort, generatingId, ready = false, busy = false, blocked = false;
   let modelNames = [], probeRevision = 0, visible = !byId("panel-chat").hidden;
+  let promptDirty = false, promptBaseline = "";
   const status = text => { byId("chat-status").textContent = text; };
   function connectionHelp(error) {
     const origin = api.runtime.getURL("").replace(/\/$/, "");
@@ -25,13 +26,15 @@
     byId("chat-stop").disabled = !active;
     byId("chat-new").disabled = busy || !settings;
     byId("save-ollama-url").disabled = busy || !settings;
+    byId("system-prompt").disabled = busy || !settings;
+    byId("save-system-prompt").disabled = busy || !settings;
   }
   function abort() { requestAbort?.abort(); requestAbort = undefined; probeRevision++; }
   async function call(operation, patch = {}) {
     let result;
     try { result = await api.runtime.sendMessage({ type: "chat-operation", operation, patch }); }
     catch { blocked = true; controls(); throw new Error("保存結果を確認できません。ページを再読み込みして状態を確認してください。自動再送は行いません。"); }
-    if (!result?.ok) { blocked = true; controls(); throw new Error(result?.error || "会話の処理結果を確認できません。"); }
+    if (!result?.ok) { if (result?.code !== "INVALID_INPUT") blocked = true; controls(); throw Object.assign(new Error(result?.error || "会話の処理結果を確認できません。"), { code: result?.code }); }
     return result.settings;
   }
   function renderModels() {
@@ -45,6 +48,7 @@
     if (state && state.epoch !== next.epoch) { abort(); byId("chat-input").value = ""; }
     if (generatingId && next.active?.id !== generatingId) abort();
     state = next;
+    byId("chat-history-info").textContent = `履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。${state.droppedTurns ? ` これまでに${state.droppedTurns}往復を保存から外しました。` : ""}${state.contextTrimmedTurns ? ` 直近の送信では、保存履歴のうち古い${state.contextTrimmedTurns}往復を送信対象から外しました。` : ""}`;
     const container = byId("chat-messages"), atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
     container.replaceChildren();
     for (const turn of state.turns) {
@@ -61,6 +65,7 @@
     settings = await platform.getState();
     byId("chat-endpoint").textContent = `接続先：${settings.ollamaUrl}`;
     if (document.activeElement !== byId("ollama-url")) byId("ollama-url").value = settings.ollamaUrl;
+    if (!promptDirty) { byId("system-prompt").value = settings.ollamaSystemPrompt; promptBaseline = settings.ollamaSystemPrompt; }
     renderModels();
     render(await call("get"));
   }
@@ -100,19 +105,42 @@
   };
   byId("ollama-settings").onsubmit = async event => {
     event.preventDefault(); if (busy || !settings) return;
-    let endpoint;
-    try { endpoint = core.normalizeOllamaUrl(byId("ollama-url").value); }
+    let endpoint, expectedToken;
+    try { endpoint = core.normalizeOllamaUrl(byId("ollama-url").value); expectedToken = core.settingsToken(settings); }
     catch (error) { byId("ollama-settings-status").textContent = error.message; return; }
     if (endpoint === settings.ollamaUrl) { byId("ollama-settings-status").textContent = "接続先は変更されていません。"; return; }
-    if (!confirm("接続先を変更すると、保存済みの会話と未送信入力を削除し、モデル選択を解除します。変更しますか？")) return;
+    if (!confirm("接続先を変更すると、保存済みの会話と未送信入力を削除し、モデル選択・システムプロンプトを初期化します。変更しますか？")) return;
     busy = true; abort(); controls();
     try {
-      await platform.save({ ollamaUrl: endpoint });
+      await platform.saveLLM({ ollamaUrl: endpoint }, expectedToken);
       ready = false; blocked = false; modelNames = []; byId("chat-input").value = "";
+      promptDirty = false;
       await sync();
       byId("ollama-settings-status").textContent = "接続先を保存し、会話を初期化しました。おしゃべり画面から接続してください。";
       status("接続先を変更しました。「接続・再試行」を押してください。");
     } catch (error) { blocked = true; byId("ollama-settings-status").textContent = error.message; }
+    finally { busy = false; controls(); }
+  };
+  byId("system-prompt").addEventListener("input", () => {
+    if (!promptDirty) promptBaseline = settings?.ollamaSystemPrompt ?? "";
+    promptDirty = true; byId("system-prompt-status").textContent = "未保存の変更があります。";
+  });
+  byId("system-prompt-settings").onsubmit = async event => {
+    event.preventDefault(); if (busy || !settings) return;
+    let value, expectedToken;
+    try { value = core.validateSystemPrompt(byId("system-prompt").value); expectedToken = core.settingsToken(settings); }
+    catch (error) { byId("system-prompt-status").textContent = error.message; return; }
+    if (value === settings.ollamaSystemPrompt) { promptDirty = false; promptBaseline = value; byId("system-prompt-status").textContent = "システムプロンプトは変更されていません。"; return; }
+    if (promptDirty && promptBaseline !== settings.ollamaSystemPrompt) { byId("system-prompt-status").textContent = "別の画面でシステムプロンプトが変更されました。入力を控えたうえで再読み込みし、最新の設定を確認してください。"; return; }
+    if (!confirm("システムプロンプトを変更し、会話と未送信入力を削除します。保存しますか？")) return;
+    busy = true; abort(); controls();
+    try {
+      await platform.saveLLM({ ollamaSystemPrompt: value }, expectedToken);
+      promptDirty = false; blocked = false; byId("chat-input").value = "";
+      await sync();
+      byId("system-prompt-status").textContent = "システムプロンプトを保存し、会話を初期化しました。";
+      status("システムプロンプトを変更し、新しい会話を始めました。");
+    } catch (error) { blocked = true; byId("system-prompt-status").textContent = error.message; }
     finally { busy = false; controls(); }
   };
   byId("chat-model").onchange = async () => {
@@ -124,6 +152,12 @@
     catch (error) { blocked = true; status(error.message); }
     finally { busy = false; controls(); }
   };
+  byId("chat-input").addEventListener("keydown", event => {
+    if (event.key !== "Enter" || !event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.isComposing || event.keyCode === 229 || event.repeat) return;
+    if (byId("chat-input").disabled || byId("chat-send").disabled) return;
+    event.preventDefault();
+    byId("chat-form").requestSubmit();
+  });
   byId("chat-form").onsubmit = async event => {
     event.preventDefault(); if (byId("chat-send").disabled) return;
     connectionHelp();
@@ -142,7 +176,13 @@
       const response = await globalThis.OshaberiNoteOllama.chat(endpoint, model, started.messages, controller.signal, async answer => {
         controller.signal.throwIfAborted();
         if (state.epoch !== epoch || state.active?.id !== id) throw new Error("生成は中止されました。");
-        state.turns.at(-1).assistant = answer; render(state);
+        state.turns.at(-1).assistant = answer;
+        const container = byId("chat-messages"), atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        const paragraph = container.children[container.children.length - 1]?.querySelector("p");
+        // 長い記事本文を受信チャンクごとに作り直さず、末尾のAI発言だけ更新する。
+        if (paragraph) paragraph.textContent = answer || "（応答なし）";
+        else render(state);
+        if (atBottom) container.scrollTop = container.scrollHeight;
         if (Date.now() - lastSave > 250) {
           lastSave = Date.now();
           await call("progress", { epoch, endpoint, id, owner, model, text: answer });
@@ -177,11 +217,12 @@
   };
   platform.subscribe(value => {
     const next = core.readSettings(value);
-    if (!settings || next.ollamaUrl !== settings.ollamaUrl || next.ollamaModel !== settings.ollamaModel || !next.enabled) abort();
-    if (settings && next.ollamaUrl !== settings.ollamaUrl) { ready = false; modelNames = []; byId("chat-input").value = ""; }
+    if (!settings || next.ollamaUrl !== settings.ollamaUrl || next.ollamaModel !== settings.ollamaModel || next.ollamaSystemPrompt !== settings.ollamaSystemPrompt || !next.enabled) abort();
+    if (settings && next.ollamaUrl !== settings.ollamaUrl) { ready = false; modelNames = []; byId("chat-input").value = ""; promptDirty = false; byId("system-prompt-status").textContent = ""; }
     settings = next; renderModels(); controls();
     byId("chat-endpoint").textContent = `接続先：${settings.ollamaUrl}`;
     if (document.activeElement !== byId("ollama-url")) byId("ollama-url").value = settings.ollamaUrl;
+    if (!promptDirty) { byId("system-prompt").value = settings.ollamaSystemPrompt; promptBaseline = settings.ollamaSystemPrompt; }
   });
   api.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || !Object.hasOwn(changes, chatKey)) return;
@@ -192,7 +233,11 @@
     } catch { abort(); ready = false; blocked = true; status("会話の更新を確認できません。再読み込みして確認してください。"); controls(); }
   });
   api.permissions.onRemoved.addListener(() => { abort(); ready = false; status("接続権限が変更されました。「接続・再試行」で確認してください。"); controls(); });
-  globalThis.OshaberiNoteChatUI = Object.freeze({ setVisible(value) {
+  globalThis.OshaberiNoteChatUI = Object.freeze({ async settingsImported() {
+    promptDirty = false;
+    await sync();
+    byId("system-prompt-status").textContent = "";
+  }, setVisible(value) {
     visible = value;
     if (!visible) {
       abort();

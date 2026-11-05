@@ -76,18 +76,30 @@ test('ページの接続切断を検知して中断する。背景再起動後�
   f.data[f.context.OshaberiNoteChatState.key] = orphan;
   const state = await f.chat('get'); assert.equal(state.active, null); assert.equal(state.turns[0].status, 'interrupted');
 });
-test('入力・応答・送信履歴・会話件数の上限で拒否し、勝手に履歴を削除しない', async () => {
+test('入力の単発上限と応答の上限を検証し、その後も会話を続けられる', async () => {
   const { f, patch } = await ready();
-  await assert.rejects(f.chat('start', { ...patch, text: 'x'.repeat(8001) }), /8,000/);
+  await assert.rejects(f.chat('start', { ...patch, text: 'x'.repeat(200001) }), /200,000/);
   let state = await f.chat('start', { ...patch, text: 'x' });
   await assert.rejects(f.chat('progress', { ...patch, id: state.active.id, text: 'x'.repeat(32001) }), /長さ/);
   await f.chat('complete', { ...patch, id: state.active.id, text: 'x'.repeat(32000) });
-  await assert.rejects(f.chat('start', { ...patch, text: 'next' }), /上限/);
-  assert.equal((await f.chat('get')).turns[0].assistant.length, 32000);
-  state = await f.chat('reset');
-  const raw = f.data[f.context.OshaberiNoteChatState.key];
-  raw.turns = Array.from({ length: 100 }, () => ({ user: 'x', assistant: 'y', status: 'complete' }));
-  await assert.rejects(f.chat('start', { ...patch, epoch: state.epoch, text: 'next' }), /上限/);
+  state = await f.chat('start', { ...patch, text: 'next' }); assert.equal(state.messages.at(-1).content, 'next');
+});
+test('10往復を超えても古い履歴を入れ替えて会話を継続し、再初期化を強制しない', async () => {
+  const { f, patch } = await ready();
+  for (let i = 0; i < 25; i++) {
+    const state = await f.chat('start', { ...patch, text: 'turn-'+i });
+    assert.equal(state.epoch, patch.epoch); assert.ok(state.turns.length <= 10);
+    await f.chat('complete', { ...patch, id: state.active.id, text: 'answer-'+i });
+  }
+  const state = await f.chat('get'); assert.equal(state.turns.length, 10); assert.equal(state.droppedTurns, 15);
+  assert.equal(state.turns[0].user, 'turn-15'); assert.equal(state.turns.at(-1).user, 'turn-24');
+});
+test('旧版の100往復の保存値を直近10往復へ移行して継続できる', async () => {
+  const { f, patch } = await ready(); const key=f.context.OshaberiNoteChatState.key;
+  f.data[key].turns=Array.from({length:100},(_,i)=>({user:'old-'+i,assistant:'answer',status:'complete'}));
+  delete f.data[key].droppedTurns; delete f.data[key].contextTrimmedTurns;
+  const state=await f.chat('get');assert.equal(state.turns.length,10);assert.equal(state.droppedTurns,90);assert.equal(state.turns[0].user,'old-90');
+  const next=await f.chat('start',{...patch,text:'continue'});assert.equal(next.turns.length,10);assert.equal(next.droppedTurns,91);
 });
 test('不正な会話データは通信せず、新しい会話でのみ明示的に復旧できる', async () => {
   const { f } = await ready(); f.data[f.context.OshaberiNoteChatState.key].turns = [{ user: '<script>', assistant: {}, status: 'complete' }];
@@ -98,6 +110,72 @@ test('不正なON/OFF保存値を有効と推測せず、通信開始を拒否�
   const { f, patch } = await ready();
   f.data[f.context.OshaberiNote.settingsKey].enabled = 'true';
   await assert.rejects(f.chat('start', { ...patch, text: 'hello' }), /保存値が不正/);
+});
+test('システムプロンプトは先頭に一度だけ置き、会話本文とは別に送信する', async () => {
+  const { f } = await ready(); const text = '  日本語で簡潔に回答する。\n空白も保持する。  ';
+  await f.save({ ollamaSystemPrompt: text });
+  const state = await f.chat('get'), patch = { epoch: state.epoch, endpoint: state.endpoint, owner: 'owner', model: 'local-model' };
+  const first = await f.chat('start', { ...patch, text: 'first' });
+  assert.deepEqual(first.messages, [{ role: 'system', content: text }, { role: 'user', content: 'first' }]);
+  await f.chat('complete', { ...patch, id: first.active.id, text: 'answer' });
+  const second = await f.chat('start', { ...patch, text: 'second' });
+  assert.equal(second.messages[0].role, 'system'); assert.equal(second.messages.filter(item => item.role === 'system').length, 1);
+  assert.equal(second.messages.length, 4); assert.equal(second.turns[0].user, 'first');
+});
+test('プロンプト変更で生成中の会話を初期化し、遅延応答を拒否する。新しい会話では設定を保持する', async () => {
+  const { f, patch } = await ready(); const old = await f.chat('start', { ...patch, text: 'old conditions' });
+  await f.save({ ollamaSystemPrompt: 'new conditions' });
+  const current = await f.chat('get'); assert.deepEqual(current.turns, []); assert.notEqual(current.epoch, old.epoch);
+  assert.equal(current.approvedUrl, patch.endpoint); assert.equal((await f.settings()).ollamaModel, 'local-model');
+  await assert.rejects(f.chat('complete', { ...patch, id: old.active.id, text: 'late' }));
+  await f.chat('reset'); assert.equal((await f.settings()).ollamaSystemPrompt, 'new conditions');
+  await f.save({ ollamaUrl: 'http://192.168.1.9:11434' });
+  assert.equal((await f.settings()).ollamaSystemPrompt, '');
+});
+test('プロンプトの不正値・長さ・保存失敗では設定と会話を変更しない', async () => {
+  const { f, patch } = await ready(); await f.chat('start', { ...patch, text: 'keep' });
+  const before = structuredClone(f.data);
+  for (const value of [null, 1, {}, [], 'x'.repeat(8001)]) await assert.rejects(f.save({ ollamaSystemPrompt: value }), /8,000/);
+  assert.deepEqual(f.data, before);
+  f.fail = true; await assert.rejects(f.save({ ollamaSystemPrompt: 'new prompt' }), /storage failed/); assert.deepEqual(f.data, before);
+});
+test('20万文字の最新入力とシステムプロンプトを保持し、送信枠を超える古い往復だけ外す', async () => {
+  const { f } = await ready(); await f.save({ ollamaSystemPrompt: 'system'.repeat(1000) });
+  const state = await f.chat('get'), patch = { epoch: state.epoch, endpoint: state.endpoint, owner: 'owner', model: 'local-model' };
+  const first = await f.chat('start', { ...patch, text: 'old article'.repeat(10000) });
+  await f.chat('complete', { ...patch, id: first.active.id, text: 'a'.repeat(24000) });
+  const article='本文'.repeat(100000),next=await f.chat('start',{...patch,text:article});
+  assert.equal(next.messages.length,2); assert.equal(next.messages[0].role,'system');assert.equal(next.messages[1].content,article);
+  assert.equal(next.contextTrimmedTurns,1);assert.equal(next.turns.length,2);
+  await f.chat('complete',{...patch,id:next.active.id,text:'感想'});
+  const followup=await f.chat('start',{...patch,text:'もう少し詳しく'});assert.equal(followup.messages.at(-1).content,'もう少し詳しく');
+  assert.ok(followup.messages.some(item=>item.content===article));
+});
+test('UTF-8保存容量の上限でも古い往復を整理して、長文入力と最大応答を保存できる', async () => {
+  const { f, patch }=await ready();
+  for(let i=0;i<6;i++){
+    const state=await f.chat('start',{...patch,text:String.fromCharCode(0).repeat(199999)+i});
+    await f.chat('complete',{...patch,id:state.active.id,text:String.fromCharCode(0).repeat(32000)});
+    assert.ok(f.context.OshaberiNoteChatState.bytes(await f.chat('get'))<=2097152);
+  }
+  const state=await f.chat('get');assert.ok(state.droppedTurns>0);assert.ok(state.turns.length<6);
+});
+test('古い履歴の整理を伴う送信開始で保存が失敗しても、元の履歴は削除しない', async () => {
+  const { f, patch }=await ready();
+  for(let i=0;i<10;i++){const state=await f.chat('start',{...patch,text:'turn-'+i});await f.chat('complete',{...patch,id:state.active.id,text:'answer'});}
+  const before=structuredClone(f.data);f.fail=true;
+  await assert.rejects(f.chat('start',{...patch,text:'next'}),/storage failed/);assert.deepEqual(f.data,before);
+});
+test('LLM設定の競合トークンを保存キュー内で検証し、古い画面から上書きしない', async () => {
+  const { f } = await ready(), state = await f.settings();
+  const expectedToken = f.context.OshaberiNote.settingsToken(state);
+  const results = await Promise.allSettled([
+    f.send({ type: 'save-llm-settings', patch: { settings: { ollamaSystemPrompt: 'first' }, expectedToken } }),
+    f.send({ type: 'save-llm-settings', patch: { settings: { ollamaSystemPrompt: 'second' }, expectedToken } })
+  ]);
+  assert.equal(results[0].status, 'fulfilled'); assert.equal(results[1].status, 'rejected');
+  assert.equal((await f.settings()).ollamaSystemPrompt, 'first');
+  await assert.rejects(f.send({ type: 'save-llm-settings', patch: { settings: { ollamaSystemPrompt: 'missing token' } } }));
 });
 function client(chunks, options = {}) {
   let request;
@@ -117,6 +195,7 @@ test('NDJSONと日本語のUTF-8が任意のバイト位置で分割されても
   assert.deepEqual(parts, ['こんにちは', 'こんにちは！']);
   assert.equal(f.request.credentials, 'omit'); assert.equal(f.request.redirect, 'error'); assert.equal(f.request.referrerPolicy, 'no-referrer');
   assert.deepEqual(JSON.parse(f.request.body).messages, [{ role: 'user', content: 'hi' }]);
+  assert.equal(JSON.parse(f.request.body).truncate,true); assert.equal(JSON.parse(f.request.body).shift,true);
 });
 test('途中切断・不正JSON・HTTP異常・完了後の余分な行は成功扱いにしない', async () => {
   for (const data of [line('partial', false), '{bad}\n', line('ok', true) + line('late', true), JSON.stringify({ error: 'server error' }) + '\n']) {

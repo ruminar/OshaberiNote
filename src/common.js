@@ -4,7 +4,7 @@
   const settingsKey = "oshaberiNote.settings.v2";
   const groupIds = ["group1", "group2", "group3", "group4"];
   function defaultSettings() {
-    return { enabled: true, noteUserId: "", dashboardDisabled: false, mode: "normal", ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "",
+    return { enabled: true, noteUserId: "", dashboardDisabled: false, mode: "normal", ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "",
       hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, noteLogoBrowserBack: false, keepNoteHeaderVisible: false, tagSchemaVersion: 2,
       tagGroups: groupIds.map(id => ({ id, name: "", tags: [] })), selectedTagGroupId: "group1",
       groupSelectionRevision: 0, tagGroupsRevision: 0, authorDisplayRules: [], authorDisplayRevision: 0 };
@@ -82,7 +82,7 @@
     try { noteUserId = normalizeUserId(value?.noteUserId); } catch { /* 破損値は空欄へ */ }
     const groups = inspectGroups(value);
     return { enabled: value?.enabled !== false, noteUserId, dashboardDisabled: value?.dashboardDisabled === true,
-      mode: "normal", ollamaUrl: value?.ollamaUrl ?? "http://127.0.0.1:11434", ollamaModel: value?.ollamaModel ?? "", hideArticleRecommendations: value?.hideArticleRecommendations === true, hidePaidArticles: value?.hidePaidArticles === true, hideLikeCounts: value?.hideLikeCounts === true,
+      mode: "normal", ollamaUrl: value?.ollamaUrl ?? "http://127.0.0.1:11434", ollamaModel: value?.ollamaModel ?? "", ollamaSystemPrompt: value && Object.hasOwn(value, "ollamaSystemPrompt") ? value.ollamaSystemPrompt : "", hideArticleRecommendations: value?.hideArticleRecommendations === true, hidePaidArticles: value?.hidePaidArticles === true, hideLikeCounts: value?.hideLikeCounts === true,
       noteLogoBrowserBack: value?.noteLogoBrowserBack === true, keepNoteHeaderVisible: value?.keepNoteHeaderVisible === true, ...groups, ...inspectAuthors(value) };
   }
   function normalizeTag(value) {
@@ -303,6 +303,7 @@
     delete value.mode;
     value.ollamaUrl = normalizeOllamaUrl(settings.ollamaUrl);
     value.ollamaModel = validateModel(settings.ollamaModel);
+    value.ollamaSystemPrompt = validateSystemPrompt(settings.ollamaSystemPrompt === undefined ? "" : settings.ollamaSystemPrompt);
     const json = JSON.stringify({ format: "oshaberi-note-settings", schemaVersion: 1, settings: value }, null, 2);
     if (json.length > 1048576) throw new Error("設定JSONは1,048,576文字以内で入力してください。");
     return json;
@@ -316,6 +317,10 @@
   }
   function validateModel(value) {
     if (typeof value !== "string" || value.length > 256 || /[\u0000-\u0020\u007f]/.test(value)) throw new Error("モデル名が正しくありません。");
+    return value;
+  }
+  function validateSystemPrompt(value) {
+    if (typeof value !== "string" || value.length > 8000) throw new Error("システムプロンプトは8,000文字以内の文字列で入力してください。");
     return value;
   }
   function parseSettingsExport(text, current = defaultSettings()) {
@@ -344,14 +349,15 @@
     const result = validateTransferSettings(merged, 7);
     result.ollamaUrl = own && Object.hasOwn(source, "ollamaUrl") ? normalizeOllamaUrl(source.ollamaUrl) : current.ollamaUrl;
     result.ollamaModel = own && Object.hasOwn(source, "ollamaModel") ? validateModel(source.ollamaModel) : current.ollamaModel;
+    result.ollamaSystemPrompt = own && Object.hasOwn(source, "ollamaSystemPrompt") ? validateSystemPrompt(source.ollamaSystemPrompt) : validateSystemPrompt(current.ollamaSystemPrompt ?? "");
     return result;
   }
   function settingsToken(settings) {
-    return JSON.stringify([transferSettings(settings), settings.ollamaUrl, settings.ollamaModel, settings.groupSelectionRevision, settings.tagGroupsRevision, settings.authorDisplayRevision ?? 0]);
+    return JSON.stringify([transferSettings(settings), settings.ollamaUrl, settings.ollamaModel, settings.ollamaSystemPrompt ?? "", settings.groupSelectionRevision, settings.tagGroupsRevision, settings.authorDisplayRevision ?? 0]);
   }
   globalThis.OshaberiNote = Object.freeze({ settingsKey, isHome, isDashboard, shouldRedirect, normalizeUserId, readSettings, profileUrl,
     modeOf, usesTags, usesFollowing, usesLogoBack,
-    exportSettings, parseSettingsExport, settingsToken, normalizeOllamaUrl, validateModel, authorId, authorName, isSelf, authorRule, authorLabel, sortAuthors,
+    exportSettings, parseSettingsExport, settingsToken, normalizeOllamaUrl, validateModel, validateSystemPrompt, authorId, authorName, isSelf, authorRule, authorLabel, sortAuthors,
     favorite, favoriteKey, favoriteLabel, favoriteUrl, authorSearchUrl, searchedAuthor, favoriteUser, favoriteMagazine, favoriteMembership, favoriteSchema, bookIconPath, membershipIconPath, membershipPage, questionPage,
     normalizeTag, inspectTags, tagUrl, articleSearchTabUrl, pageKind, isArticle, isPreviewArticle, groupIds, groupName, normalizeGroupName, selectedGroup, defaultSettings });
 })();
