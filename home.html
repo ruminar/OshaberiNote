@@ -46,6 +46,11 @@
           <h2 id="chat-heading">おしゃべり</h2>
           <div id="chat-actions" class="settings-actions chat-tabs" role="tablist" aria-label="会話の種類"></div>
           <p id="chat-status" role="status" aria-live="polite">「LLMの設定」で接続し、モデルを選択してください。</p>
+          <nav class="chat-scroll-navigation" aria-label="発言の移動">
+            <button id="chat-previous-message" type="button" class="secondary" aria-controls="chat-messages" disabled>△ 前の発言</button>
+            <span id="chat-message-position" class="muted">発言なし</span>
+            <button id="chat-next-message" type="button" class="secondary" aria-controls="chat-messages" disabled>▽ 次の発言</button>
+          </nav>
           <div id="chat-messages" role="tabpanel" role="log" aria-label="会話履歴" aria-live="off"></div>
           <form id="chat-form">
             <label for="chat-input">メッセージ</label>

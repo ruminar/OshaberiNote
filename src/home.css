@@ -66,6 +66,10 @@ footer { font-size: 13px; color: var(--muted); margin-top: 24px; }
 #chat-input { width: 100%; max-width: 100%; padding: 12px; border: 1px solid var(--field-border); border-radius: 6px; font: inherit; resize: vertical; margin-bottom: 12px; }
 #panel-chat { display: flex; flex-direction: column; min-height: calc(100dvh - 64px); }
 #chat-messages { flex: 1; max-height: 48vh; overflow-y: auto; overflow-wrap: anywhere; margin: 20px 0; }
+.chat-scroll-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chat-scroll-navigation button { padding: 4px 12px; }
+.chat-scroll-navigation span { min-width: 6em; text-align: center; }
+.chat-scroll-tail { pointer-events: none; }
 #chat-messages article { padding: 12px 16px; margin-bottom: 12px; background: var(--user-message); border-radius: 10px; }
 #chat-messages article:nth-child(even) { background: var(--ai-message); }
 #chat-messages h3 { font-size: 14px; margin: 0 0 6px; color: var(--speaker); }

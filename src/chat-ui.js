@@ -13,6 +13,35 @@
   const actionButtons = [];
   let selectedAction = "chat";
   const drafts = new Map();
+  let scrollTail, navigatingHistory = false;
+  function messagePositions() {
+    const container = byId("chat-messages"), top = container.getBoundingClientRect().top + (container.clientTop || 0);
+    return [...container.querySelectorAll("article")].map(node => node.getBoundingClientRect().top - top + (container.scrollTop || 0));
+  }
+  function updateMessageNavigation() {
+    if (!visible) return;
+    const container = byId("chat-messages"), rows = container.querySelectorAll("article");
+    // 最後の短い発言も、先頭を会話欄の上端まで移動できるよう余白を確保する。
+    if (scrollTail) scrollTail.setAttribute("style", `height: ${Math.max(0, (container.clientHeight || 0) - (rows[rows.length - 1]?.getBoundingClientRect().height || 0))}px`);
+    const positions = messagePositions(), current = container.scrollTop || 0;
+    byId("chat-previous-message").disabled = !positions.some(top => top < current - 2);
+    byId("chat-next-message").disabled = !positions.some(top => top > current + 2);
+    const index = Math.max(0, positions.findLastIndex(top => top <= current + 2));
+    byId("chat-message-position").textContent = positions.length ? `${index + 1} / ${positions.length} 発言` : "発言なし";
+  }
+  function moveMessage(direction) {
+    if (!visible) return;
+    updateMessageNavigation();
+    const container = byId("chat-messages"), current = container.scrollTop || 0, positions = messagePositions();
+    const target = direction < 0 ? positions.findLast(top => top < current - 2) : positions.find(top => top > current + 2);
+    if (target === undefined) return;
+    navigatingHistory = true; container.scrollTop = target; updateMessageNavigation();
+  }
+  byId("chat-previous-message").onclick = () => moveMessage(-1);
+  byId("chat-next-message").onclick = () => moveMessage(1);
+  byId("chat-messages").addEventListener("scroll", updateMessageNavigation);
+  for (const event of ["wheel", "touchstart", "keydown"]) byId("chat-messages").addEventListener(event, () => { navigatingHistory = false; });
+  addEventListener("resize", updateMessageNavigation);
   const status = text => { byId("chat-status").textContent = text; };
   const connectionStatus = text => { byId("llm-connection-status").textContent = text; };
   const tagUI = globalThis.OshaberiNoteChatTags.create({ document, platform, getSettings: () => settings,
@@ -58,6 +87,7 @@
   }
   function render(next) {
     if (state && (state.actionId !== next.actionId || state.epoch !== next.epoch)) {
+      navigatingHistory = false;
       abort(); generatingId = undefined; tagUI.close();
       if (state.actionId !== next.actionId) {
         drafts.set(state.actionId, { epoch: state.epoch, text: byId("chat-input").value });
@@ -75,7 +105,8 @@
     const action = globalThis.OshaberiNoteChatActions.find(state.actionId);
     byId("chat-heading").textContent = action ? `おしゃべり（${action.title} v${action.version}）` : "おしゃべり";
     byId("chat-history-info").textContent = `履歴は各会話タブで直近10往復・最大2MiBを保存し、古い分から自動で整理します。${state.droppedTurns ? ` これまでに${state.droppedTurns}往復を保存から外しました。` : ""}${state.contextTrimmedTurns ? ` 直近の送信では、保存履歴のうち古い${state.contextTrimmedTurns}往復を送信対象から外しました。` : ""}`;
-    const container = byId("chat-messages"), atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    const container = byId("chat-messages"), previousTop = container.scrollTop || 0;
+    const atBottom = !navigatingHistory && container.scrollHeight - previousTop - container.clientHeight < 100;
     container.replaceChildren();
     for (const turn of state.turns) {
       for (const [label, content] of [["あなた", turn.user], [turn.status === "complete" ? "AI" : turn.status === "pending" ? "AI（生成中・未完了）" : "AI（中断・次回送信の対象外）", turn.assistant]]) {
@@ -107,7 +138,11 @@
       }
     }
     if (!state.turns.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "新しい会話です。メッセージを入力してください。"; container.append(empty); }
-    if (atBottom) container.scrollTop = container.scrollHeight;
+    scrollTail = undefined;
+    if (state.turns.length) { scrollTail = document.createElement("div"); scrollTail.className = "chat-scroll-tail"; scrollTail.setAttribute("aria-hidden", "true"); container.append(scrollTail); }
+    updateMessageNavigation();
+    container.scrollTop = atBottom ? container.scrollHeight : previousTop;
+    updateMessageNavigation();
     controls();
   }
   async function sync() {
@@ -256,19 +291,21 @@
       id = started.active.id; epoch = started.epoch; generatingId = id;
       controller.signal.throwIfAborted();
       if (sequence !== sendSequence || !visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
-      render(started); byId("chat-input").value = ""; busy = false; controls();
+      navigatingHistory = false; render(started); byId("chat-input").value = ""; busy = false; controls();
       if (visible && !byId("chat-input").disabled) byId("chat-input").focus({ preventScroll: true });
       status("応答を生成しています…");
       const response = await globalThis.OshaberiNoteOllama.chat(endpoint, model, started.messages, controller.signal, async answer => {
         controller.signal.throwIfAborted();
         if (state.epoch !== epoch || state.active?.id !== id) throw new Error("生成は中止されました。");
         state.turns.at(-1).assistant = answer;
-        const container = byId("chat-messages"), atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-        const paragraph = container.children[container.children.length - 1]?.querySelector("[data-chat-body]");
+        const container = byId("chat-messages"), atBottom = !navigatingHistory && container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+        const rows = container.querySelectorAll("article"), paragraph = rows[rows.length - 1]?.querySelector("[data-chat-body]");
         // 長い記事本文を受信チャンクごとに作り直さず、末尾のAI発言だけ更新する。
         if (paragraph) paragraph.textContent = answer || "（応答なし）";
         else render(state);
+        updateMessageNavigation();
         if (atBottom) container.scrollTop = container.scrollHeight;
+        updateMessageNavigation();
         if (Date.now() - lastSave > 250) {
           lastSave = Date.now();
           await call("progress", { actionId, epoch, endpoint, id, owner, model, text: answer });
@@ -327,6 +364,7 @@
     const leavingChat = visible && !value;
     const leavingBoth = (visible || llmVisible) && !value && !llm;
     visible = value; llmVisible = llm;
+    if (visible) setTimeout(updateMessageNavigation, 0);
     if (leavingChat || leavingBoth) {
       tagUI.close();
       abort();

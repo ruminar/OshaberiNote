@@ -374,6 +374,38 @@ test('送信直後に入力へフォーカスを戻し、生成中の下書き�
   finish();await flush();assert.equal(n.get('chat-input').value,'次の質問の下書き');assert.equal(n.get('chat-send').disabled,false);
   assert.equal(f.document.activeElement,n.get('chat-input'));
 });
+test('前後の発言へ自分・AIの順で移動し、手動スクロール後も現在位置から移動する',async t=>{
+  const f=await fixture(t),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();
+  for(const text of ['最初の質問','次の質問']){n.get('chat-input').value=text;n.get('chat-form').fire('submit');await flush();}
+  const container=n.get('chat-messages'),rows=container.querySelectorAll('article'),previous=n.get('chat-previous-message'),next=n.get('chat-next-message');
+  container.clientHeight=200;container.scrollHeight=580;container.scrollTop=0;container.getBoundingClientRect=()=>({top:50});
+  rows.forEach((row,index)=>{row.getBoundingClientRect=()=>({top:50+index*120-container.scrollTop,height:100});});
+  container.fire('scroll');assert.equal(previous.disabled,true);assert.equal(next.disabled,false);
+  for(const top of [120,240,360]){next.onclick();assert.equal(container.scrollTop,top);}
+  assert.equal(next.disabled,true);assert.match(n.get('chat-message-position').textContent,/4 \/ 4/);
+  assert.match(container.children.at(-1).getAttribute('style'),/height: 100px/);
+  previous.onclick();assert.equal(container.scrollTop,240);
+  container.scrollTop=180;container.fire('scroll');previous.onclick();assert.equal(container.scrollTop,120);
+  container.scrollTop=180;container.fire('scroll');next.onclick();assert.equal(container.scrollTop,240);
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,2);
+  assert.equal((await f.chat('get')).turns.length,2);
+  await n.get('chat-new').onclick();await flush();assert.equal(previous.disabled,true);assert.equal(next.disabled,true);assert.equal(n.get('chat-message-position').textContent,'発言なし');
+});
+
+test('前の発言を読んでいる間は生成更新・完了で末尾へ引き戻さない',async t=>{
+  let finish;const encoder=new TextEncoder();
+  const f=await fixture(t,{stream:()=>new Response(new ReadableStream({start(controller){
+    controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'生成途中'},done:false})+'\n'));
+    finish=()=>{controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'完了'},done:true})+'\n'));controller.close();};
+  }}))}),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
+  container.clientHeight=200;container.scrollHeight=280;container.getBoundingClientRect=()=>({top:0});
+  f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-(container.scrollTop||0),height:60});return node;};
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='質問';n.get('chat-form').fire('submit');await flush();
+  container.scrollTop=80;container.fire('scroll');n.get('chat-previous-message').onclick();assert.equal(container.scrollTop,0);
+  finish();await flush();assert.equal(container.scrollTop,0);assert.match(n.get('chat-status').textContent,/完了/);
+});
+
 test('AI回答の箇条書きと入れ子を太字・タグ操作と併用し、保存とコピーは原文のまま保つ',async t=>{
   const reply='**要点整理**\r\n\r\n* **評価軸:** 読者の視点\r\n* **具体的確認事項:**\r\n    * AI利用\r\n        * **方法** [#AI]\r\n    * 基準 <img src=x onerror=alert(1)>\r\n* **運営:** 期待\r\n\r\n最後の段落';
   const f=await fixture(t,{reply}),n=f.nodes;
