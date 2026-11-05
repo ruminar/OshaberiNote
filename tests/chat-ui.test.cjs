@@ -93,7 +93,7 @@ test('Enter・IME変換中・キーリピート・別の修飾キーでは送信
 test('モデル一覧200・会話403を区別し、正確な拡張Originの許可手順を表示する', async t => {
   const f = await fixture(t, { postStatus: 403 }), n = f.nodes;
   n.get('connect-ollama').onclick(); await flush();
-  assert.match(n.get('chat-status').textContent, /モデル一覧を取得/);
+  assert.match(n.get('llm-connection-status').textContent, /モデル一覧を取得/);
   assert.doesNotMatch(n.get('chat-status').textContent, /接続できました/);
   n.get('chat-input').value = 'hello'; n.get('chat-form').fire('submit'); await flush();
   assert.match(n.get('chat-status').textContent, /会話送信を拒否.*403/);
@@ -217,4 +217,22 @@ test('10往復を超えてもUIから会話を続け、履歴を外した件数�
   assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,12);
   assert.equal((await f.chat('get')).turns.length,10);assert.match(n.get('chat-history-info').textContent,/2往復を保存から外し/);
   assert.equal(n.get('chat-send').disabled,false);
+});
+test('接続・モデル・説明・履歴案内をLLM設定に置き、設定画面から接続して会話へ戻れる', async t => {
+  const f=await fixture(t,{hash:'#llm'}),n=f.nodes;
+  for(const id of ['connect-ollama','chat-model','chat-endpoint','llm-connection-status','chat-history-info','ollama-origin-help']){
+    assert.equal(n.get('panel-llm').contains(n.get(id)),true,id);
+    assert.equal(n.get('panel-chat').contains(n.get(id)),false,id);
+  }
+  assert.equal(n.get('panel-chat').contains(n.get('chat-status')),true);
+  const html=source('home.html'),chatHtml=html.split('<section id="panel-chat"')[1].split('</section>')[0],llmHtml=html.split('<section id="panel-llm"')[1].split('</section>')[0];
+  assert.doesNotMatch(chatHtml,/入力したメッセージ・完了済み|クラウドモデルでは|履歴は直近10往復/);
+  assert.match(llmHtml,/入力したメッセージ・完了済み/);
+  n.get('connect-ollama').onclick();await flush();
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/tags')).length,1);
+  assert.match(n.get('llm-connection-status').textContent,/モデル一覧を取得/);
+  n.get('chat-model').value='local';await n.get('chat-model').onchange();await flush();
+  n.get('nav-chat').onclick();assert.equal(n.get('chat-send').disabled,false);
+  n.get('chat-input').value='設定から戻って会話';n.get('chat-form').fire('submit');await flush();
+  assert.equal((await f.chat('get')).turns[0].status,'complete');assert.match(n.get('chat-status').textContent,/応答が完了/);
 });

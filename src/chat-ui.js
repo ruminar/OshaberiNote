@@ -6,8 +6,10 @@
   const owner = crypto.randomUUID(), chatKey = globalThis.OshaberiNoteChatState.key;
   let settings, state, connection, requestAbort, generatingId, ready = false, busy = false, blocked = false;
   let modelNames = [], probeRevision = 0, visible = !byId("panel-chat").hidden;
+  let llmVisible = !byId("panel-llm").hidden;
   let promptDirty = false, promptBaseline = "";
   const status = text => { byId("chat-status").textContent = text; };
+  const connectionStatus = text => { byId("llm-connection-status").textContent = text; };
   function connectionHelp(error) {
     const origin = api.runtime.getURL("").replace(/\/$/, "");
     const show = error?.status === 403 && /^(chrome|moz)-extension:\/\/[a-zA-Z0-9-]+$/.test(origin);
@@ -57,7 +59,7 @@
         heading.textContent = label; text.textContent = content || "（応答なし）"; article.append(heading, text); container.append(article);
       }
     }
-    if (!state.turns.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "新しい会話です。モデルを選んでメッセージを送ってください。"; container.append(empty); }
+    if (!state.turns.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "新しい会話です。メッセージを入力してください。"; container.append(empty); }
     if (atBottom) container.scrollTop = container.scrollHeight;
     controls();
   }
@@ -85,15 +87,20 @@
         const url = new URL(endpoint);
         if (!await api.permissions.contains({ origins: [url.protocol + "//" + url.hostname + "/*"], ...(firefox ? { data_collection: ["personalCommunications"] } : {}) })) throw new Error("接続権限がありません。「接続・再試行」を押してください。");
       }
-      if (revision !== probeRevision || !visible) return;
-      status("Ollamaへの接続とモデル一覧を確認しています…");
+      if (revision !== probeRevision || (!visible && !llmVisible)) return;
+      connectionStatus("Ollamaへの接続とモデル一覧を確認しています…");
       const names = await globalThis.OshaberiNoteOllama.models(endpoint, controller.signal);
       if (revision !== probeRevision || epoch !== state.epoch || endpoint !== settings.ollamaUrl) return;
       modelNames = names;
       if (settings.ollamaModel && !names.includes(settings.ollamaModel)) { await platform.save({ ollamaModel: "" }); await sync(); }
       ready = true; renderModels();
-      status(names.length ? "モデル一覧を取得しました。会話送信の可否は送信時に確認します。" : "モデルがありません。Ollama側でモデルを登録し、再試行してください。");
-    } catch (error) { connectionHelp(error); status(controller.signal.aborted ? "接続確認を中止しました。Ollamaの起動と接続URLを確認してください。" : error.message); }
+      connectionStatus(names.length ? "モデル一覧を取得しました。会話送信の可否は送信時に確認します。" : "モデルがありません。Ollama側でモデルを登録し、再試行してください。");
+      status(names.length && settings.ollamaModel ? "会話できます。" : "「LLMの設定」でモデルを選択してください。");
+    } catch (error) {
+      connectionHelp(error);
+      connectionStatus(controller.signal.aborted ? "接続確認を中止しました。Ollamaの起動と接続URLを確認してください。" : error.message);
+      status("接続を確認できません。「LLMの設定」で確認してください。");
+    }
     finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; busy = false; controls(); }
   }
   byId("connect-ollama").onclick = () => {
@@ -116,8 +123,9 @@
       ready = false; blocked = false; modelNames = []; byId("chat-input").value = "";
       promptDirty = false;
       await sync();
-      byId("ollama-settings-status").textContent = "接続先を保存し、会話を初期化しました。おしゃべり画面から接続してください。";
-      status("接続先を変更しました。「接続・再試行」を押してください。");
+      byId("ollama-settings-status").textContent = "接続先を保存し、会話を初期化しました。この画面の「接続・再試行」から接続してください。";
+      connectionStatus("接続先を変更しました。「接続・再試行」を押してください。");
+      status("「LLMの設定」で接続し、モデルを選択してください。");
     } catch (error) { blocked = true; byId("ollama-settings-status").textContent = error.message; }
     finally { busy = false; controls(); }
   };
@@ -148,8 +156,8 @@
     const model = byId("chat-model").value;
     if (model && !modelNames.includes(model)) return;
     busy = true; abort(); controls();
-    try { await platform.save({ ollamaModel: model }); await sync(); status(model ? `使用モデル：${model}` : "モデルを選択してください。"); }
-    catch (error) { blocked = true; status(error.message); }
+    try { await platform.save({ ollamaModel: model }); await sync(); connectionStatus(model ? `使用モデル：${model}` : "モデルを選択してください。"); status(model ? "会話できます。" : "「LLMの設定」でモデルを選択してください。"); }
+    catch (error) { blocked = true; connectionStatus(error.message); status("モデルを保存できません。「LLMの設定」で確認してください。"); }
     finally { busy = false; controls(); }
   };
   byId("chat-input").addEventListener("keydown", event => {
@@ -194,12 +202,12 @@
     } catch (error) {
       controller.abort();
       connectionHelp(error);
-      if (error.status === 403) ready = false;
+      if (error.status === 403) { ready = false; connectionStatus(error.message); }
       if (id) {
         try { render(await call("stop", { id, owner })); }
         catch { blocked = true; }
       }
-      status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message} 自動再送は行いません。`);
+      status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message}${error.status === 403 ? " 詳細は「LLMの設定」で確認してください。" : ""} 自動再送は行いません。`);
     } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) generatingId = undefined; busy = false; controls(); }
   };
   byId("chat-stop").onclick = async () => {
@@ -232,14 +240,16 @@
       render(next);
     } catch { abort(); ready = false; blocked = true; status("会話の更新を確認できません。再読み込みして確認してください。"); controls(); }
   });
-  api.permissions.onRemoved.addListener(() => { abort(); ready = false; status("接続権限が変更されました。「接続・再試行」で確認してください。"); controls(); });
+  api.permissions.onRemoved.addListener(() => { abort(); ready = false; connectionStatus("接続権限が変更されました。「接続・再試行」で確認してください。"); status("接続権限が変更されました。「LLMの設定」で確認してください。"); controls(); });
   globalThis.OshaberiNoteChatUI = Object.freeze({ async settingsImported() {
     promptDirty = false;
     await sync();
     byId("system-prompt-status").textContent = "";
-  }, setVisible(value) {
-    visible = value;
-    if (!visible) {
+  }, setVisible(value, llm = false) {
+    const leavingChat = visible && !value;
+    const leavingBoth = (visible || llmVisible) && !value && !llm;
+    visible = value; llmVisible = llm;
+    if (leavingChat || leavingBoth) {
       abort();
       if (generatingId) void call("stop", { owner, id: generatingId }).then(render).catch(error => status(error.message));
     }
@@ -249,7 +259,7 @@
       connection = api.runtime.connect({ name: `oshaberi-chat:${owner}` });
       connection.onDisconnect.addListener(() => { abort(); ready = false; blocked = true; status("背景処理との接続が切れました。再読み込みして状態を確認してください。"); controls(); });
       await sync();
-      if (visible && state.approvedUrl === settings.ollamaUrl && settings.enabled) await probe(false);
+      if ((visible || llmVisible) && state.approvedUrl === settings.ollamaUrl && settings.enabled) await probe(false);
     } catch (error) { blocked = true; status(error.message); controls(); }
   }
   const heartbeat = setInterval(() => { try { connection?.postMessage({ type: "keep-alive" }); } catch { abort(); } }, 20000);

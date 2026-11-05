@@ -38,7 +38,7 @@
   let state, selected = views.includes(location.hash.slice(1)) ? location.hash.slice(1) : location.hash === "#activation-failed" ? "settings" : "chat", busy = false, uncertain = false, pendingState = false, dragTag = null, revision = 0;
   function selectView(name, focus = false) {
     if (!state && name !== "settings") return;
-    globalThis.OshaberiNoteChatUI?.setVisible(name === "chat");
+    globalThis.OshaberiNoteChatUI?.setVisible(name === "chat", name === "llm");
     selected = state && !core.usesTags(state) && name === "tags" ? (core.modeOf(state) === "severe" ? "intro" : "settings") : name;
     for (const view of views) {
       const button = byId(`nav-${view}`);

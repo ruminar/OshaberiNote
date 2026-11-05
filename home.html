@@ -39,24 +39,7 @@
       <div class="home-content">
         <section id="panel-chat" aria-labelledby="chat-heading" hidden>
           <h2 id="chat-heading">おしゃべり</h2>
-          <p class="muted">入力したメッセージ・完了済みの会話・保存したシステムプロンプトを、設定したOllamaへ送ります。noteの記事や認証情報を自動で収集・送信しません。</p>
-          <p id="chat-endpoint" class="muted"></p>
-          <div class="chat-toolbar">
-            <button type="button" id="connect-ollama">接続・再試行</button>
-            <label for="chat-model">使用モデル</label>
-            <select id="chat-model" disabled><option value="">モデルを選択してください</option></select>
-          </div>
-          <p id="chat-status" role="status" aria-live="polite">初回は「接続・再試行」を押してください。</p>
-          <div id="ollama-origin-help" class="warning" role="alert" hidden>
-            <p>モデル一覧を取得できても、会話送信だけがOllama側で拒否される場合があります。Ollamaの <code>OLLAMA_ORIGINS</code> に、この拡張だけを許可してください。</p>
-            <p>許可するOrigin：<code id="ollama-extension-origin"></code></p>
-            <p>Windowsの場合：Ollamaを動かしているPCで、タスクトレイのOllamaを終了し、PowerShellで以下を実行してください。既存の許可先を保持し、この拡張だけを追加して起動します。このPowerShellを閉じると、そのOllamaサーバーも終了します。</p>
-            <label for="ollama-origin-command">今回の起動用コマンド（環境変数の永続設定は変更しません）</label>
-            <textarea id="ollama-origin-command" rows="5" readonly spellcheck="false"></textarea>
-            <p>起動後、この画面の「接続・再試行」から試してください。他のWebサイトや拡張まで一括で許可しないでください。既に許可済みの場合は、接続先の認証・プロキシ設定も確認してください。</p>
-          </div>
-          <p class="muted">未接続の場合はOllamaの起動、接続URL、モデルの登録を確認してください。クラウドモデルではOllama側から外部へ通信します。詳細は同梱の導入手順をご覧ください。</p>
-          <p id="chat-history-info" class="muted" role="status">履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。</p>
+          <p id="chat-status" role="status" aria-live="polite">「LLMの設定」で接続し、モデルを選択してください。</p>
           <div id="chat-messages" role="log" aria-label="会話履歴" aria-live="off"></div>
           <form id="chat-form">
             <label for="chat-input">メッセージ</label>
@@ -91,6 +74,7 @@
         </section>
         <section id="panel-llm" aria-labelledby="llm-heading" hidden>
           <h2 id="llm-heading">LLMの設定</h2>
+          <p class="muted">入力したメッセージ・完了済みの会話・保存したシステムプロンプトを、設定したOllamaへ送ります。noteの記事や認証情報を自動で収集・送信しません。</p>
           <form id="ollama-settings">
             <label for="ollama-url">Ollama接続URL</label>
             <input id="ollama-url" type="url" maxlength="2048" value="http://127.0.0.1:11434" autocomplete="off" spellcheck="false" required>
@@ -98,6 +82,23 @@
             <button type="submit" id="save-ollama-url">接続先を保存</button>
             <p id="ollama-settings-status" role="status"></p>
           </form>
+          <p id="chat-endpoint" class="muted"></p>
+          <div class="chat-toolbar">
+            <button type="button" id="connect-ollama">接続・再試行</button>
+            <label for="chat-model">使用モデル</label>
+            <select id="chat-model" disabled><option value="">モデルを選択してください</option></select>
+          </div>
+          <p id="llm-connection-status" role="status" aria-live="polite">初回は「接続・再試行」を押してください。</p>
+          <div id="ollama-origin-help" class="warning" role="alert" hidden>
+            <p>モデル一覧を取得できても、会話送信だけがOllama側で拒否される場合があります。Ollamaの <code>OLLAMA_ORIGINS</code> に、この拡張だけを許可してください。</p>
+            <p>許可するOrigin：<code id="ollama-extension-origin"></code></p>
+            <p>Windowsの場合：Ollamaを動かしているPCで、タスクトレイのOllamaを終了し、PowerShellで以下を実行してください。既存の許可先を保持し、この拡張だけを追加して起動します。このPowerShellを閉じると、そのOllamaサーバーも終了します。</p>
+            <label for="ollama-origin-command">今回の起動用コマンド（環境変数の永続設定は変更しません）</label>
+            <textarea id="ollama-origin-command" rows="5" readonly spellcheck="false"></textarea>
+            <p>起動後、この画面の「接続・再試行」から試してください。他のWebサイトや拡張まで一括で許可しないでください。既に許可済みの場合は、接続先の認証・プロキシ設定も確認してください。</p>
+          </div>
+          <p class="muted">未接続の場合はOllamaの起動、接続URL、モデルの登録を確認してください。クラウドモデルではOllama側から外部へ通信します。詳細は同梱の導入手順をご覧ください。</p>
+          <p id="chat-history-info" class="muted" role="status">履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。</p>
           <hr>
           <form id="system-prompt-settings">
             <label for="system-prompt">システムプロンプト</label>
