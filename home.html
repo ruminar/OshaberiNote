@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>おしゃべりnote</title>
+  <link rel="stylesheet" href="src/home.css">
+  <script defer src="src/common.js"></script>
+  <script defer src="src/platform/browser-api.js"></script>
+  <script defer src="src/home.js"></script>
+  <script defer src="src/chat-state.js"></script>
+  <script defer src="src/ollama.js"></script>
+  <script defer src="src/chat-ui.js"></script>
+</head>
+<body>
+  <main>
+    <header><h1>おしゃべりnote</h1><span id="version" class="muted">0.1.0</span></header>
+    <p id="mode" class="muted">設定とホームの転送状態を確認しています…</p>
+    <p id="status" role="status" aria-live="polite"></p>
+    <p id="tag-warning" class="warning" role="alert" hidden></p>
+    <div class="home-layout">
+      <aside class="home-sidebar">
+        <nav id="home-menu" aria-label="専用ホーム" hidden>
+          <button type="button" id="nav-chat" aria-controls="panel-chat">おしゃべり</button>
+          <button type="button" id="nav-tags" aria-controls="panel-tags">お気に入り</button>
+          <button type="button" id="nav-authors" aria-controls="panel-authors">ユーザーの表示管理</button>
+          <button type="button" id="nav-settings" aria-controls="panel-settings">設定</button>
+          <button type="button" id="nav-transfer" aria-controls="panel-transfer">設定の移行</button>
+        </nav>
+        <div id="page-links" class="page-links" hidden>
+          <button id="previous-page" type="button" class="secondary">前の画面に戻る</button>
+          <a id="profile" href="#settings">自分のページ（未設定）</a>
+          <a id="official-home" href="https://note.com/" hidden>note公式ホームへ戻る</a>
+          <a id="following" href="https://note.com/following">フォロー中のTL</a>
+        </div>
+      </aside>
+      <div class="home-content">
+        <section id="panel-chat" aria-labelledby="chat-heading" hidden>
+          <h2 id="chat-heading">おしゃべり</h2>
+          <p class="muted">入力したメッセージと完了済みの会話だけを、設定したOllamaへ送ります。noteの記事や認証情報は送りません。</p>
+          <p id="chat-endpoint" class="muted"></p>
+          <div class="chat-toolbar">
+            <button type="button" id="connect-ollama">接続・再試行</button>
+            <label for="chat-model">使用モデル</label>
+            <select id="chat-model" disabled><option value="">モデルを選択してください</option></select>
+          </div>
+          <p id="chat-status" role="status" aria-live="polite">初回は「接続・再試行」を押してください。</p>
+          <div id="ollama-origin-help" class="warning" role="alert" hidden>
+            <p>モデル一覧を取得できても、会話送信だけがOllama側で拒否される場合があります。Ollamaの <code>OLLAMA_ORIGINS</code> に、この拡張だけを許可してください。</p>
+            <p>許可するOrigin：<code id="ollama-extension-origin"></code></p>
+            <p>Windowsの場合：Ollamaを動かしているPCで、タスクトレイのOllamaを終了し、PowerShellで以下を実行してください。既存の許可先を保持し、この拡張だけを追加して起動します。このPowerShellを閉じると、そのOllamaサーバーも終了します。</p>
+            <label for="ollama-origin-command">今回の起動用コマンド（環境変数の永続設定は変更しません）</label>
+            <textarea id="ollama-origin-command" rows="5" readonly spellcheck="false"></textarea>
+            <p>起動後、この画面の「接続・再試行」から試してください。他のWebサイトや拡張まで一括で許可しないでください。既に許可済みの場合は、接続先の認証・プロキシ設定も確認してください。</p>
+          </div>
+          <p class="muted">未接続の場合はOllamaの起動、接続URL、モデルの登録を確認してください。クラウドモデルではOllama側から外部へ通信します。詳細は同梱の導入手順をご覧ください。</p>
+          <div id="chat-messages" role="log" aria-label="会話履歴" aria-live="off"></div>
+          <form id="chat-form">
+            <label for="chat-input">メッセージ</label>
+            <textarea id="chat-input" rows="4" maxlength="8000" placeholder="メッセージを入力（Enterで改行）" disabled></textarea>
+            <div class="settings-actions">
+              <button id="chat-send" type="submit" disabled>送信</button>
+              <button id="chat-stop" type="button" class="secondary" disabled>中止</button>
+              <button id="chat-new" type="button" class="secondary" disabled>新しい会話</button>
+            </div>
+          </form>
+        </section>
+        <section id="panel-intro" aria-label="重度ひきこもりモード" hidden>
+          <p class="catchphrase">枠を超えたら落選したので、殻を作りました。</p>
+        </section>
+        <section id="panel-tags" aria-labelledby="tags-heading" hidden>
+          <h2 id="tags-heading">お気に入り</h2>
+          <div id="edit-groups" class="tag-groups"></div>
+          <form id="group-name-form" class="tag-form">
+            <label for="group-name">グループ名</label>
+            <input id="group-name" type="text" autocomplete="off" disabled>
+            <button id="save-group-name" type="submit" disabled>名前を保存</button>
+          </form>
+          <p class="muted">追加・削除・並べ替えは操作ごとに保存します。ドラッグ、または上下ボタンで並べ替えできます。</p>
+          <form id="tag-form" class="tag-form">
+            <label for="tag-input">タグ名</label>
+            <input id="tag-input" type="text" autocomplete="off" placeholder="例：ComfyUI" disabled>
+            <button id="add-tag" type="submit" disabled>追加</button>
+          </form>
+          <p id="tags-empty" class="muted">お気に入りは未登録です。タグ名を入力するか、作者ページから追加できます。</p>
+          <ul id="edit-tags" class="tag-editor"></ul>
+        </section>
+        <section id="panel-settings" aria-labelledby="settings-heading" hidden>
+          <h2 id="settings-heading">設定</h2>
+          <form id="ollama-settings">
+            <label for="ollama-url">Ollama接続URL</label>
+            <input id="ollama-url" type="url" maxlength="2048" value="http://127.0.0.1:11434" autocomplete="off" spellcheck="false" required>
+            <p class="muted">接続先変更時は会話と入力を削除します。HTTP接続は暗号化されません。信頼できるネットワーク内でご利用ください。</p>
+            <button type="submit" id="save-ollama-url">接続先を保存</button>
+            <p id="ollama-settings-status" role="status"></p>
+          </form>
+          <hr>
+          <form id="settings">
+            <label for="note-user">noteユーザー名 または 公開プロフィールURL</label>
+            <input id="note-user" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="例：ruminar または https://note.com/ruminar" disabled>
+            <p class="muted">空欄で保存すると登録を解除します。ブラウザ内にのみ保存します。</p>
+            <label class="check-option" for="dashboard-disabled"><input id="dashboard-disabled" type="checkbox" aria-describedby="dashboard-help" disabled>ダッシュボードを無効化する</label>
+            <p class="muted" id="dashboard-help">アクセス状況・提案・バッジ・売上・振込・販売履歴を含むダッシュボード全体を専用ホームへ戻し、note上のダッシュボードボタンを隠します。</p>
+            <label class="check-option" for="hide-paid-articles"><input id="hide-paid-articles" type="checkbox" aria-describedby="paid-help" disabled>有料記事を非表示</label>
+            <p class="muted" id="paid-help">ONのとき有料記事を開くと、未設定の作者の表示方法を確認します。価格が表示される記事・マガジンカードと、タイトルに鍵アイコンがあるメンバーシップ限定記事を隠します。購入済み記事一覧は対象外です。ほかの一覧では購入済み・参加済みでも価格や鍵アイコンがあれば対象になります。記事内の「チップで応援する」枠も隠します。作者ホームのAmazon商品カード・ストア商品枠・有料メンバーシップ参加プランも隠します（自分と表示許可した作者は対象外）。記事への直接アクセスは制限しません。</p>
+            <label class="check-option" for="hide-article-recommendations"><input id="hide-article-recommendations" type="checkbox" aria-describedby="recommendations-help" disabled>記事の「あなたへのおすすめ」を非表示にする</label>
+            <p class="muted" id="recommendations-help">記事下のおすすめ欄、公式ホーム中央の運営バナー、自分の記事一覧の運営バナー・「あなたへの提案」を隠します。チェックを外すか、拡張をOFFにすると元の表示に戻ります。</p>
+            <label class="check-option" for="hide-like-counts"><input id="hide-like-counts" type="checkbox" aria-describedby="like-counts-help" disabled>スキ数を非表示にする</label>
+            <p class="muted" id="like-counts-help">スキを押せるハートは残し、数字を隠します。表示専用のハートは数字と一緒に隠します。記事内のnoteリンクカードも対象です。</p>
+            <label class="check-option" for="keep-note-header-visible"><input id="keep-note-header-visible" type="checkbox" disabled>noteのヘッダを常に表示する</label>
+            <p class="muted">スクロール中も公式ヘッダを画面上部に表示します。チェックを外すか、拡張をOFFにすると公式の動作へ戻ります。</p>
+            <label class="check-option" for="note-logo-browser-back"><input id="note-logo-browser-back" type="checkbox" disabled>noteアイコンをブラウザバックに差し替える</label>
+            <p class="muted">左上のnoteロゴの通常クリックで、note内の前のページへ戻ります。外部から来た場合・戻れる履歴がない場合・API未対応の場合は現在のページにとどまります。ロゴの隣の歯車から設定画面を開けます。拡張OFFでは公式の動作へ戻ります。</p>
+            <div class="settings-actions">
+              <button id="save" type="submit" disabled>ユーザー設定を保存</button>
+              <button id="retry" class="secondary" type="button">状態を再確認</button>
+            </div>
+          </form>
+          <hr>
+          <p class="muted">通常のnoteを表示すると、ホーム転送・ダッシュボード制限・おすすめ欄の非表示を解除します。保存済みの設定は保持します。</p>
+          <button id="normal" class="secondary" type="button" disabled>通常のnoteを表示（拡張OFF）</button>
+        </section>
+        <section id="panel-authors" aria-labelledby="authors-heading" hidden>
+          <h2 id="authors-heading">ユーザーの表示管理</h2>
+          <p id="authors-state" class="muted" role="status"></p>
+          <h3 id="authors-hidden-heading">非表示</h3>
+          <ul id="authors-hidden" class="author-list"></ul>
+          <h3 id="authors-allowed-heading">表示を許可</h3>
+          <ul id="authors-allowed" class="author-list"></ul>
+        </section>
+        <section id="panel-transfer" aria-labelledby="transfer-heading" hidden>
+          <h2 id="transfer-heading">設定の書き出しと読み込み</h2>
+          <p>設定をJSON形式で別のブラウザや端末に持ち運べます。</p>
+          <div class="settings-actions">
+            <button id="export-settings" type="button" disabled>設定の書き出し</button>
+            <button id="clear-settings-json" class="secondary" type="button" disabled>クリア</button>
+          </div>
+          <p class="muted">保存済みの設定を書き出します。未保存の入力は含みません。</p>
+          <label for="settings-json">設定JSON</label>
+          <textarea id="settings-json" rows="12" maxlength="1048576" spellcheck="false" autocomplete="off" aria-describedby="transfer-validation" placeholder="ここに設定JSONを貼り付けてください。書き出し時もここに表示されます。"></textarea>
+          <p id="transfer-validation" class="muted" role="status">設定JSONを入力してください。</p>
+          <div class="settings-actions">
+            <button id="copy-settings" class="secondary" type="button" disabled>コピー</button>
+            <button id="import-settings" type="button" disabled>設定の読み込み</button>
+          </div>
+          <p id="transfer-status" class="muted" role="status" aria-live="polite"></p>
+          <p class="muted">おしゃべりnote形式と、ひきこもりnote形式1～7を読み込めます。入力JSONに存在する対応項目だけを適用し、未対応項目は破棄します。会話履歴は含みません。ひきこもりnoteへの読み戻しは、そちらの対応版が必要です。</p>
+        </section>
+      </div>
+    </div>
+    <p class="muted">ブラウザの拡張アイコンを押すと、ONに戻してこの画面を開きます。</p>
+    <footer>非公式拡張 · 0.1.0 · note株式会社とは関係ありません。<br>この画面は拡張内にあり、noteの通常ホームを読み込みません。記事の取得・表示・操作はnote公式画面で行います。</footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,47 @@
+# おしゃべりnote 0.1.0 試作
+
+noteのホームをOllamaチャットに置き換える、PC版Chrome・Edge・Firefox向けの非公式拡張です。ひきこもりnote v0.3.0のひとみしりモードを基にしています。
+
+## 試す
+
+1. `pwsh -File scripts/package.ps1` で構文・自動テストを実行し、両ブラウザの読込用フォルダとZIPを生成します。
+2. Chrome / Edgeの拡張管理画面で開発者モードを有効にし、`dist/OshaberiNote-0.1.0-chromium` を「パッケージ化されていない拡張機能」として読み込みます。
+3. Firefoxでは `about:debugging#/runtime/this-firefox` →「一時的なアドオンを読み込む」から `dist/OshaberiNote-0.1.0-firefox/manifest.json` を指定します。Firefox 140以上が必要です。Androidは対象外です。
+4. ひきこもりnoteは無効にして、Ollamaを起動します。拡張アイコンから専用ホームを開き、「接続・再試行」で接続先へのアクセスを許可し、モデルを選択します。
+5. メッセージを入力して「送信」を押します。Enterは改行です。中止・新しい会話・再読み込み・接続先変更も確認してください。
+
+Ollama未接続でも、お気に入り・設定や通常のnote閲覧は利用できます。コミット・タグ・公開は開発者本人が行います。
+
+## 接続とプライバシー
+
+初期接続先は `http://127.0.0.1:11434` です。接続先は「設定」から変更できます。変更を適用すると会話・未送信入力・モデル選択を削除します。HTTPのLAN接続は暗号化されません。認証付きURL・APIのリダイレクトには対応しません。
+
+Firefoxでは接続ボタンからホスト権限と会話送信の任意同意（`personalCommunications`）を要求します。拒否・取消時には接続しません。[Firefox公式の同意仕様](https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/)に基づく宣言です。
+
+接続許可は設定したホストについてのみ要求します。ブラウザのホスト権限はポート単位の制限ではないため、実際の通信先を保存済みURLと `/api/tags`・`/api/chat` に限定しています。Manifestの任意ホスト権限は接続先選択のための宣言であり、全ホストの権限を自動取得しません。
+
+ブラウザから接続できない場合は、Ollama側の `OLLAMA_ORIGINS` に専用ホームの実際のオリジン（`chrome-extension://拡張ID` または `moz-extension://実行時UUID`）を追加し、Ollamaを再起動してください。実際のオリジンは専用ホームのアドレスから確認できます。すべての拡張やすべてのWebサイトを許可する設定は推奨しません。LAN接続ではOllama側の待受アドレスとファイアウォールも利用者が設定してください。
+
+モデル一覧の取得が成功しても、Origin付きの会話POSTだけがHTTP 403で拒否される場合があります。モデル一覧の取得は会話送信の成功を保証しません。403の場合はチャット画面に、その拡張の実際のOriginとWindows向けの起動用コマンドを表示します。タスクトレイのOllamaを終了し、Ollamaを動かしているPCのPowerShellでそのコマンドを実行してから、拡張で再試行してください。コマンドは既存の許可先を保持して当該Originを追加し、そのPowerShellのプロセス環境だけに設定します。環境変数の永続設定・待受アドレス・他のアプリの設定は変更しません。
+
+送信する会話内容は入力と完了済み履歴のみです。note本文・Cookie・認証情報は送信せず、AIによる操作やスクリプト実行は行いません。会話は暗号化せずブラウザの拡張保存領域に保持します。共用PCでは内容に注意し、「新しい会話」で削除してください。
+
+ローカルOllamaでもクラウドモデルを使うとOllama側から外部へ通信します。完全ローカル運用では利用者が `OLLAMA_NO_CLOUD=1` またはOllamaの `server.json` の `disable_ollama_cloud: true` を設定してOllamaを再起動してください。拡張からOllamaの環境設定は変更しません。
+
+参考：[Ollama公式FAQ](https://docs.ollama.com/faq)、[Chat API](https://docs.ollama.com/api/chat)、[Chromeの任意権限](https://developer.chrome.com/docs/extensions/reference/api/permissions)。
+
+## 設定移行
+
+ひきこもりnote形式1～7とおしゃべりnote形式1を読み込みます。存在する共通項目だけを検証・適用し、欠けた項目は現在値を維持します。未対応項目は破棄し、不正な対応項目があれば全体を適用しません。`false` や空の値も有効な設定値として扱います。
+
+出力は `oshaberi-note-settings` 形式1で、会話や接続許可状態は含めません。ひきこもりnoteへの読み戻しは、そちらの別途改修が必要です。今回ひきこもりnoteは変更していません。
+
+## 検証範囲
+
+自動試験は既存のnote表示・保存・お気に入り処理に加え、会話の競合、初期化後の遅延応答拒否、設定移行、ストリーム分割と異常応答を確認します。元製品専用の3モード切替と旧JSON全置換の試験は、本製品の固定モード・部分移行の試験へ置き換えています。
+
+実ブラウザの権限ダイアログ・noteの最新DOM・LAN接続・実モデル生成は別途手動確認が必要です。手順は [手動確認](docs/manual-test.md) に記載しています。
+
+## クレジット
+
+ひきこもりnote v0.3.0のソースを複製・改修しています。原著作権表示とMITライセンスは `THIRD_PARTY_LICENSE` に保持しています。note株式会社・Ollamaとは関係ありません。

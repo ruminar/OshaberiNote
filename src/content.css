@@ -1,0 +1,232 @@
+/* 自分で付けた属性のある導線だけを非表示にし、設定解除時は属性を外す。 */
+.oshaberi-note-navigation-root > div.py-4,
+.oshaberi-note-navigation-root > div[class~="lg:contents"] > div.py-4,
+.oshaberi-note-navigation-root > div[class~="hidden"][class~="lg:block"] > div.py-4,
+.oshaberi-note-navigation-root > aside > div > div.flex.flex-col.gap-4,
+.oshaberi-note-navigation-root > div[class~="lg:contents"] > aside > div > div.flex.flex-col.gap-4,
+.oshaberi-note-navigation-root > div[class~="hidden"][class~="lg:block"] > aside > div > div.flex.flex-col.gap-4,
+.oshaberi-note-navigation-root > div[class~="sticky"][class~="w-[11.375rem]"] > div > div.flex.flex-col.gap-4:has(> nav[aria-label="カテゴリナビゲーション"]),
+.oshaberi-note-navigation-root > div[class~="hidden"][class~="lg:block"] > div[class~="sticky"][class~="w-[11.375rem]"] > div > div.flex.flex-col.gap-4:has(> nav[aria-label="カテゴリナビゲーション"]),
+.oshaberi-note-navigation-root > div[class~="hidden"][class~="lg:contents"] > div[class~="sticky"][class~="w-[11.375rem]"] > div > div.flex.flex-col.gap-4:has(> nav[aria-label="カテゴリナビゲーション"]) {
+  display: none !important;
+}
+a[data-oshaberi-note-dashboard-hidden] {
+  display: none !important;
+}
+[data-oshaberi-note-menu-hidden] { display: none !important; }
+[data-oshaberi-note-product-hidden] { display: none !important; }
+[data-oshaberi-note-home-banner-hidden] { display: none !important; }
+[data-oshaberi-note-membership-examples-hidden] { display: none !important; }
+[data-oshaberi-note-magazine-promotion-hidden] { display: none !important; }
+[data-oshaberi-note-profile-promotion-hidden] { display: none !important; }
+/* 公式ホームのおすすめメンバーシップ。後挿入にも親の印から適用する。 */
+[data-oshaberi-note-home-paid-hidden] [data-testid="recommended-memberships"],
+[data-oshaberi-note-home-paid-hidden] div.mb-5:has(> div.px-4[class~="lg:px-0"] > [data-testid="recommended-memberships"]) {
+  display: none !important;
+}
+[data-oshaberi-note-recommendations-hidden] { display: none !important; }
+.oshaberi-note-recommendations-root > div[class~="border-t"][class~="print:hidden"] > div.divide-y.divide-border-default > div.pt-6 {
+  display: none !important;
+}
+[data-oshaberi-note-paid-hidden] { display: none !important; }
+[data-oshaberi-note-tip-hidden] { display: none !important; }
+[data-oshaberi-note-logo-settings-layout] { display: flex; align-items: center; gap: 8px; }
+[data-oshaberi-note-mobile-logo] { display: flex; align-items: center; gap: 4px; }
+.oshaberi-note-mobile-toggle {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 40px;
+  width: 40px; height: 40px; padding: 0; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; font: inherit; font-size: 24px; cursor: pointer;
+}
+.oshaberi-note-mobile-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.oshaberi-note-mobile-panel {
+  box-sizing: border-box; width: 100%; max-height: 65vh; overflow-y: auto;
+  padding: 12px 16px; border-bottom: 1px solid rgba(128,128,128,.35);
+  color: var(--color-text-primary, inherit); background: var(--color-surface-normal, inherit);
+}
+.oshaberi-note-mobile-panel[hidden] { display: none !important; }
+.oshaberi-note-mobile-panel .oshaberi-note-navigation { margin: 0; }
+.oshaberi-note-mobile-panel .oshaberi-note-navigation a,
+.oshaberi-note-mobile-panel .oshaberi-note-navigation button { min-height: 44px; }
+.oshaberi-note-mobile-panel .oshaberi-note-navigation ul {
+  display: flex; flex-flow: row wrap; justify-content: flex-start; gap: 8px;
+}
+.oshaberi-note-mobile-panel .oshaberi-note-navigation li {
+  flex: 0 1 auto; min-width: 0; max-width: 100%; margin: 0;
+}
+.oshaberi-note-mobile-panel .oshaberi-note-navigation li a {
+  box-sizing: border-box; max-width: 100%; padding: 10px 12px;
+  border: 1px solid rgba(128,128,128,.35);
+}
+.oshaberi-note-mobile-search { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.oshaberi-note-mobile-search input[type="search"] {
+  box-sizing: border-box; flex: 1; min-width: 0; width: 100%; min-height: 44px;
+  border: 1px solid rgba(128,128,128,.5); border-radius: 6px; padding: 8px;
+  color: inherit; background: transparent; font: inherit; font-size: 16px;
+}
+.oshaberi-note-mobile-search button {
+  flex-shrink: 0; min-height: 44px; padding: 8px 12px; border-radius: 6px;
+  border: 1px solid rgba(128,128,128,.5); color: inherit; background: transparent; font: inherit;
+}
+
+a[data-oshaberi-note-logo-back-unavailable],
+a[data-oshaberi-note-logo-back-unavailable] * { cursor: default !important; }
+.oshaberi-note-header-settings {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px;
+  width: 32px; height: 32px; border-radius: 6px; color: inherit; text-decoration: none;
+}
+.oshaberi-note-header-settings:hover { background: rgba(128,128,128,.12); }
+.oshaberi-note-header-settings:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.oshaberi-note-header-settings svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
+form[data-oshaberi-note-search-clear-layout] { display: flex; align-items: center; gap: 8px; }
+form[data-oshaberi-note-search-clear-layout] > [data-name="Field"] { flex: 1; min-width: 0; }
+.oshaberi-note-search-clear {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px;
+  width: 32px; height: 32px; padding: 4px; border: 0; border-radius: 6px;
+  color: var(--color-text-secondary, inherit); background: transparent; cursor: pointer;
+}
+.oshaberi-note-search-clear[hidden] { display: none !important; }
+.oshaberi-note-search-clear:hover { background: rgba(128,128,128,.12); }
+.oshaberi-note-search-clear:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.oshaberi-note-search-clear:disabled { opacity: .5; cursor: default; }
+.oshaberi-note-search-clear svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; pointer-events: none; }
+.oshaberi-note-article-following, .oshaberi-note-article-author, .oshaberi-note-article-author-search, .oshaberi-note-question-following, .oshaberi-note-question-author, .oshaberi-note-question-self {
+  position: fixed; top: 72px; left: 12px; z-index: 100;
+  box-sizing: border-box; width: 200px; min-height: 36px; padding: 8px 12px;
+  border: 1px solid rgba(128,128,128,.35); border-radius: 8px;
+  color: var(--color-text-primary, inherit); background: var(--color-surface-normal, transparent);
+  font: inherit; font-size: 14px; line-height: 1.5; text-align: center;
+  text-decoration: none; white-space: nowrap;
+}
+.oshaberi-note-article-following:hover, .oshaberi-note-article-author:hover, .oshaberi-note-article-author-search:hover, .oshaberi-note-question-following:hover, .oshaberi-note-question-author:hover, .oshaberi-note-question-self:hover { background: rgba(128,128,128,.12); }
+.oshaberi-note-article-following:focus-visible, .oshaberi-note-article-author:focus-visible, .oshaberi-note-article-author-search:focus-visible, .oshaberi-note-question-following:focus-visible, .oshaberi-note-question-author:focus-visible, .oshaberi-note-question-self:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.oshaberi-note-article-author, .oshaberi-note-question-author { top: 120px; display: flex; align-items: center; gap: 8px; text-align: left; }
+.oshaberi-note-question-author { top: 72px; }
+.oshaberi-note-question-self { top: 130px; }
+.oshaberi-note-question-author[data-oshaberi-note-question-following] { top: 120px; }
+.oshaberi-note-question-self[data-oshaberi-note-question-following] { top: 178px; }
+.oshaberi-note-article-author-only { top: 72px; }
+.oshaberi-note-article-author-search { top: 178px; overflow: hidden; text-overflow: ellipsis; }
+.oshaberi-note-article-author-search-only { top: 130px; }
+.oshaberi-note-article-author img, .oshaberi-note-question-author img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.oshaberi-note-article-author span, .oshaberi-note-question-author span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+[data-oshaberi-note-side-profile-offset="author-search"] {
+  top: 232px !important; max-height: calc(100vh - 248px); overflow-y: auto;
+}
+[data-oshaberi-note-side-profile-offset="author-search-only"] {
+  top: 184px !important; max-height: calc(100vh - 200px); overflow-y: auto;
+}
+[data-oshaberi-note-side-profile-offset="author"] {
+  top: 184px !important; max-height: calc(100vh - 200px); overflow-y: auto;
+}
+[data-oshaberi-note-side-profile-offset="following"] {
+  top: 124px !important; max-height: calc(100vh - 140px); overflow-y: auto;
+}
+[data-oshaberi-note-side-profile-follow-hidden] > div > button[data-name="ToggleButton"][type="button"][aria-pressed="false"][aria-haspopup="dialog"] {
+  display: none !important;
+}
+/* 投稿一覧の運営案内エリア。親を先に識別し、PC/スマホ・後挿入も同じCSSで制御する。 */
+[data-oshaberi-note-notes-promotions] > div[class~="hidden"][class~="md:block"],
+[data-oshaberi-note-notes-promotions] > div.flex.flex-col.gap-4 > div[class~="border-border-default"][class~="border-b"][class~="bg-background-primary"][class~="md:hidden"],
+[data-oshaberi-note-notes-promotions] > div.flex.flex-col.gap-4 > section[class~="hidden"][class~="rounded-lg"][class~="bg-surface-normal"][class~="p-6"][class~="md:block"] {
+  display: none !important;
+}
+@media (max-width: 1099px) { .oshaberi-note-article-following, .oshaberi-note-article-author, .oshaberi-note-article-author-search, .oshaberi-note-question-following, .oshaberi-note-question-author, .oshaberi-note-question-self { display: none; } }
+.oshaberi-note-navigation { margin: 0 0 16px; color: inherit; font: inherit; overflow-wrap: anywhere; }
+.oshaberi-note-navigation ul { list-style: none; padding: 0; margin: 0; }
+.oshaberi-note-navigation li a { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oshaberi-note-navigation p { font-size: 12px; opacity: .75; margin: 16px 8px 6px; }
+.oshaberi-note-navigation a { display: block; padding: 8px; border-radius: 8px; color: inherit; text-decoration: none; line-height: 1.5; }
+.oshaberi-note-navigation a:hover { background: rgba(128,128,128,.12); }
+.oshaberi-note-navigation a[aria-current="page"] { background: rgba(128,128,128,.18); font-weight: bold; }
+.oshaberi-note-navigation a:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.oshaberi-note-navigation .oshaberi-note-navigation-following,
+.oshaberi-note-navigation .oshaberi-note-navigation-profile {
+  box-sizing: border-box; width: 100%; min-height: 36px; padding: 8px 12px;
+  border: 1px solid rgba(128,128,128,.35); font-size: 14px; text-align: center;
+}
+.oshaberi-note-navigation > .oshaberi-note-navigation-following + .oshaberi-note-navigation-profile { margin-top: 8px; }
+.oshaberi-note-navigation [data-oshaberi-note-author-card] { display: flex; align-items: center; gap: 8px; text-align: left; }
+.oshaberi-note-navigation [data-oshaberi-note-author-card] img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.oshaberi-note-navigation [data-oshaberi-note-author-card] span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oshaberi-note-navigation button {
+  box-sizing: border-box; width: 100%; margin-top: 8px; padding: 8px;
+  border: 1px solid rgba(128,128,128,.35); border-radius: 8px;
+  background: transparent; color: inherit; font: inherit; font-size: 12px;
+  cursor: pointer; white-space: nowrap;
+}
+.oshaberi-note-navigation button:disabled { opacity: .6; cursor: default; }
+.oshaberi-note-navigation button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.oshaberi-note-tag-status { display: block; font-size: 12px; overflow-wrap: anywhere; }
+.oshaberi-note-tag-status:empty { display: none; }
+.oshaberi-note-group-selector { display: flex; gap: 4px; }
+.oshaberi-note-group-selector button { width: auto; flex: 1; margin: 0; padding: 4px; }
+.oshaberi-note-group-selector button[aria-pressed="true"] { background: #285d4b; border-color: #285d4b; color: white; }
+.oshaberi-note-group-name { margin: 8px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.oshaberi-note-profile-navigation a {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 12px;
+  border: 1px solid rgba(128,128,128,.35);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+@media (max-width: 1023px) {
+  .oshaberi-note-profile-navigation { padding-inline: 16px; }
+}
+
+[data-oshaberi-note-author-hidden] { display: none !important; }
+.oshaberi-note-author-dialog { box-sizing: border-box; width: min(92vw, 560px); max-height: 85vh; overflow-y: auto; padding: 24px; border: 1px solid #87928e; border-radius: 12px; background: var(--color-background-primary, Canvas); color: var(--color-text-primary, CanvasText); font: 16px/1.6 system-ui, sans-serif; }
+.oshaberi-note-author-dialog::backdrop { background: rgb(0 0 0 / .45); }
+.oshaberi-note-author-dialog h2 { margin: 0 0 12px; font-weight: bold; }
+.oshaberi-note-author-dialog button, .oshaberi-note-author-profile button, .oshaberi-note-author-profile select { box-sizing: border-box; font: inherit; color: inherit; background: transparent; border: 1px solid #87928e; border-radius: 8px; min-height: 44px; padding: 8px 12px; margin: 4px; cursor: pointer; }
+.oshaberi-note-author-dialog button { display: block; width: 100%; margin: 8px 0; }
+.oshaberi-note-author-dialog [hidden], .oshaberi-note-author-profile [hidden] { display: none !important; }
+.oshaberi-note-author-dialog button:disabled, .oshaberi-note-author-profile button:disabled, .oshaberi-note-author-profile select:disabled { opacity: .6; cursor: default; }
+.oshaberi-note-author-profile { border: 1px solid #87928e; border-radius: 8px; padding: 12px; margin: 12px 0; font-size: 14px; overflow-wrap: anywhere; }
+.oshaberi-note-author-profile p { margin: 8px 0; }
+.oshaberi-note-favorite-profile[hidden] { display: none !important; }
+.oshaberi-note-profile-actions { display: flex; align-items: stretch; gap: 8px; }
+.oshaberi-note-navigation .oshaberi-note-favorite-toggle {
+  flex: 0 0 40px; width: 40px; min-height: 40px; margin: 0; padding: 4px; font-size: 22px; line-height: 1;
+}
+.oshaberi-note-profile-actions .oshaberi-note-navigation-following { flex: 1; min-width: 0; width: auto; min-height: 40px; }
+.oshaberi-note-favorite-toggle[aria-expanded="true"] { background: rgba(128,128,128,.18); }
+.oshaberi-note-magazine-toggle, .oshaberi-note-membership-toggle {
+  box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 48px; width: 48px; min-height: 48px; padding: 8px; margin: 0;
+  border: 1px solid currentColor; border-radius: 8px; background: transparent; color: inherit; cursor: pointer;
+}
+.oshaberi-note-magazine-toggle:focus-visible, .oshaberi-note-membership-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.oshaberi-note-book-icon, .oshaberi-note-membership-icon { display: inline-block; vertical-align: -.2em; flex-shrink: 0; margin-right: .4em; }
+.oshaberi-note-magazine-toggle .oshaberi-note-book-icon, .oshaberi-note-membership-toggle .oshaberi-note-membership-icon { margin: 0; }
+.oshaberi-note-membership-controls { margin-top: 8px; }
+@media print { .oshaberi-note-magazine-toggle, .oshaberi-note-membership-controls { display: none !important; } }
+.oshaberi-note-author-profile select { max-width: 100%; }
+.oshaberi-note-author-dialog :focus-visible, .oshaberi-note-author-profile :focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+@media print { .oshaberi-note-author-profile, .oshaberi-note-author-dialog { display: none !important; } }
+/* 公式のスクロール状態は保持し、確認済みヘッダの移動だけを抑える。 */
+@media screen {
+  header[data-oshaberi-note-header-pinned] {
+    position: sticky !important;
+    top: 0 !important;
+    transform: none !important;
+    z-index: 21 !important;
+  }
+  /* 狭幅の記事では通常ヘッダの代わりに出る作者行。常時表示中は重複させない。 */
+  header[data-oshaberi-note-header-pinned] > div[class*="with-navbar-layout_creatorRow__"] {
+    display: none !important;
+  }
+  div[data-oshaberi-note-profile-fixed-bar-hidden] {
+    display: none !important;
+  }
+  [data-oshaberi-note-header-sidebar] {
+    top: var(--oshaberi-note-sidebar-top) !important;
+    max-height: calc(100vh - var(--oshaberi-note-sidebar-top)) !important;
+  }
+}
+[data-oshaberi-note-like-hidden] { display: none !important; }

@@ -1,0 +1,25 @@
+{
+  "background": {
+    "scripts": [
+      "src/common.js",
+      "src/chat-state.js",
+      "src/platform/browser-api.js",
+      "src/routing.js",
+      "src/background.js"
+    ]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "oshaberi-note@ruminar",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ],
+        "optional": [
+          "personalCommunications"
+        ]
+      }
+    }
+  }
+}

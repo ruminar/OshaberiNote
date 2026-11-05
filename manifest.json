@@ -1,0 +1,79 @@
+{
+  "manifest_version": 3,
+  "name": "__MSG_extensionName__",
+  "default_locale": "ja",
+  "version": "0.1.0",
+  "description": "__MSG_extensionDescription__",
+  "permissions": [
+    "storage",
+    "declarativeNetRequestWithHostAccess"
+  ],
+  "host_permissions": [
+    "https://note.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_title": "おしゃべりnoteをONにして開く"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none';"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "home.html"
+      ],
+      "matches": [
+        "https://note.com/*"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://note.com/*"
+      ],
+      "exclude_matches": [
+        "https://note.com/embed/notes/*"
+      ],
+      "js": [
+        "src/common.js",
+        "src/platform/browser-api.js",
+        "src/note-ui.js",
+        "src/content.js"
+      ],
+      "css": [
+        "src/content.css"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://note.com/embed/notes/*"
+      ],
+      "all_frames": true,
+      "js": [
+        "src/common.js",
+        "src/platform/browser-api.js",
+        "src/note-ui.js",
+        "src/embed-likes.js"
+      ],
+      "css": [
+        "src/embed-likes.css"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ]
+}
