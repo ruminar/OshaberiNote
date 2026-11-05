@@ -393,6 +393,35 @@ test('前後の発言へ自分・AIの順で移動し、手動スクロール後
   await n.get('chat-new').onclick();await flush();assert.equal(previous.disabled,true);assert.equal(next.disabled,true);assert.equal(n.get('chat-message-position').textContent,'発言なし');
 });
 
+test('初回2/2が収まる間は余白とスクロール書込を作らず、次の往復から末尾へ移動する',async t=>{
+  let finish,count=0;const encoder=new TextEncoder();
+  const f=await fixture(t,{stream:()=>++count===1?new Response(new ReadableStream({start(controller){
+    controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'短い回答'},done:false})+'\n'));
+    finish=()=>{controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'です'},done:true})+'\n'));controller.close();};
+  }})):new Response(JSON.stringify({message:{role:'assistant',content:'次の回答'},done:true})+'\n')}),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
+  container.clientHeight=300;container.getBoundingClientRect=()=>({top:0});
+  const writes=[];let top=0;Object.defineProperty(container,'scrollTop',{get:()=>top,set:value=>{writes.push(value);top=Math.max(0,Math.min(value,container.scrollHeight-container.clientHeight));}});
+  Object.defineProperty(container,'scrollHeight',{get:()=>Math.max(300,container.querySelectorAll('article').length*80+Number(/height: ([\d.]+)/.exec(container.children.at(-1)?.getAttribute('style')||'')?.[1]||0))});
+  f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='初回';n.get('chat-form').fire('submit');await flush();
+  for(let i=0;i<3;i++){container.fire('scroll');f.events.get('resize')();}
+  assert.deepEqual(writes,[]);assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');
+  assert.equal(n.get('chat-next-message').disabled,true);assert.equal(container.querySelector('div[aria-hidden="true"]'),null);
+  finish();await flush();assert.deepEqual(writes,[]);
+  n.get('chat-input').value='次の質問';n.get('chat-form').fire('submit');await flush();
+  assert.ok(writes.length>0);assert.ok(top>0);assert.equal(n.get('chat-message-position').textContent,'4 / 4 発言');
+});
+
+test('初回2/2でも長文で実際のスクロールが必要なら末尾追従する',async t=>{
+  const f=await fixture(t,{reply:'長'.repeat(500)}),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
+  container.clientHeight=200;container.getBoundingClientRect=()=>({top:0});
+  Object.defineProperty(container,'scrollHeight',{get:()=>container.textContent.includes('長'.repeat(500))?680:200});
+  let top=0;Object.defineProperty(container,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(value,container.scrollHeight-200));}});
+  f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='長文の確認';n.get('chat-form').fire('submit');await flush();
+  assert.equal(top,480);assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');assert.equal(container.querySelector('div[aria-hidden="true"]'),null);
+});
+
 test('過去を閲覧中でも自分の送信受付後は最終発言へ移動し、入力中や送信拒否時は位置を保つ',async t=>{
   const f=await fixture(t),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
   container.clientHeight=200;container.getBoundingClientRect=()=>({top:0});

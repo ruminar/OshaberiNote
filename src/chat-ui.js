@@ -14,24 +14,37 @@
   let selectedAction = "chat";
   const drafts = new Map();
   let scrollTail, navigatingHistory = false;
+  function scrollRange() {
+    const container = byId("chat-messages");
+    return Math.max(0, (container.scrollHeight || 0) - (container.clientHeight || 0));
+  }
   function messagePositions() {
     const container = byId("chat-messages"), top = container.getBoundingClientRect().top + (container.clientTop || 0);
-    return [...container.querySelectorAll("article")].map(node => node.getBoundingClientRect().top - top + (container.scrollTop || 0));
+    const maximum = scrollRange();
+    return [...container.querySelectorAll("article")].map(node => Math.max(0, Math.min(maximum, node.getBoundingClientRect().top - top + (container.scrollTop || 0))));
   }
-  function updateMessageNavigation() {
+  function updateScrollTail() {
     if (!visible) return;
     const container = byId("chat-messages"), rows = container.querySelectorAll("article");
     // 最後の短い発言も、先頭を会話欄の上端まで移動できるよう余白を確保する。
-    if (scrollTail) scrollTail.setAttribute("style", `height: ${Math.max(0, (container.clientHeight || 0) - (rows[rows.length - 1]?.getBoundingClientRect().height || 0))}px`);
+    if (scrollTail) {
+      const style = `height: ${Math.max(0, (container.clientHeight || 0) - (rows[rows.length - 1]?.getBoundingClientRect().height || 0))}px`;
+      if (scrollTail.getAttribute("style") !== style) scrollTail.setAttribute("style", style);
+    }
+  }
+  function updateMessageNavigation() {
+    if (!visible) return;
+    const container = byId("chat-messages");
     const positions = messagePositions(), current = container.scrollTop || 0;
     byId("chat-previous-message").disabled = !positions.some(top => top < current - 2);
     byId("chat-next-message").disabled = !positions.some(top => top > current + 2);
     const index = Math.max(0, positions.findLastIndex(top => top <= current + 2));
     byId("chat-message-position").textContent = positions.length ? `${index + 1} / ${positions.length} 発言` : "発言なし";
   }
+  function refreshMessageNavigation() { updateScrollTail(); updateMessageNavigation(); }
   function moveMessage(direction) {
     if (!visible) return;
-    updateMessageNavigation();
+    refreshMessageNavigation();
     const container = byId("chat-messages"), current = container.scrollTop || 0, positions = messagePositions();
     const target = direction < 0 ? positions.findLast(top => top < current - 2) : positions.find(top => top > current + 2);
     if (target === undefined) return;
@@ -41,7 +54,7 @@
   byId("chat-next-message").onclick = () => moveMessage(1);
   byId("chat-messages").addEventListener("scroll", updateMessageNavigation);
   for (const event of ["wheel", "touchstart", "keydown"]) byId("chat-messages").addEventListener(event, () => { navigatingHistory = false; });
-  addEventListener("resize", updateMessageNavigation);
+  addEventListener("resize", refreshMessageNavigation);
   const status = text => { byId("chat-status").textContent = text; };
   const connectionStatus = text => { byId("llm-connection-status").textContent = text; };
   const tagUI = globalThis.OshaberiNoteChatTags.create({ document, platform, getSettings: () => settings,
@@ -139,9 +152,10 @@
     }
     if (!state.turns.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "新しい会話です。メッセージを入力してください。"; container.append(empty); }
     scrollTail = undefined;
-    if (state.turns.length) { scrollTail = document.createElement("div"); scrollTail.className = "chat-scroll-tail"; scrollTail.setAttribute("aria-hidden", "true"); container.append(scrollTail); }
-    updateMessageNavigation();
-    container.scrollTop = atBottom ? container.scrollHeight : previousTop;
+    // 初回の1往復には余白を足さず、短い会話に人工的なスクロールを作らない。
+    if (state.turns.length > 1) { scrollTail = document.createElement("div"); scrollTail.className = "chat-scroll-tail"; scrollTail.setAttribute("aria-hidden", "true"); container.append(scrollTail); }
+    refreshMessageNavigation();
+    if (scrollRange() > 1) container.scrollTop = atBottom ? container.scrollHeight : previousTop;
     updateMessageNavigation();
     controls();
   }
@@ -292,7 +306,7 @@
       controller.signal.throwIfAborted();
       if (sequence !== sendSequence || !visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
       navigatingHistory = false; render(started); byId("chat-input").value = ""; busy = false; controls();
-      const container = byId("chat-messages"); container.scrollTop = container.scrollHeight;
+      const container = byId("chat-messages"); if (scrollRange() > 1) container.scrollTop = container.scrollHeight;
       updateMessageNavigation();
       if (visible && !byId("chat-input").disabled) byId("chat-input").focus({ preventScroll: true });
       status("応答を生成しています…");
@@ -305,8 +319,8 @@
         // 長い記事本文を受信チャンクごとに作り直さず、末尾のAI発言だけ更新する。
         if (paragraph) paragraph.textContent = answer || "（応答なし）";
         else render(state);
-        updateMessageNavigation();
-        if (atBottom) container.scrollTop = container.scrollHeight;
+        refreshMessageNavigation();
+        if (atBottom && scrollRange() > 1) container.scrollTop = container.scrollHeight;
         updateMessageNavigation();
         if (Date.now() - lastSave > 250) {
           lastSave = Date.now();
@@ -366,7 +380,7 @@
     const leavingChat = visible && !value;
     const leavingBoth = (visible || llmVisible) && !value && !llm;
     visible = value; llmVisible = llm;
-    if (visible) setTimeout(updateMessageNavigation, 0);
+    if (visible) setTimeout(refreshMessageNavigation, 0);
     if (leavingChat || leavingBoth) {
       tagUI.close();
       abort();
