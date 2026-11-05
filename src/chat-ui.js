@@ -10,6 +10,8 @@
   let promptDirty = false, promptBaseline = "";
   const status = text => { byId("chat-status").textContent = text; };
   const connectionStatus = text => { byId("llm-connection-status").textContent = text; };
+  const tagUI = globalThis.OshaberiNoteChatTags.create({ document, platform, getSettings: () => settings,
+    onSaved(value) { settings = core.readSettings(value); } });
   function connectionHelp(error) {
     const origin = api.runtime.getURL("").replace(/\/$/, "");
     const show = error?.status === 403 && /^(chrome|moz)-extension:\/\/[a-zA-Z0-9-]+$/.test(origin);
@@ -30,6 +32,7 @@
     byId("save-ollama-url").disabled = busy || !settings;
     byId("system-prompt").disabled = busy || !settings;
     byId("save-system-prompt").disabled = busy || !settings;
+    tagUI.refresh();
   }
   function abort() { requestAbort?.abort(); requestAbort = undefined; probeRevision++; }
   async function call(operation, patch = {}) {
@@ -47,7 +50,7 @@
     select.value = settings?.ollamaModel || "";
   }
   function render(next) {
-    if (state && state.epoch !== next.epoch) { abort(); byId("chat-input").value = ""; }
+    if (state && state.epoch !== next.epoch) { abort(); byId("chat-input").value = ""; tagUI.close(); }
     if (generatingId && next.active?.id !== generatingId) abort();
     state = next;
     byId("chat-history-info").textContent = `履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。${state.droppedTurns ? ` これまでに${state.droppedTurns}往復を保存から外しました。` : ""}${state.contextTrimmedTurns ? ` 直近の送信では、保存履歴のうち古い${state.contextTrimmedTurns}往復を送信対象から外しました。` : ""}`;
@@ -56,7 +59,12 @@
     for (const turn of state.turns) {
       for (const [label, content] of [["あなた", turn.user], [turn.status === "complete" ? "AI" : turn.status === "pending" ? "AI（生成中・未完了）" : "AI（中断・次回送信の対象外）", turn.assistant]]) {
         const article = document.createElement("article"), heading = document.createElement("h3"), text = document.createElement("p");
-        heading.textContent = label; text.textContent = content || "（応答なし）"; article.append(heading, text); container.append(article);
+        heading.textContent = label;
+        if (label === "AI" && content) {
+          const epoch = state.epoch, user = turn.user;
+          tagUI.render(text, content, () => state?.epoch === epoch && state.turns.some(item => item.status === "complete" && item.user === user && item.assistant === content));
+        } else text.textContent = content || "（応答なし）";
+        article.append(heading, text); container.append(article);
       }
     }
     if (!state.turns.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "新しい会話です。メッセージを入力してください。"; container.append(empty); }
@@ -251,6 +259,7 @@
     const leavingBoth = (visible || llmVisible) && !value && !llm;
     visible = value; llmVisible = llm;
     if (leavingChat || leavingBoth) {
+      tagUI.close();
       abort();
       if (generatingId) void call("stop", { owner, id: generatingId }).then(render).catch(error => status(error.message));
     }

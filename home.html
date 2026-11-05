@@ -11,6 +11,7 @@
   <script defer src="src/home.js"></script>
   <script defer src="src/chat-state.js"></script>
   <script defer src="src/ollama.js"></script>
+  <script defer src="src/chat-tags.js"></script>
   <script defer src="src/chat-ui.js"></script>
 </head>
 <body>
@@ -168,5 +169,14 @@
     <p class="muted">ブラウザの拡張アイコンを押すと、ONに戻してこの画面を開きます。</p>
     <footer>非公式拡張 · 0.1.0 · note株式会社とは関係ありません。<br>この画面は拡張内にあり、noteの通常ホームを読み込みません。記事の取得・表示・操作はnote公式画面で行います。</footer>
   </main>
+  <dialog id="chat-tag-dialog" class="chat-tag-dialog" aria-labelledby="chat-tag-heading">
+    <h2 id="chat-tag-heading">タグの操作</h2>
+    <div class="chat-tag-actions">
+      <a id="chat-tag-search" href="https://note.com/search" target="_blank" rel="noopener noreferrer">このタグで検索</a>
+      <div id="chat-tag-groups" class="chat-tag-actions"></div>
+    </div>
+    <p id="chat-tag-status" role="status" aria-live="polite"></p>
+    <button id="chat-tag-close" class="secondary" type="button">閉じる</button>
+  </dialog>
 </body>
 </html>

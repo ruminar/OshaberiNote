@@ -17,19 +17,22 @@ async function fixture(t, options = {}) {
       if (url.endsWith('/api/tags')) return new Response('{"models":[{"name":"local"}]}');
       if (options.postStatus) return new Response('', { status: options.postStatus });
       if (options.stream) return options.stream(init);
-      return new Response(JSON.stringify({ message: { role: 'assistant', content: '<script>alert(1)</script>こんにちは' }, done: true }) + '\n');
+      return new Response(JSON.stringify({ message: { role: 'assistant', content: options.reply ?? '<script>alert(1)</script>こんにちは' }, done: true }) + '\n');
     }
   });
   c.chrome.permissions.request = async permission => { grants.push(structuredClone(permission)); return options.grant !== false; };
   c.chrome.runtime.sendMessage = async message => {
-    try { return { ok: true, settings: await f.send(message) }; }
+    try {
+      if (message.type === 'tag-operation') { await options.tagGate; if (options.tagError) throw Object.assign(new Error('登録結果を確認できません'), { code: 'UNCONFIRMED' }); }
+      return { ok: true, settings: await f.send(message) };
+    }
     catch (error) { return { ok: false, error: error.message, code: error.code }; }
   };
   c.chrome.runtime.connect = ({ name }) => {
     const disconnect = f.connect(name.slice('oshaberi-chat:'.length));
     return { onDisconnect: { addListener() {} }, postMessage() {}, disconnect };
   };
-  for (const file of ['src/home.js', 'src/ollama.js', 'src/chat-ui.js']) vm.runInContext(source(file), c, { filename: file });
+  for (const file of ['src/home.js', 'src/ollama.js', 'src/chat-tags.js', 'src/chat-ui.js']) vm.runInContext(source(file), c, { filename: file });
   t.after(() => { for (const timer of timers) clearTimeout(timer); events.get('pagehide')?.(); });
   await flush();
   return { ...f, c, document, nodes: document.nodes, requests, grants, confirmations, events };
@@ -248,4 +251,54 @@ test('送信直後に入力へフォーカスを戻し、生成中の下書き�
   assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,1);
   finish();await flush();assert.equal(n.get('chat-input').value,'次の質問の下書き');assert.equal(n.get('chat-send').disabled,false);
   assert.equal(f.document.activeElement,n.get('chat-input'));
+});
+test('完了したAI回答のタグだけをボタン化し、検索と実際の4グループを選べる',async t=>{
+  const reply='1. [#週末の過ごし方]：週末の案です。\n2. [#a/b? x]：別の案。';
+  const f=await fixture(t,{reply}),n=f.nodes;
+  await f.c.OshaberiNotePlatform.tag({type:'RENAME_TAG_GROUP',groupId:'group2',name:'読み物',expectedName:''});await flush();
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='[#ユーザーの入力]';n.get('chat-form').fire('submit');await flush();
+  const rows=n.get('chat-messages').children,buttons=rows[1].querySelectorAll('button');
+  assert.equal(rows[0].querySelectorAll('button').length,0);assert.equal(buttons.length,2);
+  assert.equal(rows[1].querySelector('p').textContent,reply);assert.equal((await f.chat('get')).turns[0].assistant,reply);
+  assert.deepEqual((await f.settings()).tagGroups[1].tags,[]);
+  buttons[0].onclick();assert.equal(n.get('chat-tag-dialog').open,true);
+  assert.equal(n.get('chat-tag-search').href,f.c.OshaberiNote.tagUrl('週末の過ごし方'));
+  assert.equal(n.get('chat-tag-search').getAttribute('target'),'_blank');
+  const groups=n.get('chat-tag-groups').children;assert.equal(groups.length,4);assert.equal(groups[1].textContent,'②読み物に登録');
+  groups[1].onclick();await flush();
+  assert.deepEqual((await f.settings()).tagGroups[1].tags,['週末の過ごし方']);assert.equal((await f.settings()).selectedTagGroupId,'group1');
+  assert.equal(groups[1].disabled,true);assert.match(groups[1].textContent,/登録済み/);
+  n.get('chat-tag-close').onclick();buttons[1].onclick();
+  assert.equal(n.get('chat-tag-search').href,'https://note.com/search?q=%23a%2Fb%3F%20x&context=note&mode=search&sort=new');
+  n.get('chat-tag-search').onclick();assert.equal(n.get('chat-tag-dialog').open,false);
+});
+test('生成途中と中断した応答はボタン化せず、完了応答のHTMLも実行しない',async t=>{
+  const f=await fixture(t,{stream:init=>new Response(new ReadableStream({start(controller){
+    controller.enqueue(new TextEncoder().encode(JSON.stringify({message:{role:'assistant',content:'途中 [#タグ]'},done:false})+'\n'));
+    init.signal.addEventListener('abort',()=>controller.error(new DOMException('aborted','AbortError')));
+  }}))}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='hi';n.get('chat-form').fire('submit');await flush();
+  assert.equal(n.get('chat-messages').querySelectorAll('button').length,0);
+  await n.get('chat-stop').onclick();await flush();assert.equal(n.get('chat-messages').querySelectorAll('button').length,0);
+  const html=await fixture(t,{reply:'<img src=x onerror=alert(1)> [#<script>]'}),h=html.nodes;
+  h.get('connect-ollama').onclick();await flush();h.get('chat-input').value='hi';h.get('chat-form').fire('submit');await flush();
+  assert.equal(h.get('chat-messages').querySelector('img'),null);assert.equal(h.get('chat-messages').querySelector('script'),null);
+  assert.equal(h.get('chat-messages').querySelector('button').textContent,'[#<script>]');
+});
+test('タグ解析は既知の表記だけを扱い、表示原文を維持して最大100個まで操作化する',async t=>{
+  const f=await fixture(t),parse=f.c.OshaberiNoteChatTags.parts;
+  for(const text of ['#タグ [＃タグ] [#] [#  ]','[#改行\nタグ]','[#制御\u0000文字]'])assert.equal(parse(text).some(part=>part.tag),false);
+  const text='[#タグ] '.repeat(101),parts=parse(text);assert.equal(parts.filter(part=>part.tag).length,100);assert.equal(parts.map(part=>part.text).join(''),text);
+});
+test('登録中の連打を止め、結果未確認なら自動再送せず登録を止める',async t=>{
+  let release;const gate=new Promise(resolve=>{release=resolve;});
+  const f=await fixture(t,{reply:'[#tag]',tagGate:gate}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='hi';n.get('chat-form').fire('submit');await flush();
+  n.get('chat-messages').querySelector('button').onclick();const button=n.get('chat-tag-groups').children[0];
+  button.onclick();button.onclick();assert.equal(button.disabled,true);release();await flush();assert.deepEqual((await f.settings()).tagGroups[0].tags,['tag']);
+  const uncertain=await fixture(t,{reply:'[#tag]',tagError:true}),u=uncertain.nodes;
+  u.get('connect-ollama').onclick();await flush();u.get('chat-input').value='hi';u.get('chat-form').fire('submit');await flush();
+  u.get('chat-messages').querySelector('button').onclick();u.get('chat-tag-groups').children[0].onclick();await flush();
+  assert.match(u.get('chat-tag-status').textContent,/自動再送は行いません/);assert.equal(u.get('chat-tag-groups').children[1].disabled,true);
+  assert.deepEqual((await uncertain.settings()).tagGroups[0].tags,[]);
 });
