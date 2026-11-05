@@ -104,3 +104,14 @@ test('JSONからのプロンプト変更でも履歴を初期化し、接続許�
   const next = await f.chat('get'); assert.deepEqual(next.turns, []); assert.equal(next.approvedUrl, '');
   assert.equal((await f.settings()).ollamaSystemPrompt, 'new system');
 });
+test('廃止したロゴ戻る設定は旧保存・両JSONで無視し、保存・再出力しない',async()=>{
+ const f=backend(),core=f.context.OshaberiNote;const settings=core.defaultSettings();
+ f.data[core.settingsKey]={...settings,noteLogoBrowserBack:true};
+ assert.equal(Object.hasOwn(await f.settings(),'noteLogoBrowserBack'),false);
+ for(const json of [own({noteLogoBrowserBack:true,hidePaidArticles:true}),legacy({noteLogoBrowserBack:'ignored',hidePaidArticles:true})]){
+  const parsed=core.parseSettingsExport(json);assert.equal(parsed.hidePaidArticles,true);assert.equal(Object.hasOwn(parsed,'noteLogoBrowserBack'),false);
+  assert.equal(Object.hasOwn(JSON.parse(core.exportSettings(parsed)).settings,'noteLogoBrowserBack'),false);
+ }
+ await f.save({hidePaidArticles:true});assert.equal(Object.hasOwn(f.data[core.settingsKey],'noteLogoBrowserBack'),false);
+ await assert.rejects(f.save({noteLogoBrowserBack:true}));
+});

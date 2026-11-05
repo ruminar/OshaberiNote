@@ -77,7 +77,7 @@ test("ダッシュボード設定を保存・復元し、全体OFF/ONと別タ�
   const f = controllerFixture({ enabled: true, noteUserId: "ruminar" });
   await f.controller.save({ dashboardDisabled: true }); assert.equal(f.rules.length, 4);
   await Promise.all([f.controller.save({ noteUserId: "other_user" }), f.controller.save({ enabled: false })]);
-  assert.deepEqual(f.value, { enabled: false, noteUserId: "other_user", dashboardDisabled: true, mode:'normal', ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "", hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, noteLogoBrowserBack: false, keepNoteHeaderVisible: false, ...settingsData.groups() });
+  assert.deepEqual(f.value, { enabled: false, noteUserId: "other_user", dashboardDisabled: true, mode:'normal', ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "", hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, keepNoteHeaderVisible: false, ...settingsData.groups() });
   assert.equal(f.rules.length, 0);
   const restart = controllerFixture(f.value); await restart.controller.getState(); assert.equal(restart.rules.length, 0);
   await restart.controller.save({ enabled: true }); assert.equal(restart.rules.length, 4);
@@ -101,7 +101,7 @@ test("DNR：ホームの文書だけ専用ページへ転送、事前取得も�
 });
 test("保存したユーザー名・OFFを再起動後も適用", async () => {
   const f = controllerFixture({ enabled: false, noteUserId: "ruminar" });
-  assert.deepEqual(plain(await f.controller.getState()), { enabled: false, noteUserId: "ruminar", dashboardDisabled: false, mode:'normal', ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "", hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, noteLogoBrowserBack: false, keepNoteHeaderVisible: false, tagSchemaVersion: 2, tagGroups: [1,2,3,4].map(number=>({id:`group${number}`,name:"",tags:[]})), selectedTagGroupId:"group1", groupSelectionRevision:0, tagGroupsRevision:0, authorDisplayRules:[], authorDisplayRevision:0 });
+  assert.deepEqual(plain(await f.controller.getState()), { enabled: false, noteUserId: "ruminar", dashboardDisabled: false, mode:'normal', ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "", hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, keepNoteHeaderVisible: false, tagSchemaVersion: 2, tagGroups: [1,2,3,4].map(number=>({id:`group${number}`,name:"",tags:[]})), selectedTagGroupId:"group1", groupSelectionRevision:0, tagGroupsRevision:0, authorDisplayRules:[], authorDisplayRevision:0 });
   assert.deepEqual(f.rules, []);
   await f.controller.save({ enabled: true });
   const restart = controllerFixture(f.value); await restart.controller.getState();
@@ -116,7 +116,7 @@ test("OFFはルール解除・保存の順に完了してから成功を返す",
 test("複数タブから同時保存してもON/OFFとユーザー名を上書きし合わない", async () => {
   const f = controllerFixture();
   await Promise.all([f.controller.save({ enabled: false }), f.controller.save({ noteUserId: "ruminar" })]);
-  assert.deepEqual(f.value, { enabled: false, noteUserId: "ruminar", dashboardDisabled: false, mode:'normal', ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "", hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, noteLogoBrowserBack: false, keepNoteHeaderVisible: false, ...settingsData.groups(), authorDisplayRules: [], authorDisplayRevision: 0 });
+  assert.deepEqual(f.value, { enabled: false, noteUserId: "ruminar", dashboardDisabled: false, mode:'normal', ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "", hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, keepNoteHeaderVisible: false, ...settingsData.groups(), authorDisplayRules: [], authorDisplayRevision: 0 });
   assert.deepEqual(f.rules, []);
 });
 test("転送更新失敗時は設定を保存せず、次の操作は再試行できる", async () => {
@@ -249,14 +249,8 @@ test("OFF・記事リンク・修飾クリック・別タブ・ダウンロー�
   assert.equal(f.moves.length, 0);
 });
 
-test("ロゴの通常クリックはイベント停止後にブラウザバック。重度でも適用しOFFで停止",async()=>{
- let event,calls=0;const f=contentFixture({noteLogoBrowserBack:true,mode:'severe'},{logoDetector:()=>true,back(){calls++;assert.equal(event.defaultPrevented,true);assert.equal(event.stopped,true);}});await flush();
- event={button:0,isTrusted:true,cancelable:true,defaultPrevented:false,composedPath:()=>[{tagName:'A',href:'https://note.com/',hasAttribute:()=>false}],preventDefault(){this.defaultPrevented=true;},stopImmediatePropagation(){this.stopped=true;}};
- f.documentEvents.get('click')(event);assert.equal(calls,1);assert.deepEqual(f.moves,[['back']]);
- f.changed({enabled:false,noteLogoBrowserBack:true});assert.equal(f.click(undefined,{isTrusted:true,cancelable:true}).defaultPrevented,false);assert.equal(calls,1);
-});
 
-test("ロゴ以外・修飾キー・非trusted・設定OFFではブラウザバックしない",async()=>{
+test("旧ロゴ設定にかかわらずホームへ戻り、修飾クリックでブラウザバックしない",async()=>{
  let calls=0;const options={logoDetector:()=>true,back(){calls++;}};
  const f=contentFixture({noteLogoBrowserBack:true},options);await flush();
  for(const event of [{isTrusted:true,cancelable:true,ctrlKey:true},{isTrusted:false,cancelable:true},{isTrusted:true,cancelable:false},{isTrusted:true,cancelable:true,button:1}])f.click(undefined,event);
@@ -264,24 +258,15 @@ test("ロゴ以外・修飾キー・非trusted・設定OFFではブラウザバ�
  const other=contentFixture({noteLogoBrowserBack:true},{...options,logoDetector:()=>false});await flush();other.click(undefined,{isTrusted:true,cancelable:true});assert.equal(calls,0);assert.deepEqual(other.moves,[['assign',other.home]]);
  await assert.rejects(controllerFixture().controller.save({noteLogoBrowserBack:'true'}));
 });
-
-test("ロゴで戻れない・API失敗時は現在ページにとどまり、次のクリックを再試行できる",async()=>{
- for(const options of [{backResult:false},{back(){throw Error('unsupported');}},{back:()=>Promise.reject(Error('failed'))},{back:()=>Promise.resolve(false)}]){
-  let calls=0;
-  const f=contentFixture({noteLogoBrowserBack:true},{logoDetector:()=>true,back(){calls++;return calls===1?(options.back?options.back():false):true;}});await flush();
-  const event=f.click(undefined,{isTrusted:true,cancelable:true});assert.equal(event.defaultPrevented,true);assert.equal(event.stopped,true);await flush();
-  assert.deepEqual(f.moves,[]);
-  const retry=f.click(undefined,{isTrusted:true,cancelable:true});assert.equal(retry.defaultPrevented,true);await flush();assert.equal(calls,2);assert.deepEqual(f.moves,[]);
+test('旧ロゴ設定がtrueでもブラウザバックせず、おしゃべりへ戻る。OFFでは介入しない',async()=>{
+ for(const oldValue of [true,false,undefined]){
+  const f=contentFixture({noteLogoBrowserBack:oldValue},{logoDetector:()=>true,back(){assert.fail('ブラウザバックは廃止');}});await flush();
+  const event=f.click(undefined,{isTrusted:true,cancelable:true});assert.equal(event.defaultPrevented,true);assert.deepEqual(f.moves,[['assign',f.home]]);
+  f.changed({enabled:false});assert.equal(f.click(undefined,{isTrusted:true,cancelable:true}).defaultPrevented,false);assert.equal(f.moves.length,1);
  }
 });
 
-test("ロゴの戻る待機中は連打をまとめ、利用者の画面移動・設定OFF後には転送しない",async()=>{
- for(const change of [f=>{f.location.href='https://note.com/other';},f=>f.changed({enabled:false})]){
-  let resolve,calls=0;const f=contentFixture({noteLogoBrowserBack:true},{logoDetector:()=>true,back(){calls++;return new Promise(done=>{resolve=done;});}});await flush();
-  f.click(undefined,{isTrusted:true,cancelable:true});f.click(undefined,{isTrusted:true,cancelable:true});assert.equal(calls,1);
-  change(f);resolve(false);await flush();assert.deepEqual(f.moves,[]);
- }
-});
+
 
 test("JSによるホーム遷移も可能なら通信開始前にキャンセルし専用ホームへ", async () => {
   const f = contentFixture(); await flush();

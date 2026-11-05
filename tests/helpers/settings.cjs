@@ -1,7 +1,7 @@
 "use strict";
 module.exports = function settings(tags = []) {
   return { enabled: true, noteUserId: "", dashboardDisabled: false, mode:'normal', ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "",
-    hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, noteLogoBrowserBack: false, keepNoteHeaderVisible: false, tagSchemaVersion: 2,
+    hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, keepNoteHeaderVisible: false, tagSchemaVersion: 2,
     tagGroups: [1, 2, 3, 4].map(number => ({ id: `group${number}`, name: "", tags: number === 1 ? tags : [] })),
     selectedTagGroupId: "group1", groupSelectionRevision: 0, tagGroupsRevision: 0 };
 };

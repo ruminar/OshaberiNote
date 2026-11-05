@@ -55,16 +55,6 @@
   let interval;
   let observer;
   let scheduled = false;
-  let logoBackPending = false;
-  async function logoBack() {
-    if (logoBackPending) return;
-    logoBackPending = true;
-    try {
-      await platform.goBack();
-    } catch {
-      // 戻れない・API利用不可・失敗時は現在のページにとどまる。
-    } finally { logoBackPending = false; }
-  }
   const hiddenLinks = new Set();
   const dashboardMarker = "data-oshaberi-note-dashboard-hidden";
   function restoreLinks() {
@@ -131,12 +121,6 @@
         event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const anchor = event.composedPath().find(node => node?.tagName === "A");
     if (!anchor || anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
-    if (core.usesLogoBack(settings) && event.isTrusted === true && event.cancelable === true && core.isHome(anchor.href) &&
-        globalThis.OshaberiNoteUi?.isOfficialHeaderLogo(anchor, location.href)) {
-      event.preventDefault(); event.stopImmediatePropagation();
-      void logoBack();
-      return;
-    }
     // クリック時の委譲処理なので、SPAで後から追加された公式タブにも対応する。
     const articleTabUrl = core.usesFollowing(settings) && anchor.getAttribute?.("data-id") === "NavigationItem" &&
       anchor.textContent?.trim() === "記事" ? core.articleSearchTabUrl(location.href, anchor.href) : null;

@@ -68,8 +68,6 @@ a[data-oshaberi-note-dashboard-hidden] {
   border: 1px solid rgba(128,128,128,.5); color: inherit; background: transparent; font: inherit;
 }
 
-a[data-oshaberi-note-logo-back-unavailable],
-a[data-oshaberi-note-logo-back-unavailable] * { cursor: default !important; }
 .oshaberi-note-header-settings {
   display: inline-flex; align-items: center; justify-content: center; flex: 0 0 32px;
   width: 32px; height: 32px; border-radius: 6px; color: inherit; text-decoration: none;

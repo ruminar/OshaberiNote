@@ -32,6 +32,10 @@ Firefoxでは接続ボタンからホスト権限と会話送信の任意同意�
 
 参考：[Ollama公式FAQ](https://docs.ollama.com/faq)、[Chat API](https://docs.ollama.com/api/chat)、[Chromeの任意権限](https://developer.chrome.com/docs/extensions/reference/api/permissions)。
 
+## noteアイコン
+
+拡張ON時は、note公式ヘッダーのアイコンから常に「おしゃべり」へ戻ります。ブラウザバックへの差し替え機能と設定は削除し、旧設定JSONの該当項目も無視します。ロゴ横の歯車から通常の設定画面を開けます。拡張OFFではnote本来の動作に戻ります。専用ホームの「前の画面に戻る」ボタンは引き続き利用できます。
+
 ## 長文入力と履歴
 
 メッセージは最大200,000文字まで入力でき、記事本文を手動で貼り付けられます。記事の自動取得と感想専用の導線は、将来構想として設計書に記録しています。

@@ -4,7 +4,7 @@
   const platform = globalThis.OshaberiNotePlatform;
   const byId = id => document.getElementById(id);
   const views = ["chat", "tags", "authors", "llm", "settings", "transfer"];
-  const fields = { hideLikeCounts: "hide-like-counts", hidePaidArticles: "hide-paid-articles", noteUserId: "note-user", dashboardDisabled: "dashboard-disabled", hideArticleRecommendations: "hide-article-recommendations", noteLogoBrowserBack: "note-logo-browser-back", keepNoteHeaderVisible: "keep-note-header-visible" };
+  const fields = { hideLikeCounts: "hide-like-counts", hidePaidArticles: "hide-paid-articles", noteUserId: "note-user", dashboardDisabled: "dashboard-disabled", hideArticleRecommendations: "hide-article-recommendations", keepNoteHeaderVisible: "keep-note-header-visible" };
   const drafts = new Map();
   function draft(id) { if (!drafts.has(id)) drafts.set(id, { tag: "", name: "", nameDirty: false, expectedName: "" }); return drafts.get(id); }
   const dirty = new Set();

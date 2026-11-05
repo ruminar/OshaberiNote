@@ -37,6 +37,7 @@
       for (const key of ["tagSchemaVersion", "tagGroups", "selectedTagGroupId", "groupSelectionRevision", "tagGroupsRevision", "authorDisplayRules", "authorDisplayRevision"]) delete clean[key];
       const result = { ...(raw === undefined ? core.defaultSettings() : raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}), ...clean };
       delete result.legacyMode;
+      delete result.noteLogoBrowserBack;
       result.mode = "normal";
       return result;
     }
@@ -52,7 +53,7 @@
       }),
       save: (patch, expectedToken) => run(async () => {
         if (!patch || typeof patch !== "object" || Array.isArray(patch) ||
-            Object.keys(patch).some(key => !["enabled", "noteUserId", "dashboardDisabled", "ollamaUrl", "ollamaModel", "ollamaSystemPrompt", "hideArticleRecommendations", "hidePaidArticles", "hideLikeCounts", "noteLogoBrowserBack", "keepNoteHeaderVisible"].includes(key))) {
+            Object.keys(patch).some(key => !["enabled", "noteUserId", "dashboardDisabled", "ollamaUrl", "ollamaModel", "ollamaSystemPrompt", "hideArticleRecommendations", "hidePaidArticles", "hideLikeCounts", "keepNoteHeaderVisible"].includes(key))) {
           throw new Error("設定の形式が正しくありません。");
         }
         if (Object.hasOwn(patch, "enabled") && typeof patch.enabled !== "boolean") {
@@ -68,7 +69,6 @@
         if (Object.hasOwn(patch, "hidePaidArticles") && typeof patch.hidePaidArticles !== "boolean") throw new Error("有料記事表示設定の値が正しくありません。");
         if (Object.hasOwn(patch, "hideLikeCounts") && typeof patch.hideLikeCounts !== "boolean") throw new Error("スキ数表示設定の値が正しくありません。");
         if (Object.hasOwn(patch, "hideArticleRecommendations") && typeof patch.hideArticleRecommendations !== "boolean") throw new Error("おすすめ表示設定の値が正しくありません。");
-        if (Object.hasOwn(patch, "noteLogoBrowserBack") && typeof patch.noteLogoBrowserBack !== "boolean") throw new Error("ロゴのブラウザバック設定の値が正しくありません。");
         if (Object.hasOwn(patch, "keepNoteHeaderVisible") && typeof patch.keepNoteHeaderVisible !== "boolean") throw new Error("ヘッダ表示設定の値が正しくありません。");
         const next = { ...previous, ...patch };
         next.ollamaUrl = core.normalizeOllamaUrl(next.ollamaUrl);

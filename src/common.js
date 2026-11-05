@@ -5,7 +5,7 @@
   const groupIds = ["group1", "group2", "group3", "group4"];
   function defaultSettings() {
     return { enabled: true, noteUserId: "", dashboardDisabled: false, mode: "normal", ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "",
-      hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, noteLogoBrowserBack: false, keepNoteHeaderVisible: false, tagSchemaVersion: 2,
+      hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, keepNoteHeaderVisible: false, tagSchemaVersion: 2,
       tagGroups: groupIds.map(id => ({ id, name: "", tags: [] })), selectedTagGroupId: "group1",
       groupSelectionRevision: 0, tagGroupsRevision: 0, authorDisplayRules: [], authorDisplayRevision: 0 };
   }
@@ -76,14 +76,13 @@
   function modeOf(settings) { return ["normal", "severe", "social"].includes(settings?.mode) ? settings.mode : "normal"; }
   function usesTags(settings) { return modeOf(settings) === "normal"; }
   function usesFollowing(settings) { return modeOf(settings) !== "severe"; }
-  function usesLogoBack(settings) { return settings?.enabled === true && modeOf(settings) !== "social" && settings.noteLogoBrowserBack === true; }
   function readSettings(value = defaultSettings()) {
     let noteUserId = "";
     try { noteUserId = normalizeUserId(value?.noteUserId); } catch { /* 破損値は空欄へ */ }
     const groups = inspectGroups(value);
     return { enabled: value?.enabled !== false, noteUserId, dashboardDisabled: value?.dashboardDisabled === true,
       mode: "normal", ollamaUrl: value?.ollamaUrl ?? "http://127.0.0.1:11434", ollamaModel: value?.ollamaModel ?? "", ollamaSystemPrompt: value && Object.hasOwn(value, "ollamaSystemPrompt") ? value.ollamaSystemPrompt : "", hideArticleRecommendations: value?.hideArticleRecommendations === true, hidePaidArticles: value?.hidePaidArticles === true, hideLikeCounts: value?.hideLikeCounts === true,
-      noteLogoBrowserBack: value?.noteLogoBrowserBack === true, keepNoteHeaderVisible: value?.keepNoteHeaderVisible === true, ...groups, ...inspectAuthors(value) };
+      keepNoteHeaderVisible: value?.keepNoteHeaderVisible === true, ...groups, ...inspectAuthors(value) };
   }
   function normalizeTag(value) {
     if (typeof value !== "string") throw new Error("タグ名は文字列で入力してください。");
@@ -258,7 +257,7 @@
       return { authorDisplayRules: validateAuthors(value.authorDisplayRules), authorDisplayRevision: value.authorDisplayRevision };
     } catch { return { authorDisplayRules: [], authorDisplayRevision: 0, authorWarning: "作者の保存データに異常があります。作者の表示制御を停止しました。元データを保持して修復してください。" }; }
   }
-  const transferFlags = ["enabled", "dashboardDisabled", "legacyMode", "hideArticleRecommendations", "hidePaidArticles", "noteLogoBrowserBack"];
+  const transferFlags = ["enabled", "dashboardDisabled", "legacyMode", "hideArticleRecommendations", "hidePaidArticles"];
   function exactKeys(value, keys) {
     return value && typeof value === "object" && !Array.isArray(value) &&
       Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
@@ -334,7 +333,7 @@
     const source = document.settings, version = own ? 7 : document.schemaVersion;
     const defaults = transferSettings(current);
     defaults.tagGroups = defaults.tagGroups.map(group => ({ id: group.id, name: group.name, items: group.tags.map(item => typeof item === "string" ? { type: "tag", tag: item } : item) }));
-    const allowed = ["enabled", "noteUserId", "dashboardDisabled", "hideArticleRecommendations", "hidePaidArticles", "noteLogoBrowserBack", "tagGroups", "selectedTagGroupId", ...(version >= 2 ? ["authorDisplayRules"] : []), ...(version >= 4 ? ["keepNoteHeaderVisible"] : []), ...(version >= 7 ? ["hideLikeCounts"] : [])];
+    const allowed = ["enabled", "noteUserId", "dashboardDisabled", "hideArticleRecommendations", "hidePaidArticles", "tagGroups", "selectedTagGroupId", ...(version >= 2 ? ["authorDisplayRules"] : []), ...(version >= 4 ? ["keepNoteHeaderVisible"] : []), ...(version >= 7 ? ["hideLikeCounts"] : [])];
     const merged = { ...defaults, mode: "normal" };
     for (const key of allowed) if (Object.hasOwn(source, key)) merged[key] = source[key];
     if (Object.hasOwn(source, "tagGroups") && version < 5) {
@@ -356,7 +355,7 @@
     return JSON.stringify([transferSettings(settings), settings.ollamaUrl, settings.ollamaModel, settings.ollamaSystemPrompt ?? "", settings.groupSelectionRevision, settings.tagGroupsRevision, settings.authorDisplayRevision ?? 0]);
   }
   globalThis.OshaberiNote = Object.freeze({ settingsKey, isHome, isDashboard, shouldRedirect, normalizeUserId, readSettings, profileUrl,
-    modeOf, usesTags, usesFollowing, usesLogoBack,
+    modeOf, usesTags, usesFollowing,
     exportSettings, parseSettingsExport, settingsToken, normalizeOllamaUrl, validateModel, validateSystemPrompt, authorId, authorName, isSelf, authorRule, authorLabel, sortAuthors,
     favorite, favoriteKey, favoriteLabel, favoriteUrl, authorSearchUrl, searchedAuthor, favoriteUser, favoriteMagazine, favoriteMembership, favoriteSchema, bookIconPath, membershipIconPath, membershipPage, questionPage,
     normalizeTag, inspectTags, tagUrl, articleSearchTabUrl, pageKind, isArticle, isPreviewArticle, groupIds, groupName, normalizeGroupName, selectedGroup, defaultSettings });

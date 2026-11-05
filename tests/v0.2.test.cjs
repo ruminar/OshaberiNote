@@ -435,7 +435,7 @@ test('モバイルの追加UIは社会復帰・OFF・対象外・終了・ヘッ
   f.ui.update(settings,url);assert.ok(toggle());f.ui.update({...settings,...patch},url);assert.equal(toggle(),null);
  }
  f.ui.update(settings,url);const gear=f.doc.querySelector('[class="oshaberi-note-header-settings"]');assert.equal(gear.href,'chrome-extension://self/home.html');
- const header=f.doc.querySelector('header'),logo=header.querySelector('a');assert.equal(logo.hasAttribute('data-oshaberi-note-logo-back-unavailable'),true);header.remove();f.ui.update(settings,url);assert.equal(toggle(),null);assert.equal(logo.hasAttribute('data-oshaberi-note-logo-back-unavailable'),false);
+ const header=f.doc.querySelector('header'),logo=header.querySelector('a');assert.equal(logo.hasAttribute('data-oshaberi-note-logo-back-unavailable'),false);header.remove();f.ui.update(settings,url);assert.equal(toggle(),null);assert.equal(logo.hasAttribute('data-oshaberi-note-logo-back-unavailable'),false);
  f.doc.root.prepend(header);f.ui.update(settings,url);assert.ok(toggle());
  f.ui.update(settings,'https://note.com/settings/account');assert.equal(toggle(),null);
  f.ui.update(settings,url);f.ui.stop();assert.equal(toggle(),null);assert.equal(f.doc.querySelector('[class="oshaberi-note-mobile-panel"]'),null);assert.equal(logo.hasAttribute('data-oshaberi-note-logo-back-unavailable'),false);assert.equal(header.querySelector('[class="oshaberi-note-header-settings"]'),null);
@@ -451,7 +451,7 @@ test('設定ONで公式ロゴ横に歯車を追加。重度・左メニューな
   assert.equal(parent.hasAttribute('data-oshaberi-note-logo-settings-layout'),true);
   const aside=f.doc.querySelector('aside');assert.equal(aside.querySelector('[class="oshaberi-note-navigation-settings"]'),null);
   f.ui.update(settings,'https://note.com/settings');assert.equal(gear.isConnected,true);assert.equal(parent.children.length,2);
-  f.ui.update({...settings,noteLogoBrowserBack:false},'https://note.com/settings');assert.equal(gear.isConnected,mode==='social');assert.equal(parent.hasAttribute('data-oshaberi-note-logo-settings-layout'),mode==='social');
+  f.ui.update({...settings,noteLogoBrowserBack:false},'https://note.com/settings');assert.equal(gear.isConnected,true);assert.equal(parent.hasAttribute('data-oshaberi-note-logo-settings-layout'),true);
   f.ui.update(settings,'https://note.com/settings');f.ui.update({...settings,enabled:false},'https://note.com/settings');assert.equal(parent.children.length,1);
  }
 });
@@ -464,7 +464,7 @@ test('ダッシュボード・設定の本体と配下では管理ヘッダー�
    const anchor=f.doc.querySelector('a');assert.equal(f.isLogo(anchor,url),true);
    f.ui.update(settings,url);const gear=f.doc.querySelector('[class="oshaberi-note-header-settings"]');assert.ok(gear);assert.equal(gear.href,'chrome-extension://self/home.html');
    f.ui.update(settings,url);assert.equal(f.doc.querySelectorAll('[class="oshaberi-note-header-settings"]').length,1);
-   f.ui.update({...settings,noteLogoBrowserBack:false},url);assert.equal(gear.isConnected,false);
+   f.ui.update({...settings,noteLogoBrowserBack:false},url);assert.equal(gear.isConnected,true);f.ui.update({...settings,enabled:false},url);assert.equal(gear.isConnected,false);
    f.ui.update(settings,url);f.ui.update({...settings,enabled:false},url);assert.equal(f.doc.querySelector('[class="oshaberi-note-header-settings"]'),null);
    f.ui.update(settings,url);f.ui.update(settings,'https://note.com/search');assert.equal(f.doc.querySelector('[class="oshaberi-note-header-settings"]'),null);
   }
@@ -482,23 +482,6 @@ test('管理画面ヘッダーの追加対応は対象パスと公式ロゴだ�
  }
 });
 
-test('ロゴ戻り先がない・API未対応なら矢印用属性を付け、履歴・設定・DOM変更で解除',()=>{
- const marker='data-oshaberi-note-logo-back-unavailable';
- for(const [html,url] of [[logoHeaderHtml,'https://note.com/search'],['<header><a href="/"><svg role="img" aria-label="note"></svg></a></header>','https://note.com/settings/account']]){
-  const f=uiFixture(html),settings=f.core.readSettings({...groups(),noteLogoBrowserBack:true});const logo=f.doc.querySelector('a');
-  f.ui.update(settings,url);assert.equal(logo.hasAttribute(marker),true);
-  const gear=f.doc.querySelector('[class="oshaberi-note-header-settings"]');assert.equal(gear.hasAttribute(marker),false);
-  f.win.navigation={canGoBack:true,back(){}};f.ui.update(settings,url);assert.equal(logo.hasAttribute(marker),false);
-  f.win.navigation.canGoBack=false;f.ui.update(settings,url);assert.equal(logo.hasAttribute(marker),true);
-  f.ui.update({...settings,mode:'severe'},url);assert.equal(logo.hasAttribute(marker),true);
-  for(const patch of [{enabled:false},{noteLogoBrowserBack:false}]){
-   f.ui.update({...settings,...patch},url);assert.equal(logo.hasAttribute(marker),false);f.ui.update(settings,url);
-  }
-  logo.remove();f.ui.update(settings,url);assert.equal(logo.hasAttribute(marker),false);
-  f.doc.querySelector('header').append(logo);f.ui.update(settings,url);assert.equal(logo.hasAttribute(marker),true);
-  f.ui.stop();assert.equal(logo.hasAttribute(marker),false);
- }
-});
 
 test('記事のTL・作者に設定リンクを追加せず、ロゴ設定ONでも固定位置をずらさない',()=>{
  const f=authorFixture(),settings=f.core.readSettings({...groups(),noteLogoBrowserBack:true}),url='https://note.com/ruminar/n/n123';
@@ -518,14 +501,6 @@ test('公式ロゴが差し替われば歯車も付け直し、未確認のロ�
 });
 
 
-test('ロゴ戻る設定は初期OFF・保存再起動と他タブ同期。失敗時は従来値を維持',async()=>{
- const f=homeFixture();await flush();const input=f.nodes.get('note-logo-browser-back');assert.equal(input.checked,false);
- input.checked=true;input.fire('change');f.nodes.get('settings').fire('submit');await flush();assert.equal(f.state.noteLogoBrowserBack,true);
- f.changed({noteLogoBrowserBack:false});assert.equal(input.checked,false);
- const saved=fixture();await saved.controller.save({noteLogoBrowserBack:true});assert.equal((await saved.restart().getState()).noteLogoBrowserBack,true);
- saved.options.fail=true;await assert.rejects(saved.controller.save({noteLogoBrowserBack:false}));assert.equal(saved.stored.noteLogoBrowserBack,true);
- await assert.rejects(saved.controller.save({confirmNoteLogoClick:true}));
-});
 
 test('専用ホームの戻るボタンは自分のページの上。通常・重度・OFFでも設定保存なしに戻る',async()=>{
  for(const state of [{},{mode:'severe'},{enabled:false}]){
@@ -542,20 +517,7 @@ test('専用ホーム用の戻るAPIはオリジン判定なしにhistory.back�
  context.OshaberiNotePlatform.goBackUnrestricted();assert.equal(calls,1);
 });
 
-test('Navigation APIで同一オリジンへ戻れる場合だけbackし、完了まで成功扱いにしない',async()=>{
- let calls=0,finish;const navigation={canGoBack:true,back(){calls++;return {finished:new Promise(resolve=>{finish=resolve;}),committed:Promise.resolve()};}};
- const context=vm.createContext({URL,chrome:{runtime:{id:'self'}},navigation,history:{back(){assert.fail('history.backは禁止');}}});
- for(const file of ['src/common.js','src/platform/browser-api.js'])vm.runInContext(source(file),context);
- let done=false;const result=context.OshaberiNotePlatform.goBack().then(value=>{done=true;return value;});assert.equal(calls,1);await flush();assert.equal(done,false);finish();assert.equal(await result,true);
-});
 
-test('Navigation APIなし・外部直前履歴・同期例外・完了失敗はfalse。履歴URLを参照しない',async()=>{
- for(const navigation of [undefined,{canGoBack:false,back(){assert.fail('外部へ戻さない');}},{canGoBack:true},{get canGoBack(){throw Error('unsupported');}},{canGoBack:true,back(){throw Error('failed');}},{canGoBack:true,back(){return {committed:Promise.reject(Error('failed')),finished:Promise.reject(Error('failed'))};}}]){
-  const context=vm.createContext({URL,chrome:{runtime:{id:'self'}},navigation,history:{back(){assert.fail('history.backは禁止');}}});
-  for(const file of ['src/common.js','src/platform/browser-api.js'])vm.runInContext(source(file),context);
-  assert.equal(await context.OshaberiNotePlatform.goBack(),false);
- }
-});
 
 test('記事作者の名前・アイコンをTLの下の独立リンクへ表示し、元の欄を保持。更新・削除・復帰に追随',()=>{
  const f=authorFixture(),settings=f.core.readSettings({...groups(),}),url='https://note.com/ruminar/n/n123';
@@ -931,7 +893,7 @@ test('現行グループ形式の破損はrawを保持して変更停止',async(
  for(const patch of [{tagSchemaVersion:9,tagGroups:[]},{tagGroups:[]},{tagSchemaVersion:2,tagGroups:[]}]){
   const initial={...settingsData(),...patch},f=fixture(initial);const state=await f.controller.getState();assert.ok(state.tagWarning);assert.deepEqual(f.stored,initial);
   await assert.rejects(f.controller.tag({type:'ADD_TAG',groupId:'group1',tag:'X'}),{code:'INVALID_TAGS'});
-  await f.controller.save({noteLogoBrowserBack:true});for(const key of ['tagSchemaVersion','tagGroups','selectedTagGroupId','groupSelectionRevision','tagGroupsRevision'])assert.deepEqual(f.stored[key],initial[key]);
+  await f.controller.save({hidePaidArticles:true});for(const key of ['tagSchemaVersion','tagGroups','selectedTagGroupId','groupSelectionRevision','tagGroupsRevision'])assert.deepEqual(f.stored[key],initial[key]);
  }
 });
 

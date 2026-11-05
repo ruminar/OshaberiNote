@@ -40,6 +40,7 @@ test('ホームはおしゃべり初期表示、歯車の#settingsは設定を�
     assert.equal(f.nodes.get(hash ? 'panel-settings' : 'panel-chat').hidden, false);
     assert.equal(f.requests.length, 0); assert.equal(f.grants.length, 0);
     assert.equal(f.nodes.has('operation-mode'), false);
+    assert.equal(f.nodes.has('note-logo-browser-back'), false);
   }
 });
 test('接続・モデル・送信を通して実モジュールで会話し、HTMLを文字として表示する', async t => {

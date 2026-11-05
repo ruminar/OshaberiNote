@@ -488,26 +488,6 @@
       }
     }
     const headerSettings = new Map();
-    const inactiveLogos = new Set();
-    const inactiveLogo = "data-oshaberi-note-logo-back-unavailable";
-    function syncLogoCursor(active) {
-      let canGoBack = false;
-      try { canGoBack = win.navigation?.canGoBack === true && typeof win.navigation.back === "function"; }
-      catch { /* 判定できない場合も戻れない状態として扱う。 */ }
-      for (const logo of inactiveLogos) {
-        if (!active || canGoBack || !isOfficialHeaderLogo(logo, currentUrl)) {
-          logo.removeAttribute(inactiveLogo); inactiveLogos.delete(logo);
-        }
-      }
-      if (!active || canGoBack) return;
-      for (const header of doc.querySelectorAll("header")) {
-        for (const logo of header.querySelectorAll("a[href]")) {
-          if (isOfficialHeaderLogo(logo, currentUrl) && !inactiveLogos.has(logo)) {
-            logo.setAttribute(inactiveLogo, ""); inactiveLogos.add(logo);
-          }
-        }
-      }
-    }
     const settingsLayout = "data-oshaberi-note-logo-settings-layout";
     function logoContainer(logo) {
       const parent = logo.parentElement;
@@ -1451,8 +1431,7 @@
       authorControls.update(settings, url);
       syncFavoriteProfile(settings);
       syncSearchClear(settings.enabled);
-      syncHeaderSettings(settings.enabled && (core.modeOf(settings) === "social" || settings.noteLogoBrowserBack));
-      syncLogoCursor(core.usesLogoBack(settings));
+      syncHeaderSettings(settings.enabled);
       const page = core.pageKind(url);
       syncArticleFollowing(settings, url);
       syncQuestionAuthor(settings, url);
@@ -1484,7 +1463,7 @@
       const activeTag = selectedTag(page, url);
       const activeAuthor = core.searchedAuthor(url);
       const authorCard = !severe && activeAuthor ? searchAuthor(activeAuthor, settings) : null;
-      const nextSignature = JSON.stringify([page, activeTag, activeAuthor, authorCard, core.modeOf(settings), settings.noteUserId, settings.tagGroups, settings.selectedTagGroupId, settings.noteLogoBrowserBack, settings.tagWarning, adding, uncertain, actionMessage]);
+      const nextSignature = JSON.stringify([page, activeTag, activeAuthor, authorCard, core.modeOf(settings), settings.noteUserId, settings.tagGroups, settings.selectedTagGroupId, settings.tagWarning, adding, uncertain, actionMessage]);
       if (!menu) {
         menu = doc.createElement(page.type === "profile" ? "div" : "nav");
         menu.setAttribute(owned, "");
@@ -1624,7 +1603,6 @@
         syncPinnedHeader({ enabled: false }, currentUrl);
         removeMobile();
         syncHeaderSettings(false);
-        syncLogoCursor(false);
         syncSearchClear(false);
         articleFollowing?.remove();
         articleFollowing = undefined;
