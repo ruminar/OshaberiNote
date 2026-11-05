@@ -79,7 +79,8 @@
     container.replaceChildren();
     for (const turn of state.turns) {
       for (const [label, content] of [["あなた", turn.user], [turn.status === "complete" ? "AI" : turn.status === "pending" ? "AI（生成中・未完了）" : "AI（中断・次回送信の対象外）", turn.assistant]]) {
-        const article = document.createElement("article"), heading = document.createElement("h3"), text = document.createElement("p");
+        const article = document.createElement("article"), heading = document.createElement("h3"), text = document.createElement("div");
+        text.className = "chat-message-body"; text.setAttribute("data-chat-body", "");
         heading.textContent = label;
         const header = document.createElement("div"), copy = document.createElement("button"), feedback = document.createElement("span");
         header.className = "chat-message-heading";
@@ -263,7 +264,7 @@
         if (state.epoch !== epoch || state.active?.id !== id) throw new Error("生成は中止されました。");
         state.turns.at(-1).assistant = answer;
         const container = byId("chat-messages"), atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-        const paragraph = container.children[container.children.length - 1]?.querySelector("p");
+        const paragraph = container.children[container.children.length - 1]?.querySelector("[data-chat-body]");
         // 長い記事本文を受信チャンクごとに作り直さず、末尾のAI発言だけ更新する。
         if (paragraph) paragraph.textContent = answer || "（応答なし）";
         else render(state);

@@ -1,4 +1,4 @@
-/* 原文を保持し、完了したAI回答の太字と既知のタグ表記だけを安全なDOMで表示する。 */
+/* 原文を保持し、完了したAI回答の箇条書き・太字と既知のタグ表記だけを安全なDOMで表示する。 */
 (() => {
   "use strict";
   const core = globalThis.OshaberiNote;
@@ -71,7 +71,8 @@
         .filter(range => !parsed.some(part => part.tag && (
           (range.start < part.end && range.start + 2 > part.start) ||
           (range.end - 2 < part.end && range.end > part.start))));
-      if (!parsed.some(part => part.tag) && !bold.length) { node.textContent = content; return; }
+      const hasList = /^[ \t]*\*[ \t]+\S/m.test(content);
+      if (!hasList && !parsed.some(part => part.tag) && !bold.length) { node.textContent = content; return; }
       node.replaceChildren();
       function appendRange(parent, start, end) {
         for (const part of parsed) {
@@ -95,13 +96,53 @@
           parent.append(child);
         }
       }
-      let cursor = 0;
-      for (const range of bold) {
-        appendRange(node, cursor, range.start);
-        const strong = doc.createElement("strong"); appendRange(strong, range.start + 2, range.end - 2); node.append(strong);
-        cursor = range.end;
+      function appendInline(parent, start, end) {
+        let cursor = start;
+        for (const range of bold) {
+          if (range.start < start || range.end > end) continue;
+          appendRange(parent, cursor, range.start);
+          const strong = doc.createElement("strong"); appendRange(strong, range.start + 2, range.end - 2); parent.append(strong);
+          cursor = range.end;
+        }
+        appendRange(parent, cursor, end);
       }
-      appendRange(node, cursor, content.length);
+      if (!hasList) { appendInline(node, 0, content.length); return; }
+      // ulは段落の中へ入れず、本文コンテナ直下に組み立てる。
+      const stack = [];
+      let paragraphStart, paragraphEnd;
+      function flushParagraph() {
+        if (paragraphStart !== undefined) {
+          const value = content.slice(paragraphStart, paragraphEnd).replace(/[\r\n]+$/, "");
+          if (value.trim()) { const p = doc.createElement("p"); appendInline(p, paragraphStart, paragraphStart + value.length); node.append(p); }
+        }
+        paragraphStart = undefined;
+      }
+      for (const match of content.matchAll(/([^\r\n]*)(\r\n|\r|\n|$)/gu)) {
+        if (!match[0]) break;
+        const line = match[1], start = match.index, end = start + line.length;
+        const item = /^([ \t]*)\*[ \t]+(\S.*)$/.exec(line);
+        if (item) {
+          flushParagraph();
+          const indent = item[1].replace(/\t/g, "    ").length;
+          while (stack.length && stack.at(-1).indent > indent) stack.pop();
+          if (!stack.length || indent > stack.at(-1).indent) {
+            const ul = doc.createElement("ul");
+            (stack.at(-1)?.last ?? node).append(ul); stack.push({ indent, ul, last: null });
+          }
+          const li = doc.createElement("li"), level = stack.at(-1);
+          appendInline(li, end - item[2].length, end); level.ul.append(li); level.last = li;
+        } else if (!line.trim()) {
+          // 空行はリスト内の次の項目も許容し、通常段落では改行を保持する。
+          if (paragraphStart !== undefined) paragraphEnd = start + match[0].length;
+        } else if (stack.length && /^[ \t]+/.test(line) && line.match(/^[ \t]*/)[0].replace(/\t/g, "    ").length > stack.at(-1).indent) {
+          const continuation = doc.createElement("span"); continuation.textContent = "\n"; stack.at(-1).last.append(continuation);
+          appendInline(stack.at(-1).last, start + line.match(/^[ \t]*/)[0].length, end);
+        } else {
+          stack.length = 0;
+          paragraphStart ??= start; paragraphEnd = start + match[0].length;
+        }
+      }
+      flushParagraph();
     }
     return Object.freeze({ render, refresh, close() { if (dialog.open) dialog.close(); } });
   }

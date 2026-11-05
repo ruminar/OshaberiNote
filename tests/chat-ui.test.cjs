@@ -374,14 +374,48 @@ test('送信直後に入力へフォーカスを戻し、生成中の下書き�
   finish();await flush();assert.equal(n.get('chat-input').value,'次の質問の下書き');assert.equal(n.get('chat-send').disabled,false);
   assert.equal(f.document.activeElement,n.get('chat-input'));
 });
+test('AI回答の箇条書きと入れ子を太字・タグ操作と併用し、保存とコピーは原文のまま保つ',async t=>{
+  const reply='**要点整理**\r\n\r\n* **評価軸:** 読者の視点\r\n* **具体的確認事項:**\r\n    * AI利用\r\n        * **方法** [#AI]\r\n    * 基準 <img src=x onerror=alert(1)>\r\n* **運営:** 期待\r\n\r\n最後の段落';
+  const f=await fixture(t,{reply}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='* 自分の箇条書き';n.get('chat-form').fire('submit');await flush();
+  const rows=n.get('chat-messages').children,body=rows[1].querySelector('[data-chat-body]');
+  assert.equal(rows[0].querySelector('ul'),null);assert.equal(body.querySelectorAll('ul').length,3);assert.equal(body.querySelectorAll('li').length,6);
+  const root=body.children.find(node=>node.tagName==='UL');assert.equal(root.children.length,3);
+  assert.equal(root.children[1].querySelector('ul').children.length,2);
+  assert.ok(body.querySelectorAll('ul').every(node=>node.parentElement.tagName!=='P'));
+  assert.equal(body.children.at(-1).textContent,'最後の段落');assert.equal(body.querySelector('img'),null);
+  assert.ok(body.querySelectorAll('strong').some(node=>node.textContent==='具体的確認事項:'));
+  body.querySelector('button[aria-haspopup="dialog"]').onclick();assert.equal(n.get('chat-tag-heading').textContent,'#AI');
+  await rows[1].querySelector('button[aria-label="AIの回答をコピー"]').onclick();assert.deepEqual(f.copies,[reply]);
+  assert.equal((await f.chat('get')).turns[0].assistant,reply);
+});
+
+test('リストの継続行と空行後の同階層項目を扱い、星印の普通の文章は保持する',async t=>{
+  const reply='導入の文章\n* 親\n  続きの行\n\n* 次の項目\n終了の文章\n*空白なしは普通の文章';
+  const f=await fixture(t,{reply}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='確認';n.get('chat-form').fire('submit');await flush();
+  const body=n.get('chat-messages').children[1].querySelector('[data-chat-body]');
+  assert.equal(body.querySelectorAll('ul').length,1);assert.equal(body.querySelectorAll('li').length,2);
+  assert.equal(body.querySelector('li').textContent,'親\n続きの行');
+  assert.equal(body.children.at(-1).textContent,'終了の文章\n*空白なしは普通の文章');
+});
+
+test('リストと太字で本文を分割してもタグ操作は回答全体で最大100個に制限する',async t=>{
+  const reply='* **[#同じタグ]**\n'.repeat(101),f=await fixture(t,{reply}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='確認';n.get('chat-form').fire('submit');await flush();
+  const body=n.get('chat-messages').children[1].querySelector('[data-chat-body]');
+  assert.equal(body.querySelectorAll('li').length,101);assert.equal(body.querySelectorAll('button[aria-haspopup="dialog"]').length,100);
+  assert.equal((await f.chat('get')).turns[0].assistant,reply);
+});
+
 test('完了したAI回答の太字とタグ操作を両立し、保存・コピーはMarkdown原文を保持する',async t=>{
   const reply='**要点整理**\n\n* **評価軸の重要性:** 内容。\n**おすすめ [#読書]**\n**<img src=x onerror=alert(1)>**';
   const f=await fixture(t,{reply}),n=f.nodes;
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='**自分の文章**';n.get('chat-form').fire('submit');await flush();
-  const rows=n.get('chat-messages').children,body=rows[1].querySelector('p');
+  const rows=n.get('chat-messages').children,body=rows[1].querySelector('[data-chat-body]');
   assert.deepEqual(body.querySelectorAll('strong').map(node=>node.textContent),['要点整理','評価軸の重要性:','おすすめ [#読書]','<img src=x onerror=alert(1)>']);
   assert.equal(body.querySelector('img'),null);assert.equal(rows[0].querySelector('strong'),null);
-  assert.equal(rows[0].querySelector('p').textContent,'**自分の文章**');
+  assert.equal(rows[0].querySelector('[data-chat-body]').textContent,'**自分の文章**');
   body.querySelector('button[aria-haspopup="dialog"]').onclick();assert.equal(n.get('chat-tag-dialog').open,true);
   assert.equal(n.get('chat-tag-heading').textContent,'#読書');
   await rows[1].querySelector('button[aria-label="AIの回答をコピー"]').onclick();
@@ -392,7 +426,7 @@ test('閉じていない太字・改行をまたぐ強調・タグ名の中の�
   const reply='未完了 **見出し\n**行を\nまたぐ**\n[#a**b**]';
   const f=await fixture(t,{reply}),n=f.nodes;
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='確認';n.get('chat-form').fire('submit');await flush();
-  const body=n.get('chat-messages').children[1].querySelector('p');
+  const body=n.get('chat-messages').children[1].querySelector('[data-chat-body]');
   assert.equal(body.querySelectorAll('strong').length,0);assert.equal(body.textContent,reply);
   assert.equal(body.querySelector('button[aria-haspopup="dialog"]').textContent,'[#a**b**]');
 });
@@ -427,7 +461,7 @@ test('完了したAI回答のタグだけをボタン化し、検索と実際の
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='[#ユーザーの入力]';n.get('chat-form').fire('submit');await flush();
   const rows=n.get('chat-messages').children,buttons=rows[1].querySelectorAll('button[aria-haspopup="dialog"]');
   assert.equal(rows[0].querySelectorAll('button[aria-haspopup="dialog"]').length,0);assert.equal(buttons.length,2);
-  assert.equal(rows[1].querySelector('p').textContent,reply);assert.equal((await f.chat('get')).turns[0].assistant,reply);
+  assert.equal(rows[1].querySelector('[data-chat-body]').textContent,reply);assert.equal((await f.chat('get')).turns[0].assistant,reply);
   assert.deepEqual((await f.settings()).tagGroups[1].tags,[]);
   buttons[0].onclick();assert.equal(n.get('chat-tag-dialog').open,true);
   assert.equal(n.get('chat-tag-search').href,f.c.OshaberiNote.tagUrl('週末の過ごし方'));
