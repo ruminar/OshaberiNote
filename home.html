@@ -44,9 +44,9 @@
       <div class="home-content">
         <section id="panel-chat" aria-labelledby="chat-heading" hidden>
           <h2 id="chat-heading">おしゃべり</h2>
-          <div id="chat-actions" class="settings-actions" aria-label="会話を始める機能"></div>
+          <div id="chat-actions" class="settings-actions chat-tabs" role="tablist" aria-label="会話の種類"></div>
           <p id="chat-status" role="status" aria-live="polite">「LLMの設定」で接続し、モデルを選択してください。</p>
-          <div id="chat-messages" role="log" aria-label="会話履歴" aria-live="off"></div>
+          <div id="chat-messages" role="tabpanel" role="log" aria-label="会話履歴" aria-live="off"></div>
           <form id="chat-form">
             <label for="chat-input">メッセージ</label>
             <textarea id="chat-input" rows="4" maxlength="200000" aria-describedby="chat-input-help" placeholder="メッセージを入力（Ctrl+Enterで送信、Enterで改行）" disabled></textarea>
@@ -104,13 +104,13 @@
             <p>起動後、この画面の「接続・再試行」から試してください。他のWebサイトや拡張まで一括で許可しないでください。既に許可済みの場合は、接続先の認証・プロキシ設定も確認してください。</p>
           </div>
           <p class="muted">未接続の場合はOllamaの起動、接続URL、モデルの登録を確認してください。クラウドモデルではOllama側から外部へ通信します。詳細は同梱の導入手順をご覧ください。</p>
-          <p id="chat-history-info" class="muted" role="status">履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。</p>
+          <p id="chat-history-info" class="muted" role="status">履歴は各会話タブで直近10往復・最大2MiBを保存し、古い分から自動で整理します。</p>
           <hr>
           <form id="system-prompt-settings">
             <label for="system-prompt">システムプロンプト</label>
             <textarea id="system-prompt" rows="8" maxlength="8000" spellcheck="false" autocomplete="off" aria-describedby="system-prompt-help" placeholder="例：あなたは簡潔な日本語で回答するアシスタントです。" disabled></textarea>
             <p id="system-prompt-help" class="muted">通常チャット用、8,000文字以内。保存した内容を会話の先頭に送信し、空欄なら追加しません。「タグの提案」の会話には専用プロンプトを使います。効き方はモデルによります。設定JSONにも含まれます。</p>
-            <p class="muted">変更を保存すると、調査条件を揃えるため会話と未送信入力を初期化します。接続先を変更するとシステムプロンプトも空に戻ります。</p>
+            <p class="muted">変更を保存すると、調査条件を揃えるため「通常の会話」の履歴と未送信入力を初期化します。接続先を変更するとシステムプロンプトも空に戻ります。</p>
             <button type="submit" id="save-system-prompt" disabled>システムプロンプトを保存</button>
             <p id="system-prompt-status" role="status" aria-live="polite"></p>
           </form>

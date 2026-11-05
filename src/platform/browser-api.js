@@ -56,14 +56,14 @@
       const previous = globalThis.OshaberiNote.readSettings((await api.storage.local.get(key))[key]);
       const chat = globalThis.OshaberiNoteChatState;
       let nextChat;
-      if (settings.ollamaUrl !== previous.ollamaUrl) nextChat = chat.fresh(settings.ollamaUrl);
+      if (settings.ollamaUrl !== previous.ollamaUrl) nextChat = chat.freshStore(settings.ollamaUrl);
       else if (settings.ollamaSystemPrompt !== previous.ollamaSystemPrompt) {
-        const previousChat = chat.read((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl);
-        nextChat = chat.fresh(settings.ollamaUrl);
-        if (!options.importing) nextChat.approvedUrl = previousChat.approvedUrl;
+        nextChat = chat.readStore((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl, "chat");
+        nextChat.conversations.chat = chat.fresh(settings.ollamaUrl);
+        if (options.importing) { chat.interruptStore(nextChat); nextChat.approvedUrl = ""; }
       }
       else if (settings.enabled === false || settings.ollamaModel !== previous.ollamaModel || options.importing) {
-        nextChat = chat.interrupt(chat.read((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl));
+        nextChat = chat.interruptStore(chat.readStore((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl));
         if (options.importing) nextChat.approvedUrl = "";
       }
       await api.storage.local.set({ [key]: settings, ...(nextChat ? { [chatKey]: nextChat } : {}) });

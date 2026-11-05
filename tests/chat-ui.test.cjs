@@ -23,6 +23,7 @@ async function fixture(t, options = {}) {
   c.chrome.permissions.request = async permission => { grants.push(structuredClone(permission)); return options.grant !== false; };
   c.chrome.runtime.sendMessage = async message => {
     try {
+      if (message.operation === 'progress' && message.patch.actionId === 'chat') await options.progressGate;
       if (message.type === 'tag-operation') { await options.tagGate; if (options.tagError) throw Object.assign(new Error('登録結果を確認できません'), { code: 'UNCONFIRMED' }); }
       return { ok: true, settings: await f.send(message) };
     }
@@ -68,16 +69,16 @@ test('権限拒否時にはAPIへ接続せず、既存の設定・お気に入�
   n.get('nav-tags').onclick(); assert.equal(n.get('panel-tags').hidden, false); assert.equal(n.get('add-tag').disabled, false);
 });
 
-test('タグの提案は新規の専用会話を自動送信し、通常プロンプトを保持する', async t => {
+test('タグタブの初回送信と通常会話の復元で、プロンプトと履歴を分離する', async t => {
   const f = await fixture(t, { reply: '[#読書]' }), n = f.nodes;
-  const action = n.get('chat-actions').children[0];
-  assert.equal(action.textContent, 'タグの提案'); assert.equal(action.disabled, true);
+  const action = n.get('chat-actions').children[1];
+  assert.equal(action.textContent, 'タグの提案'); assert.equal(action.disabled, false);
   await f.save({ ollamaSystemPrompt: '通常の調査条件' }); await flush();
   n.get('connect-ollama').onclick(); await flush();
   n.get('chat-input').value = '以前の質問'; n.get('chat-form').fire('submit'); await flush();
   n.get('chat-input').value = '以前の下書き';
   await action.onclick(); await flush();
-  assert.equal(f.confirmations.length, 1);
+  assert.equal(f.confirmations.length, 0);
   assert.match(n.get('chat-heading').textContent, /タグの提案 v1\.2/);
   const posts = () => f.requests.filter(item => item.url.endsWith('/api/chat')).map(item => JSON.parse(item.init.body));
   assert.equal(posts().length, 2);
@@ -91,21 +92,27 @@ test('タグの提案は新規の専用会話を自動送信し、通常プロ�
   assert.ok(posts()[2].messages[0].content.includes('["読書"]'));
   assert.equal(posts()[2].messages.filter(item => item.role === 'system').length, 1);
   assert.equal((await f.settings()).ollamaSystemPrompt, '通常の調査条件');
-  await n.get('chat-new').onclick(); await flush();
-  assert.equal((await f.chat('get')).actionId, 'chat');
+  await n.get('chat-actions').children[0].onclick(); await flush();
+  assert.equal(n.get('chat-input').value, '以前の下書き');
+  assert.match(n.get('chat-messages').textContent, /以前の質問/);
+  assert.equal(n.get('chat-actions').children[0].getAttribute('aria-selected'), 'true');
   n.get('chat-input').value = '通常へ'; n.get('chat-form').fire('submit'); await flush();
-  assert.deepEqual(posts()[3].messages, [{ role: 'system', content: '通常の調査条件' }, { role: 'user', content: '通常へ' }]);
+  assert.deepEqual(posts()[3].messages, [{ role: 'system', content: '通常の調査条件' }, { role: 'user', content: '以前の質問' }, { role: 'assistant', content: '[#読書]' }, { role: 'user', content: '通常へ' }]);
+  await action.onclick(); await flush();
+  assert.equal(posts().length, 4); assert.match(n.get('chat-messages').textContent, /今度は技術で/);
+
 });
 
-test('専用会話への切替を取り消すと履歴と下書きを保持する', async t => {
-  const f = await fixture(t, { confirm: false }), n = f.nodes;
-  n.get('connect-ollama').onclick(); await flush();
-  n.get('chat-input').value = '以前の質問'; n.get('chat-form').fire('submit'); await flush();
-  n.get('chat-input').value = '下書き';
-  await n.get('chat-actions').children[0].onclick(); await flush();
-  assert.equal(f.requests.filter(item => item.url.endsWith('/api/chat')).length, 1);
-  assert.equal((await f.chat('get')).actionId, 'chat');
-  assert.match(n.get('chat-messages').textContent, /以前の質問/); assert.equal(n.get('chat-input').value, '下書き');
+test('未接続でもタブを切り替えて下書きを保持し、勝手に送信しない', async t => {
+  const f = await fixture(t), n = f.nodes, tabs = n.get('chat-actions').children;
+  assert.equal(tabs[0].getAttribute('aria-selected'), 'true');
+  n.get('chat-input').value = '通常の下書き';
+  await tabs[1].onclick(); await flush();
+  assert.equal(n.get('chat-input').value, 'noteで面白そうなタグを提案してください。');
+  n.get('chat-input').value = 'タグの下書き';
+  await tabs[0].onclick(); await flush(); assert.equal(n.get('chat-input').value, '通常の下書き');
+  await tabs[1].onclick(); await flush(); assert.equal(n.get('chat-input').value, 'タグの下書き');
+  assert.equal(f.requests.length, 0); assert.equal(f.confirmations.length, 0);
 });
 
 test('タグ提案の初回POSTにも全4グループの最新タグを重複除去して付与する', async t => {
@@ -113,7 +120,7 @@ test('タグ提案の初回POSTにも全4グループの最新タグを重複除
   for (const [groupId, tag] of [['group1', 'ComfyUI'], ['group2', 'AIマンガ'], ['group3', 'ショートショート'], ['group4', 'ComfyUI']])
     await f.send({ type: 'tag-operation', patch: { type: 'ADD_TAG', groupId, tag } });
   await flush(); n.get('connect-ollama').onclick(); await flush();
-  await n.get('chat-actions').children[0].onclick(); await flush();
+  await n.get('chat-actions').children[1].onclick(); await flush();
   const posts = f.requests.filter(item => item.url.endsWith('/api/chat'));
   assert.equal(posts.length, 1);
   const { messages } = JSON.parse(posts[0].init.body);
@@ -129,7 +136,7 @@ test('「他は何がありますか？」にも専用systemと直前の完了�
   for (const tag of ['ComfyUI', 'AIマンガ', 'ショートショート'])
     await f.send({ type: 'tag-operation', patch: { type: 'ADD_TAG', groupId: 'group1', tag } });
   await flush(); n.get('connect-ollama').onclick(); await flush();
-  await n.get('chat-actions').children[0].onclick(); await flush();
+  await n.get('chat-actions').children[1].onclick(); await flush();
   const first = JSON.parse(f.requests.filter(item => item.url.endsWith('/api/chat'))[0].init.body);
   n.get('chat-input').value = '他は何がありますか？'; n.get('chat-form').fire('submit'); await flush();
   const second = JSON.parse(f.requests.filter(item => item.url.endsWith('/api/chat'))[1].init.body);
@@ -137,7 +144,7 @@ test('「他は何がありますか？」にも専用systemと直前の完了�
   assert.equal(second.messages[0].content, first.messages[0].content);
   assert.ok(second.messages[0].content.includes('["ComfyUI","AIマンガ","ショートショート"]'));
   assert.deepEqual(second.messages.slice(1), [first.messages[1], { role: 'assistant', content: previous }, { role: 'user', content: '他は何がありますか？' }]);
-  assert.equal((await f.chat('get')).actionId, 'tag-suggestion-v1');
+  assert.equal((await f.chat('get', { actionId: 'tag-suggestion-v1' })).actionId, 'tag-suggestion-v1');
 });
 
 test('生成中の専用会話への切替は古い生成を中断し、連打でも最初の質問を一度だけ送る', async t => {
@@ -150,13 +157,38 @@ test('生成中の専用会話への切替は古い生成を中断し、連打�
   } }), n = f.nodes;
   n.get('connect-ollama').onclick(); await flush();
   n.get('chat-input').value = '古い生成'; n.get('chat-form').fire('submit'); await flush();
-  const action = n.get('chat-actions').children[0]; assert.equal(action.disabled, false);
+  const action = n.get('chat-actions').children[1]; assert.equal(action.disabled, false);
   const first = action.onclick(), second = action.onclick(); await Promise.all([first, second]); await flush();
   assert.equal(aborted, true); assert.equal(count, 2);
-  const state = await f.chat('get'); assert.equal(state.actionId, 'tag-suggestion-v1'); assert.equal(state.turns.length, 1);
+  const state = await f.chat('get', { actionId: 'tag-suggestion-v1' }); assert.equal(state.actionId, 'tag-suggestion-v1'); assert.equal(state.turns.length, 1);
   assert.equal(state.turns[0].status, 'complete'); assert.equal(state.turns[0].assistant, '[#新候補]');
   assert.match(n.get('chat-status').textContent, /完了/); assert.equal(n.get('chat-send').disabled, false);
 });
+test('タブはキーボードで切り替えられ、新しい会話では選択中だけ消す', async t => {
+  const f = await fixture(t), n=f.nodes, tabs=n.get('chat-actions').children;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='通常の履歴';n.get('chat-form').fire('submit');await flush();
+  const key=tabs[0].fire('keydown',{key:'ArrowRight'});await flush();
+  assert.equal(key.defaultPrevented,true);assert.equal(f.document.activeElement,n.get('chat-input'));
+  assert.equal(tabs[1].getAttribute('aria-selected'),'true');
+  await n.get('chat-new').onclick();await flush();
+  assert.equal(tabs[1].getAttribute('aria-selected'),'true');
+  assert.equal((await f.chat('get',{actionId:'tag-suggestion-v1'})).turns.length,0);
+  assert.equal((await f.chat('get')).turns[0].user,'通常の履歴');
+  await tabs[0].onclick();await flush();assert.match(n.get('chat-messages').textContent,/通常の履歴/);
+  await tabs[1].onclick();await flush();
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,2);
+});
+
+test('切替前の遅延した進捗保存を拒否しても、切替先の会話を停止しない', async t => {
+  let release,count=0;const progressGate=new Promise(resolve=>{release=resolve;});
+  const f=await fixture(t,{progressGate,stream:()=>new Response(JSON.stringify({message:{role:'assistant',content:++count===1?'古い進捗':'新しい回答'},done:true})+'\n')}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='通常の途中';n.get('chat-form').fire('submit');await flush();
+  await n.get('chat-actions').children[1].onclick();await flush();release();await flush();
+  assert.equal(n.get('chat-send').disabled,false);assert.match(n.get('chat-status').textContent,/完了/);
+  assert.equal((await f.chat('get',{actionId:'tag-suggestion-v1'})).turns[0].assistant,'新しい回答');
+  assert.equal((await f.chat('get')).turns[0].status,'interrupted');
+});
+
 test('Ctrl+Enterは送信ボタンと同じ処理で送信し、連続操作で二重送信しない', async t => {
   const f = await fixture(t), n = f.nodes;
   n.get('connect-ollama').onclick(); await flush();
@@ -250,7 +282,7 @@ test('プロンプト保存後の送信にsystemメッセージを付け、空�
   n.get('system-prompt').value = '日本語で回答する。\nそのまま保存'; n.get('system-prompt').fire('input');
   n.get('system-prompt-settings').fire('submit'); await flush();
   assert.equal((await f.settings()).ollamaSystemPrompt, '日本語で回答する。\nそのまま保存');
-  assert.match(n.get('system-prompt-status').textContent, /保存し、会話を初期化/);
+  assert.match(n.get('system-prompt-status').textContent, /保存し、通常の会話を初期化/);
   n.get('nav-chat').onclick(); n.get('chat-input').value = 'hi'; n.get('chat-form').fire('submit'); await flush();
   let messages = JSON.parse(f.requests.find(item => item.url.endsWith('/api/chat')).init.body).messages;
   assert.deepEqual(messages, [{ role: 'system', content: '日本語で回答する。\nそのまま保存' }, { role: 'user', content: 'hi' }]);

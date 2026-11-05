@@ -96,13 +96,13 @@ test('10往復を超えても古い履歴を入れ替えて会話を継続し、
 });
 test('旧版の100往復の保存値を直近10往復へ移行して継続できる', async () => {
   const { f, patch } = await ready(); const key=f.context.OshaberiNoteChatState.key;
-  f.data[key].turns=Array.from({length:100},(_,i)=>({user:'old-'+i,assistant:'answer',status:'complete'}));
-  delete f.data[key].droppedTurns; delete f.data[key].contextTrimmedTurns;
+  f.data[key].conversations.chat.turns=Array.from({length:100},(_,i)=>({user:'old-'+i,assistant:'answer',status:'complete'}));
+  delete f.data[key].conversations.chat.droppedTurns; delete f.data[key].conversations.chat.contextTrimmedTurns;
   const state=await f.chat('get');assert.equal(state.turns.length,10);assert.equal(state.droppedTurns,90);assert.equal(state.turns[0].user,'old-90');
   const next=await f.chat('start',{...patch,text:'continue'});assert.equal(next.turns.length,10);assert.equal(next.droppedTurns,91);
 });
 test('不正な会話データは通信せず、新しい会話でのみ明示的に復旧できる', async () => {
-  const { f } = await ready(); f.data[f.context.OshaberiNoteChatState.key].turns = [{ user: '<script>', assistant: {}, status: 'complete' }];
+  const { f } = await ready(); f.data[f.context.OshaberiNoteChatState.key].conversations.chat.turns = [{ user: '<script>', assistant: {}, status: 'complete' }];
   await assert.rejects(f.chat('get'), /不正/);
   assert.deepEqual((await f.chat('reset')).turns, []);
 });
@@ -179,7 +179,7 @@ test('LLM設定の競合トークンを保存キュー内で検証し、古い�
 });
 async function beginTags(f) {
   const current=await f.chat('get');
-  return f.chat('begin-action',{epoch:current.epoch,endpoint:current.endpoint,model:'local-model',actionId:'tag-suggestion-v1'});
+  return f.chat('select',{owner:'owner',actionId:'tag-suggestion-v1'});
 }
 test('タグ提案は全4グループのタグだけを重複除去してsystemへ入れる',async()=>{
   const {f}=await ready(),core=f.context.OshaberiNote;
@@ -191,17 +191,17 @@ test('タグ提案は全4グループのタグだけを重複除去してsystem�
   raw.tagGroups[3].tags=[{type:'membership',userId:'author',displayName:'会員'},'創作'];
   const next=await beginTags(f);assert.equal(next.actionId,'tag-suggestion-v1');assert.deepEqual(next.turns,[]);
   assert.equal(next.initialMessage,'noteで面白そうなタグを提案してください。');
-  const patch={epoch:next.epoch,endpoint:next.endpoint,model:'local-model',owner:'owner'};
+  const patch={actionId:next.actionId,epoch:next.epoch,endpoint:next.endpoint,model:'local-model',owner:'owner'};
   const started=await f.chat('start',{...patch,text:next.initialMessage});
   const prompt=started.messages[0];assert.equal(prompt.role,'system');assert.match(prompt.content,/# タグ提案アシスタント/);
   assert.ok(prompt.content.includes(JSON.stringify(['読書','共通','音楽','技術','創作'])));
   assert.doesNotMatch(prompt.content,/通常の研究用プロンプト|"作者"|"会員"|\{\{REGISTERED_TAGS_JSON\}\}/);
   assert.equal(started.messages.filter(item=>item.role==='system').length,1);
   assert.equal((await f.settings()).ollamaSystemPrompt,'通常の研究用プロンプト');
-  assert.equal(f.data[f.context.OshaberiNoteChatState.key].turns.length,1);
+  assert.equal(f.data[f.context.OshaberiNoteChatState.key].conversations['tag-suggestion-v1'].turns.length,1);
 });
 test('専用会話の続きでは毎回最新タグを取得し、指示風のタグもJSONデータのまま挿入する',async()=>{
-  const {f}=await ready(),first=await beginTags(f),patch={epoch:first.epoch,endpoint:first.endpoint,model:'local-model',owner:'owner'};
+  const {f}=await ready(),first=await beginTags(f),patch={actionId:first.actionId,epoch:first.epoch,endpoint:first.endpoint,model:'local-model',owner:'owner'};
   let started=await f.chat('start',{...patch,text:first.initialMessage});
   assert.ok(started.messages[0].content.includes('\n[]\n'));
   await f.chat('complete',{...patch,id:started.active.id,text:'[#最初の候補]'});
@@ -211,24 +211,102 @@ test('専用会話の続きでは毎回最新タグを取得し、指示風の�
   assert.ok(started.messages[0].content.includes(JSON.stringify([tag])));
   assert.equal(started.messages.filter(item=>item.role==='system').length,1);assert.equal(started.messages.at(-1).content,'もっと技術寄りで');
   assert.equal(started.messages[1].content,first.initialMessage);
-  assert.equal((await f.chat('get')).actionId,'tag-suggestion-v1');
+  assert.equal((await f.chat('get',{actionId:'tag-suggestion-v1'})).actionId,'tag-suggestion-v1');
 });
-test('新しい会話は通常モードへ戻り、専用プロンプトを通常チャットへ持ち越さない',async()=>{
-  const {f}=await ready();await f.save({ollamaSystemPrompt:'通常用'});await beginTags(f);
-  const state=await f.chat('reset');assert.equal(state.actionId,'chat');
-  const started=await f.chat('start',{epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'普通の質問'});
+test('新しい会話は選択中のタブだけ初期化し、通常プロンプトを専用会話へ混ぜない',async()=>{
+  const {f}=await ready();await f.save({ollamaSystemPrompt:'通常用'});const tag=await beginTags(f);
+  const state=await f.chat('reset',{actionId:tag.actionId});assert.equal(state.actionId,tag.actionId);
+  const normal=await f.chat('get');
+  const started=await f.chat('start',{epoch:normal.epoch,endpoint:normal.endpoint,model:'local-model',owner:'owner',text:'普通の質問'});
   assert.deepEqual(started.messages,[{role:'system',content:'通常用'},{role:'user',content:'普通の質問'}]);
-  const legacy={...state};delete legacy.actionId;
-  assert.equal(f.context.OshaberiNoteChatState.read(legacy,state.endpoint).actionId,'chat');
-  assert.throws(()=>f.context.OshaberiNoteChatState.read({...state,actionId:'unknown'},state.endpoint));
+  const legacy={...normal};delete legacy.actionId;
+  assert.equal(f.context.OshaberiNoteChatState.read(legacy,normal.endpoint).actionId,'chat');
+  assert.throws(()=>f.context.OshaberiNoteChatState.read({...normal,actionId:'unknown'},normal.endpoint));
 });
-test('専用会話の開始に失敗しても元の会話は消さず、不正タグを推測で送らない',async()=>{
+
+test('タブ作成の保存失敗で既存会話を保持し、不正タグでは専用会話から送信しない',async()=>{
   const {f,patch}=await ready();const old=await f.chat('start',{...patch,text:'keep'});await f.chat('complete',{...patch,id:old.active.id,text:'keep answer'});
   const before=structuredClone(f.data[f.context.OshaberiNoteChatState.key]);
   f.fail=true;await assert.rejects(beginTags(f),/storage failed/);f.fail=false;assert.deepEqual(f.data[f.context.OshaberiNoteChatState.key],before);
+  const tag=await beginTags(f), previous=structuredClone(f.data);
   f.data[f.context.OshaberiNote.settingsKey].tagGroups[0].tags=[null];
-  await assert.rejects(beginTags(f),/登録済みタグに異常/);assert.deepEqual(f.data[f.context.OshaberiNoteChatState.key],before);
+  await assert.rejects(f.chat('start',{actionId:tag.actionId,epoch:tag.epoch,endpoint:tag.endpoint,model:'local-model',owner:'owner',text:'提案して'}),/登録済みタグに異常/);
+  assert.deepEqual(f.data[f.context.OshaberiNoteChatState.key],previous[f.context.OshaberiNoteChatState.key]);
 });
+test('通常とタグの履歴・送信内容を分離し、初期化とプロンプト変更は通常会話だけに作用する',async()=>{
+  const {f}=await ready();await f.save({ollamaSystemPrompt:'通常専用'});
+  const normal=await f.chat('get'), np={actionId:'chat',epoch:normal.epoch,endpoint:normal.endpoint,model:'local-model',owner:'owner'};
+  const n=await f.chat('start',{...np,text:'通常の秘密'});await f.chat('complete',{...np,id:n.active.id,text:'通常の回答'});
+  const tag=await beginTags(f),tp={...np,actionId:tag.actionId,epoch:tag.epoch};
+  const t=await f.chat('start',{...tp,text:'タグの質問'});assert.ok(t.messages.every(m=>!m.content.includes('通常の秘密')&&!m.content.includes('通常専用')));
+  await f.chat('complete',{...tp,id:t.active.id,text:'[#画像生成]'});
+  assert.equal((await f.chat('get')).turns[0].user,'通常の秘密');
+  assert.equal((await f.chat('select',{actionId:tag.actionId,owner:'owner'})).initialMessage,undefined);
+  await f.save({ollamaSystemPrompt:'変更した通常専用'});
+  assert.equal((await f.chat('get')).turns.length,0);
+  assert.equal((await f.chat('get',{actionId:tag.actionId})).turns[0].user,'タグの質問');
+  await f.chat('reset',{actionId:tag.actionId});assert.equal((await f.chat('get',{actionId:tag.actionId})).actionId,tag.actionId);
+  assert.equal((await f.chat('get')).turns.length,0);
+});
+
+test('旧単一のタグ会話を移行し、通常タブを初期表示しても履歴を失わない',async()=>{
+  const {f,patch}=await ready(),api=f.context.OshaberiNoteChatState,legacy=api.fresh(patch.endpoint,'tag-suggestion-v1');
+  legacy.approvedUrl=patch.endpoint;legacy.turns=[{user:'旧タグ会話',assistant:'[#旧候補]',status:'complete'}];
+  f.data[api.key]=legacy;
+  const normal=await f.chat('get');assert.equal(normal.actionId,'chat');assert.deepEqual(normal.turns,[]);
+  const tag=await beginTags(f);assert.equal(tag.turns[0].user,'旧タグ会話');assert.equal(tag.initialMessage,undefined);
+  assert.equal(f.data[api.key].schemaVersion,2);assert.equal(f.data[api.key].conversations.chat.epoch,normal.epoch);
+});
+
+test('タブ切替で自身の生成だけを中断し、遅延保存・他タブへの生成混入を拒否する',async()=>{
+  const {f,patch}=await ready();const old=await f.chat('start',{...patch,text:'途中の通常会話'});
+  const tag=await beginTags(f);assert.equal((await f.chat('get')).turns[0].status,'interrupted');
+  const tp={...patch,actionId:tag.actionId,epoch:tag.epoch},started=await f.chat('start',{...tp,text:'タグ会話'});
+  await assert.rejects(f.chat('complete',{...patch,id:old.active.id,text:'遅延した回答'}));
+  assert.equal((await f.chat('get',{actionId:tag.actionId})).active.id,started.active.id);
+  f.connect('other');await f.chat('select',{actionId:'chat',owner:'other'});
+  assert.equal((await f.chat('get',{actionId:tag.actionId})).active.id,started.active.id);
+  await assert.rejects(f.chat('start',{...patch,owner:'other',text:'二重生成'}),/生成中/);
+  await f.chat('stop',{owner:'owner'});assert.equal((await f.chat('get',{actionId:tag.actionId})).active,null);
+});
+
+test('接続先変更は全タブを消し、JSON移行による許可解除は全タブへ適用する',async()=>{
+  const {f,patch}=await ready();const n=await f.chat('start',{...patch,text:'通常の履歴'});await f.chat('complete',{...patch,id:n.active.id,text:'通常'});
+  const tag=await beginTags(f),tp={...patch,actionId:tag.actionId,epoch:tag.epoch};
+  await f.chat('start',{...tp,text:'タグの履歴'});
+  await f.save({enabled:false});assert.equal((await f.chat('get',{actionId:tag.actionId})).turns[0].status,'interrupted');
+  await f.save({enabled:true});await f.chat('revoke');
+  for(const actionId of ['chat',tag.actionId]) assert.equal((await f.chat('get',{actionId})).approvedUrl,'');
+  await f.save({ollamaUrl:'http://192.168.1.9:11434'});
+  for(const actionId of ['chat',tag.actionId]) {const state=await f.chat('get',{actionId});assert.equal(state.turns.length,0);assert.equal(state.approvedUrl,'');}
+});
+
+test('履歴上限を各タブで独立して適用し、片方の初期化失敗で両方を保持する',async()=>{
+  const {f,patch}=await ready();const tag=await beginTags(f);
+  for(const [actionId,epoch] of [['chat',patch.epoch],[tag.actionId,tag.epoch]]) {
+    const p={...patch,actionId,epoch};
+    for(let i=0;i<12;i++){const state=await f.chat('start',{...p,text:actionId+'-'+i});await f.chat('complete',{...p,id:state.active.id,text:'応答'});}
+  }
+  for(const actionId of ['chat',tag.actionId]) {const state=await f.chat('get',{actionId});assert.equal(state.turns.length,10);assert.equal(state.droppedTurns,2);}
+  const before=structuredClone(f.data);f.fail=true;await assert.rejects(f.chat('reset',{actionId:tag.actionId}),/storage failed/);f.fail=false;assert.deepEqual(f.data,before);
+  await f.chat('reset',{actionId:tag.actionId});assert.equal((await f.chat('get')).turns.length,10);
+});
+
+test('再起動後は非表示タブの孤立した生成も中断し、通常タブで会話を再開できる',async()=>{
+  const {f,patch}=await ready(),api=f.context.OshaberiNoteChatState,tag=await beginTags(f);
+  const stored=f.data[api.key].conversations[tag.actionId];stored.turns=[{user:'孤立した生成',assistant:'途中',status:'pending'}];stored.active={id:'old',owner:'closed'};
+  await f.chat('get');assert.equal((await f.chat('get',{actionId:tag.actionId})).turns[0].status,'interrupted');
+  assert.ok((await f.chat('start',{...patch,text:'再開'})).active);
+});
+
+test('一方のタブが壊れた場合は送信を拒否し、そのタブだけの初期化で復旧できる',async()=>{
+  const {f,patch}=await ready(),api=f.context.OshaberiNoteChatState;
+  const n=await f.chat('start',{...patch,text:'保持する通常会話'});await f.chat('complete',{...patch,id:n.active.id,text:'通常回答'});
+  const tag=await beginTags(f);f.data[api.key].conversations[tag.actionId].turns=[{user:'壊れた回答',assistant:{},status:'complete'}];
+  await assert.rejects(f.chat('start',{...patch,text:'送信しない'}),/不正/);
+  await f.chat('reset',{actionId:tag.actionId});assert.equal((await f.chat('get')).turns[0].user,'保持する通常会話');
+});
+
 function client(chunks, options = {}) {
   let request;
   const c = vm.createContext({ URL, TextDecoder, TextEncoder, console, fetch: async (url, init) => {
