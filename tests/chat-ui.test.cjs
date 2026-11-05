@@ -67,6 +67,64 @@ test('権限拒否時にはAPIへ接続せず、既存の設定・お気に入�
   assert.equal(f.requests.length, 0); assert.equal(n.get('chat-send').disabled, true);
   n.get('nav-tags').onclick(); assert.equal(n.get('panel-tags').hidden, false); assert.equal(n.get('add-tag').disabled, false);
 });
+
+test('タグの提案は新規の専用会話を自動送信し、通常プロンプトを保持する', async t => {
+  const f = await fixture(t, { reply: '[#読書]' }), n = f.nodes;
+  const action = n.get('chat-actions').children[0];
+  assert.equal(action.textContent, 'タグの提案'); assert.equal(action.disabled, true);
+  await f.save({ ollamaSystemPrompt: '通常の調査条件' }); await flush();
+  n.get('connect-ollama').onclick(); await flush();
+  n.get('chat-input').value = '以前の質問'; n.get('chat-form').fire('submit'); await flush();
+  n.get('chat-input').value = '以前の下書き';
+  await action.onclick(); await flush();
+  assert.equal(f.confirmations.length, 1);
+  assert.match(n.get('chat-heading').textContent, /タグの提案 v1.0/);
+  const posts = () => f.requests.filter(item => item.url.endsWith('/api/chat')).map(item => JSON.parse(item.init.body));
+  assert.equal(posts().length, 2);
+  assert.equal(posts()[1].messages.length, 2);
+  assert.match(posts()[1].messages[0].content, /^# タグ提案アシスタント/);
+  assert.equal(posts()[1].messages[1].content, 'noteで面白そうなタグを提案してください。');
+  assert.doesNotMatch(n.get('chat-messages').textContent, /以前の質問|タグ提案アシスタント/);
+  assert.equal(n.get('chat-input').value, ''); assert.equal(f.document.activeElement, n.get('chat-input'));
+  await f.send({ type: 'tag-operation', patch: { type: 'ADD_TAG', groupId: 'group4', tag: '読書' } }); await flush();
+  n.get('chat-input').value = '今度は技術で'; n.get('chat-form').fire('submit'); await flush();
+  assert.ok(posts()[2].messages[0].content.includes('["読書"]'));
+  assert.equal(posts()[2].messages.filter(item => item.role === 'system').length, 1);
+  assert.equal((await f.settings()).ollamaSystemPrompt, '通常の調査条件');
+  await n.get('chat-new').onclick(); await flush();
+  assert.equal((await f.chat('get')).actionId, 'chat');
+  n.get('chat-input').value = '通常へ'; n.get('chat-form').fire('submit'); await flush();
+  assert.deepEqual(posts()[3].messages, [{ role: 'system', content: '通常の調査条件' }, { role: 'user', content: '通常へ' }]);
+});
+
+test('専用会話への切替を取り消すと履歴と下書きを保持する', async t => {
+  const f = await fixture(t, { confirm: false }), n = f.nodes;
+  n.get('connect-ollama').onclick(); await flush();
+  n.get('chat-input').value = '以前の質問'; n.get('chat-form').fire('submit'); await flush();
+  n.get('chat-input').value = '下書き';
+  await n.get('chat-actions').children[0].onclick(); await flush();
+  assert.equal(f.requests.filter(item => item.url.endsWith('/api/chat')).length, 1);
+  assert.equal((await f.chat('get')).actionId, 'chat');
+  assert.match(n.get('chat-messages').textContent, /以前の質問/); assert.equal(n.get('chat-input').value, '下書き');
+});
+
+test('生成中の専用会話への切替は古い生成を中断し、連打でも最初の質問を一度だけ送る', async t => {
+  let count = 0, aborted = false;
+  const f = await fixture(t, { stream: init => {
+    if (++count > 1) return new Response(JSON.stringify({ message: { role: 'assistant', content: '[#新候補]' }, done: true }) + '\n');
+    return new Response(new ReadableStream({ start(controller) {
+      init.signal.addEventListener('abort', () => { aborted = true; controller.error(new DOMException('aborted', 'AbortError')); });
+    } }));
+  } }), n = f.nodes;
+  n.get('connect-ollama').onclick(); await flush();
+  n.get('chat-input').value = '古い生成'; n.get('chat-form').fire('submit'); await flush();
+  const action = n.get('chat-actions').children[0]; assert.equal(action.disabled, false);
+  const first = action.onclick(), second = action.onclick(); await Promise.all([first, second]); await flush();
+  assert.equal(aborted, true); assert.equal(count, 2);
+  const state = await f.chat('get'); assert.equal(state.actionId, 'tag-suggestion-v1'); assert.equal(state.turns.length, 1);
+  assert.equal(state.turns[0].status, 'complete'); assert.equal(state.turns[0].assistant, '[#新候補]');
+  assert.match(n.get('chat-status').textContent, /完了/); assert.equal(n.get('chat-send').disabled, false);
+});
 test('Ctrl+Enterは送信ボタンと同じ処理で送信し、連続操作で二重送信しない', async t => {
   const f = await fixture(t), n = f.nodes;
   n.get('connect-ollama').onclick(); await flush();

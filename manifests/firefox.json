@@ -2,6 +2,7 @@
   "background": {
     "scripts": [
       "src/common.js",
+      "src/chat-actions.js",
       "src/chat-state.js",
       "src/platform/browser-api.js",
       "src/routing.js",

@@ -8,6 +8,9 @@
   let modelNames = [], probeRevision = 0, visible = !byId("panel-chat").hidden;
   let llmVisible = !byId("panel-llm").hidden;
   let promptDirty = false, promptBaseline = "";
+  let actionStarting = false;
+  let sendSequence = 0;
+  const actionButtons = [];
   const status = text => { byId("chat-status").textContent = text; };
   const connectionStatus = text => { byId("llm-connection-status").textContent = text; };
   const tagUI = globalThis.OshaberiNoteChatTags.create({ document, platform, getSettings: () => settings,
@@ -23,15 +26,17 @@
   }
   function controls() {
     const active = Boolean(state?.active);
-    byId("connect-ollama").disabled = busy || !settings?.enabled || active || blocked;
-    byId("chat-model").disabled = busy || !ready || blocked;
-    byId("chat-input").disabled = busy || !settings?.enabled || blocked;
-    byId("chat-send").disabled = busy || active || !ready || !settings?.ollamaModel || !settings?.enabled || blocked;
+    const working = busy || actionStarting;
+    byId("connect-ollama").disabled = working || !settings?.enabled || active || blocked;
+    byId("chat-model").disabled = working || !ready || blocked;
+    byId("chat-input").disabled = working || !settings?.enabled || blocked;
+    byId("chat-send").disabled = working || active || !ready || !settings?.ollamaModel || !settings?.enabled || blocked;
     byId("chat-stop").disabled = !active;
-    byId("chat-new").disabled = busy || !settings;
-    byId("save-ollama-url").disabled = busy || !settings;
-    byId("system-prompt").disabled = busy || !settings;
-    byId("save-system-prompt").disabled = busy || !settings;
+    byId("chat-new").disabled = working || !settings;
+    byId("save-ollama-url").disabled = working || !settings;
+    byId("system-prompt").disabled = working || !settings;
+    byId("save-system-prompt").disabled = working || !settings;
+    for (const button of actionButtons) button.disabled = working || !ready || !settings?.ollamaModel || !settings?.enabled || blocked;
     tagUI.refresh();
   }
   function abort() { requestAbort?.abort(); requestAbort = undefined; probeRevision++; }
@@ -53,6 +58,8 @@
     if (state && state.epoch !== next.epoch) { abort(); byId("chat-input").value = ""; tagUI.close(); }
     if (generatingId && next.active?.id !== generatingId) abort();
     state = next;
+    const action = globalThis.OshaberiNoteChatActions.find(state.actionId);
+    byId("chat-heading").textContent = action ? `おしゃべり（${action.title} v${action.version}）` : "おしゃべり";
     byId("chat-history-info").textContent = `履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。${state.droppedTurns ? ` これまでに${state.droppedTurns}往復を保存から外しました。` : ""}${state.contextTrimmedTurns ? ` 直近の送信では、保存履歴のうち古い${state.contextTrimmedTurns}往復を送信対象から外しました。` : ""}`;
     const container = byId("chat-messages"), atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
     container.replaceChildren();
@@ -80,6 +87,24 @@
     render(await call("get"));
   }
   function patch(extra = {}) { return { epoch: state.epoch, endpoint: settings.ollamaUrl, ...extra }; }
+  for (const action of globalThis.OshaberiNoteChatActions.definitions) {
+    const button = document.createElement("button"); button.type = "button"; button.textContent = action.title; button.disabled = true;
+    button.setAttribute("data-chat-action", action.id); button.setAttribute("title", "専用プロンプトで新しい会話を開始して送信します");
+    button.onclick = async () => {
+      if (button.disabled || actionStarting || !visible || !settings || !state) return;
+      if ((state?.turns.length || byId("chat-input").value) && !confirm(`現在の会話と未送信入力を削除し、「${action.title}」の新しい会話を開始して送信しますか？`)) return;
+      actionStarting = true; busy = true; sendSequence++; abort(); controls();
+      let send = false;
+      try {
+        const next = await call("begin-action", patch({ actionId: action.id, model: settings.ollamaModel }));
+        render(next); byId("chat-input").value = next.initialMessage;
+        send = visible;
+      } catch (error) { status(error.message); }
+      finally { actionStarting = false; busy = false; controls(); }
+      if (send) byId("chat-form").requestSubmit();
+    };
+    byId("chat-actions").append(button); actionButtons.push(button);
+  }
   async function probe(manual, grant) {
     if (busy || state?.active) return;
     busy = true; blocked = false; ready = false; abort(); controls();
@@ -176,6 +201,7 @@
   });
   byId("chat-form").onsubmit = async event => {
     event.preventDefault(); if (byId("chat-send").disabled) return;
+    const sequence = ++sendSequence;
     connectionHelp();
     busy = true; controls();
     const text = byId("chat-input").value, endpoint = settings.ollamaUrl, model = settings.ollamaModel;
@@ -186,7 +212,7 @@
       const started = await call("start", patch({ text, model, owner }));
       id = started.active.id; epoch = started.epoch; generatingId = id;
       controller.signal.throwIfAborted();
-      if (!visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
+      if (sequence !== sendSequence || !visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
       render(started); byId("chat-input").value = ""; busy = false; controls();
       if (visible && !byId("chat-input").disabled) byId("chat-input").focus({ preventScroll: true });
       status("応答を生成しています…");
@@ -206,18 +232,18 @@
         }
       });
       controller.signal.throwIfAborted();
-      render(await call("complete", { epoch, endpoint, id, owner, model, text: response }));
-      status("応答が完了しました。");
+      const completed = await call("complete", { epoch, endpoint, id, owner, model, text: response });
+      if (sequence === sendSequence) { render(completed); status("応答が完了しました。"); }
     } catch (error) {
       controller.abort();
-      connectionHelp(error);
-      if (error.status === 403) { ready = false; connectionStatus(error.message); }
+      if (sequence === sendSequence) connectionHelp(error);
+      if (sequence === sendSequence && error.status === 403) { ready = false; connectionStatus(error.message); }
       if (id) {
-        try { render(await call("stop", { id, owner })); }
+        try { const stopped = await call("stop", { id, owner }); if (sequence === sendSequence) render(stopped); }
         catch { blocked = true; }
       }
-      status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message}${error.status === 403 ? " 詳細は「LLMの設定」で確認してください。" : ""} 自動再送は行いません。`);
-    } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) generatingId = undefined; busy = false; controls(); }
+      if (sequence === sendSequence) status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message}${error.status === 403 ? " 詳細は「LLMの設定」で確認してください。" : ""} 自動再送は行いません。`);
+    } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) generatingId = undefined; if (sequence === sendSequence) busy = false; controls(); }
   };
   byId("chat-stop").onclick = async () => {
     abort();
@@ -227,7 +253,7 @@
   byId("chat-new").onclick = async () => {
     if (busy) return;
     if (!confirm("現在の会話と未送信入力を削除し、新しい会話を始めますか？")) return;
-    busy = true; abort(); controls();
+    busy = true; sendSequence++; abort(); controls();
     try { render(await call("reset")); byId("chat-input").value = ""; blocked = false; status("新しい会話を始めました。"); }
     catch (error) { status(error.message); }
     finally { busy = false; controls(); }

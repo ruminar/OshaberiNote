@@ -18,7 +18,7 @@ module.exports = function backend() {
       action: { onClicked: event('action') }, tabs: { create: async () => {} }, declarativeNetRequest: { updateDynamicRules: async () => {} }
     }
   });
-  for (const file of ['src/common.js', 'src/chat-state.js', 'src/platform/browser-api.js', 'src/routing.js', 'src/background.js']) vm.runInContext(source(file), context, { filename: file });
+  for (const file of ['src/common.js', 'src/chat-actions.js', 'src/chat-state.js', 'src/platform/browser-api.js', 'src/routing.js', 'src/background.js']) vm.runInContext(source(file), context, { filename: file });
   const sender = { id: 'test', url: 'chrome-extension://test/home.html', frameId: 0, tab: { id: 1 } };
   const send = (message, from = sender) => new Promise((resolve, reject) => {
     const handled = handlers.message[0](message, from, result => result.ok ? resolve(copy(result.settings)) : reject(Object.assign(new Error(result.error), { code: result.code })));

@@ -5,7 +5,7 @@
   const key = "oshaberiNote.chat.v1";
   const limits = Object.freeze({ input: 200000, response: 32000, context: 256000, turns: 10, bytes: 2097152 });
   const bytes = value => new TextEncoder().encode(JSON.stringify(value)).length;
-  function fresh(endpoint) { return { schemaVersion: 1, epoch: crypto.randomUUID(), endpoint, approvedUrl: "", turns: [], active: null, droppedTurns: 0, contextTrimmedTurns: 0 }; }
+  function fresh(endpoint, actionId = "chat") { return { schemaVersion: 1, epoch: crypto.randomUUID(), endpoint, actionId, approvedUrl: "", turns: [], active: null, droppedTurns: 0, contextTrimmedTurns: 0 }; }
   function read(raw, endpoint) {
     if (raw === undefined) return fresh(endpoint);
     // 以前の100往復までの履歴は読み込んだ後、現在の保存範囲へ移行する。
@@ -13,8 +13,9 @@
     if (raw.turns.some(turn => !turn || typeof turn.user !== "string" || !turn.user.trim() || turn.user.length > limits.input || typeof turn.assistant !== "string" || turn.assistant.length > limits.response || !["complete", "interrupted", "pending"].includes(turn.status))) throw new Error("会話履歴の形式が不正です。");
     if (raw.active !== null && (!raw.active || typeof raw.active.id !== "string" || typeof raw.active.owner !== "string" || raw.turns.at(-1)?.status !== "pending")) throw new Error("生成状態が不正です。");
     if (raw.turns.filter(turn => turn.status === "pending").length !== (raw.active ? 1 : 0)) throw new Error("未完了の生成状態が不正です。");
+    if (raw.actionId !== undefined && raw.actionId !== "chat" && !globalThis.OshaberiNoteChatActions?.find(raw.actionId)) throw new Error("未対応の会話の種類です。");
     for (const key of ["droppedTurns", "contextTrimmedTurns"]) if (raw[key] !== undefined && (!Number.isSafeInteger(raw[key]) || raw[key] < 0)) throw new Error("履歴の整理状態が不正です。");
-    return { ...structuredClone(raw), droppedTurns: raw.droppedTurns ?? 0, contextTrimmedTurns: raw.contextTrimmedTurns ?? 0 };
+    return { ...structuredClone(raw), actionId: raw.actionId ?? "chat", droppedTurns: raw.droppedTurns ?? 0, contextTrimmedTurns: raw.contextTrimmedTurns ?? 0 };
   }
   function retainRecent(state, reserve = 0) {
     while (state.turns.length > limits.turns || bytes(state) + reserve > limits.bytes) {
@@ -25,7 +26,8 @@
     return state;
   }
   function messagesFor(state, settings, text) {
-    const system = settings.ollamaSystemPrompt;
+    const system = globalThis.OshaberiNoteChatActions.systemPrompt(state.actionId, settings);
+    if (system.length + text.length > limits.context) throw Object.assign(new Error("システムプロンプトと今回の入力が送信上限を超えています。入力または登録済みタグを整理してください。"), { code: "INVALID_INPUT" });
     let remaining = limits.context - system.length - text.length;
     const complete = state.turns.filter(turn => turn.status === "complete"), selected = [];
     for (let i = complete.length - 1; i >= 0; i--) {
@@ -89,6 +91,15 @@
           state.approvedUrl = settings.ollamaUrl; return save(state);
         }
         await permitted(settings, state);
+        if (operation === "begin-action") {
+          const action = globalThis.OshaberiNoteChatActions.find(patch.actionId);
+          if (!action || !settings.ollamaModel || patch.model !== settings.ollamaModel) throw new Error("会話の種類と使用モデルを確認してください。");
+          const next = fresh(settings.ollamaUrl, action.id); next.approvedUrl = state.approvedUrl;
+          // 送信に必要なデータを検証してから、元の会話を初期化する。
+          messagesFor(next, settings, action.initialMessage);
+          await save(next);
+          return { ...next, initialMessage: action.initialMessage };
+        }
         if (operation === "start") {
           if (state.active) throw new Error("別の画面で応答を生成中です。中止してから再試行してください。");
           if (!settings.ollamaModel || patch.model !== settings.ollamaModel) throw new Error("モデルを選択し直してください。");

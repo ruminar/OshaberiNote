@@ -36,7 +36,7 @@ test("FirefoxのManifestだけ背景処理・ID・Android対応・データ収�
   assert.equal(chromium.background.service_worker, "src/background.js");
   assert.equal(chromium.background.scripts, undefined);
   assert.equal(firefox.background.service_worker, undefined);
-  assert.deepEqual(firefox.background.scripts, ["src/common.js", "src/chat-state.js", "src/platform/browser-api.js", "src/routing.js", "src/background.js"]);
+  assert.deepEqual(firefox.background.scripts, ["src/common.js", "src/chat-actions.js", "src/chat-state.js", "src/platform/browser-api.js", "src/routing.js", "src/background.js"]);
   assert.equal(chromium.browser_specific_settings, undefined);
   assert.equal(firefox.browser_specific_settings.gecko_android, undefined);
   assert.equal(firefox.browser_specific_settings.gecko.id, "oshaberi-note@ruminar");
