@@ -181,7 +181,7 @@ async function beginTags(f) {
   const current=await f.chat('get');
   return f.chat('begin-action',{epoch:current.epoch,endpoint:current.endpoint,model:'local-model',actionId:'tag-suggestion-v1'});
 }
-test('タグ提案v1.0は全4グループのタグだけを重複除去してsystemへ入れる',async()=>{
+test('タグ提案は全4グループのタグだけを重複除去してsystemへ入れる',async()=>{
   const {f}=await ready(),core=f.context.OshaberiNote;
   await f.save({ollamaSystemPrompt:'通常の研究用プロンプト'});
   const raw=f.data[core.settingsKey];raw.tagSchemaVersion=5;

@@ -78,7 +78,7 @@ test('タグの提案は新規の専用会話を自動送信し、通常プロ�
   n.get('chat-input').value = '以前の下書き';
   await action.onclick(); await flush();
   assert.equal(f.confirmations.length, 1);
-  assert.match(n.get('chat-heading').textContent, /タグの提案 v1.0/);
+  assert.match(n.get('chat-heading').textContent, /タグの提案 v1\.2/);
   const posts = () => f.requests.filter(item => item.url.endsWith('/api/chat')).map(item => JSON.parse(item.init.body));
   assert.equal(posts().length, 2);
   assert.equal(posts()[1].messages.length, 2);
@@ -106,6 +106,38 @@ test('専用会話への切替を取り消すと履歴と下書きを保持す�
   assert.equal(f.requests.filter(item => item.url.endsWith('/api/chat')).length, 1);
   assert.equal((await f.chat('get')).actionId, 'chat');
   assert.match(n.get('chat-messages').textContent, /以前の質問/); assert.equal(n.get('chat-input').value, '下書き');
+});
+
+test('タグ提案の初回POSTにも全4グループの最新タグを重複除去して付与する', async t => {
+  const f = await fixture(t), n = f.nodes;
+  for (const [groupId, tag] of [['group1', 'ComfyUI'], ['group2', 'AIマンガ'], ['group3', 'ショートショート'], ['group4', 'ComfyUI']])
+    await f.send({ type: 'tag-operation', patch: { type: 'ADD_TAG', groupId, tag } });
+  await flush(); n.get('connect-ollama').onclick(); await flush();
+  await n.get('chat-actions').children[0].onclick(); await flush();
+  const posts = f.requests.filter(item => item.url.endsWith('/api/chat'));
+  assert.equal(posts.length, 1);
+  const { messages } = JSON.parse(posts[0].init.body);
+  assert.deepEqual(messages.map(item => item.role), ['system', 'user']);
+  const data = messages[0].content.split('現在登録されているタグ：\\\n')[1].split('\n')[0];
+  assert.deepEqual(JSON.parse(data), ['ComfyUI', 'AIマンガ', 'ショートショート']);
+  assert.equal(messages[1].content, 'noteで面白そうなタグを提案してください。');
+});
+
+test('「他は何がありますか？」にも専用systemと直前の完了済み会話を原文で送る', async t => {
+  const previous = '[#AIイラスト]：ComfyUIと関連する画像生成。\n[#掌編]：短い物語。';
+  const f = await fixture(t, { reply: previous }), n = f.nodes;
+  for (const tag of ['ComfyUI', 'AIマンガ', 'ショートショート'])
+    await f.send({ type: 'tag-operation', patch: { type: 'ADD_TAG', groupId: 'group1', tag } });
+  await flush(); n.get('connect-ollama').onclick(); await flush();
+  await n.get('chat-actions').children[0].onclick(); await flush();
+  const first = JSON.parse(f.requests.filter(item => item.url.endsWith('/api/chat'))[0].init.body);
+  n.get('chat-input').value = '他は何がありますか？'; n.get('chat-form').fire('submit'); await flush();
+  const second = JSON.parse(f.requests.filter(item => item.url.endsWith('/api/chat'))[1].init.body);
+  assert.equal(second.messages[0].role, 'system');
+  assert.equal(second.messages[0].content, first.messages[0].content);
+  assert.ok(second.messages[0].content.includes('["ComfyUI","AIマンガ","ショートショート"]'));
+  assert.deepEqual(second.messages.slice(1), [first.messages[1], { role: 'assistant', content: previous }, { role: 'user', content: '他は何がありますか？' }]);
+  assert.equal((await f.chat('get')).actionId, 'tag-suggestion-v1');
 });
 
 test('生成中の専用会話への切替は古い生成を中断し、連打でも最初の質問を一度だけ送る', async t => {
