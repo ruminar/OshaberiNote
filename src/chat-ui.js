@@ -81,11 +81,28 @@
       for (const [label, content] of [["あなた", turn.user], [turn.status === "complete" ? "AI" : turn.status === "pending" ? "AI（生成中・未完了）" : "AI（中断・次回送信の対象外）", turn.assistant]]) {
         const article = document.createElement("article"), heading = document.createElement("h3"), text = document.createElement("p");
         heading.textContent = label;
+        const header = document.createElement("div"), copy = document.createElement("button"), feedback = document.createElement("span");
+        header.className = "chat-message-heading";
+        copy.type = "button"; copy.className = "secondary chat-copy"; copy.textContent = "コピー";
+        copy.setAttribute("aria-label", label === "あなた" ? "自分の発言をコピー" : "AIの回答をコピー");
+        copy.disabled = !content || label === "AI（生成中・未完了）";
+        feedback.className = "chat-copy-status"; feedback.setAttribute("role", "status");
+        copy.onclick = async () => {
+          if (copy.disabled) return;
+          copy.disabled = true; feedback.textContent = "";
+          try {
+            await navigator.clipboard.writeText(content);
+            if (copy.isConnected) feedback.textContent = "コピーしました。";
+          } catch {
+            if (copy.isConnected) feedback.textContent = "コピーできませんでした。本文を選択してコピーしてください。";
+          } finally { copy.disabled = false; }
+        };
+        header.append(heading, copy, feedback);
         if (label === "AI" && content) {
           const epoch = state.epoch, user = turn.user;
           tagUI.render(text, content, () => state?.epoch === epoch && state.turns.some(item => item.status === "complete" && item.user === user && item.assistant === content));
         } else text.textContent = content || "（応答なし）";
-        article.append(heading, text); container.append(article);
+        article.append(header, text); container.append(article);
       }
     }
     if (!state.turns.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "新しい会話です。メッセージを入力してください。"; container.append(empty); }

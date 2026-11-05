@@ -3,12 +3,12 @@ const backend = require('./helpers/chat.cjs'), { source } = backend;
 const { documentFromHtml } = require('./helpers/dom.cjs');
 const flush = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)); };
 async function fixture(t, options = {}) {
-  const f = backend(), c = f.context, requests = [], grants = [], events = new Map(), confirmations = [];
+  const f = backend(), c = f.context, requests = [], grants = [], events = new Map(), confirmations = [], copies = [];
   await f.save({ ollamaModel: 'local' });
   const document = documentFromHtml(source('home.html'));
   const timers = new Set();
   Object.assign(c, { document, location: { hash: options.hash ?? '', assign() {} }, AbortController, AbortSignal, TextDecoder,
-    navigator: { clipboard: { writeText: async () => {} } },
+    navigator: { clipboard: { writeText: async text => { copies.push(text); await options.copyGate; if (options.copyError) throw new Error('clipboard denied'); } } },
     confirm: text => { confirmations.push(text); return options.confirm !== false; },
     setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout,
     setInterval: () => 1, clearInterval() {}, addEventListener: (type, fn) => events.set(type, fn),
@@ -36,7 +36,7 @@ async function fixture(t, options = {}) {
   for (const file of ['src/home.js', 'src/ollama.js', 'src/chat-tags.js', 'src/chat-ui.js']) vm.runInContext(source(file), c, { filename: file });
   t.after(() => { for (const timer of timers) clearTimeout(timer); events.get('pagehide')?.(); });
   await flush();
-  return { ...f, c, document, nodes: document.nodes, requests, grants, confirmations, events };
+  return { ...f, c, document, nodes: document.nodes, requests, grants, confirmations, copies, events };
 }
 test('ホームはおしゃべり初期表示、歯車の#settingsは設定を表示し、初回に接続しない', async t => {
   for (const hash of ['', '#settings']) {
@@ -374,13 +374,36 @@ test('送信直後に入力へフォーカスを戻し、生成中の下書き�
   finish();await flush();assert.equal(n.get('chat-input').value,'次の質問の下書き');assert.equal(n.get('chat-send').disabled,false);
   assert.equal(f.document.activeElement,n.get('chat-input'));
 });
+test('自分の発言とAI回答は表示装飾を含めず、改行・タグ・HTML文字列を原文のままコピーする',async t=>{
+  const user='  自分の文章\n改行と余白  ',reply='回答\n[#読書] <script>文字列</script>';
+  const f=await fixture(t,{reply}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value=user;n.get('chat-form').fire('submit');await flush();
+  assert.deepEqual(f.copies,[]);
+  const rows=n.get('chat-messages').children;
+  await rows[0].querySelector('button[aria-label="自分の発言をコピー"]').onclick();
+  await rows[1].querySelector('button[aria-label="AIの回答をコピー"]').onclick();
+  assert.deepEqual(f.copies,[user,reply]);assert.match(rows[1].textContent,/コピーしました/);
+  assert.equal((await f.chat('get')).turns[0].assistant,reply);
+  assert.equal(n.get('chat-tag-dialog').open,undefined);
+});
+
+test('コピー中の連打を止め、失敗を表示して会話と再試行を保つ',async t=>{
+  let release;const copyGate=new Promise(resolve=>{release=resolve;});
+  const f=await fixture(t,{copyGate,copyError:true}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='保持する発言';n.get('chat-form').fire('submit');await flush();
+  const button=n.get('chat-messages').querySelector('button[aria-label="自分の発言をコピー"]');
+  const pending=button.onclick();button.onclick();assert.equal(f.copies.length,1);assert.equal(button.disabled,true);
+  release();await pending;assert.equal(button.disabled,false);assert.match(n.get('chat-messages').textContent,/コピーできませんでした/);
+  assert.equal((await f.chat('get')).turns[0].user,'保持する発言');assert.equal(n.get('chat-send').disabled,false);
+});
+
 test('完了したAI回答のタグだけをボタン化し、検索と実際の4グループを選べる',async t=>{
   const reply='1. [#週末の過ごし方]：週末の案です。\n2. [#a/b? x]：別の案。';
   const f=await fixture(t,{reply}),n=f.nodes;
   await f.c.OshaberiNotePlatform.tag({type:'RENAME_TAG_GROUP',groupId:'group2',name:'読み物',expectedName:''});await flush();
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='[#ユーザーの入力]';n.get('chat-form').fire('submit');await flush();
-  const rows=n.get('chat-messages').children,buttons=rows[1].querySelectorAll('button');
-  assert.equal(rows[0].querySelectorAll('button').length,0);assert.equal(buttons.length,2);
+  const rows=n.get('chat-messages').children,buttons=rows[1].querySelectorAll('button[aria-haspopup="dialog"]');
+  assert.equal(rows[0].querySelectorAll('button[aria-haspopup="dialog"]').length,0);assert.equal(buttons.length,2);
   assert.equal(rows[1].querySelector('p').textContent,reply);assert.equal((await f.chat('get')).turns[0].assistant,reply);
   assert.deepEqual((await f.settings()).tagGroups[1].tags,[]);
   buttons[0].onclick();assert.equal(n.get('chat-tag-dialog').open,true);
@@ -404,12 +427,12 @@ test('生成途中と中断した応答はボタン化せず、完了応答のHT
     init.signal.addEventListener('abort',()=>controller.error(new DOMException('aborted','AbortError')));
   }}))}),n=f.nodes;
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='hi';n.get('chat-form').fire('submit');await flush();
-  assert.equal(n.get('chat-messages').querySelectorAll('button').length,0);
-  await n.get('chat-stop').onclick();await flush();assert.equal(n.get('chat-messages').querySelectorAll('button').length,0);
+  assert.equal(n.get('chat-messages').querySelectorAll('button[aria-haspopup="dialog"]').length,0);
+  await n.get('chat-stop').onclick();await flush();assert.equal(n.get('chat-messages').querySelectorAll('button[aria-haspopup="dialog"]').length,0);
   const html=await fixture(t,{reply:'<img src=x onerror=alert(1)> [#<script>]'}),h=html.nodes;
   h.get('connect-ollama').onclick();await flush();h.get('chat-input').value='hi';h.get('chat-form').fire('submit');await flush();
   assert.equal(h.get('chat-messages').querySelector('img'),null);assert.equal(h.get('chat-messages').querySelector('script'),null);
-  assert.equal(h.get('chat-messages').querySelector('button').textContent,'[#<script>]');
+  assert.equal(h.get('chat-messages').querySelector('button[aria-haspopup="dialog"]').textContent,'[#<script>]');
 });
 test('タグ解析は既知の表記だけを扱い、表示原文を維持して最大100個まで操作化する',async t=>{
   const f=await fixture(t),parse=f.c.OshaberiNoteChatTags.parts;
@@ -420,11 +443,11 @@ test('登録中の連打を止め、結果未確認なら自動再送せず登�
   let release;const gate=new Promise(resolve=>{release=resolve;});
   const f=await fixture(t,{reply:'[#tag]',tagGate:gate}),n=f.nodes;
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='hi';n.get('chat-form').fire('submit');await flush();
-  n.get('chat-messages').querySelector('button').onclick();const button=n.get('chat-tag-groups').children[0];
+  n.get('chat-messages').querySelector('button[aria-haspopup="dialog"]').onclick();const button=n.get('chat-tag-groups').children[0];
   button.onclick();button.onclick();assert.equal(button.disabled,true);release();await flush();assert.deepEqual((await f.settings()).tagGroups[0].tags,['tag']);
   const uncertain=await fixture(t,{reply:'[#tag]',tagError:true}),u=uncertain.nodes;
   u.get('connect-ollama').onclick();await flush();u.get('chat-input').value='hi';u.get('chat-form').fire('submit');await flush();
-  u.get('chat-messages').querySelector('button').onclick();u.get('chat-tag-groups').children[0].onclick();await flush();
+  u.get('chat-messages').querySelector('button[aria-haspopup="dialog"]').onclick();u.get('chat-tag-groups').children[0].onclick();await flush();
   assert.match(u.get('chat-tag-status').textContent,/自動再送は行いません/);assert.equal(u.get('chat-tag-groups').children[1].disabled,true);
   assert.deepEqual((await uncertain.settings()).tagGroups[0].tags,[]);
 });
