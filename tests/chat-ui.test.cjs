@@ -55,6 +55,7 @@ test('接続・モデル・送信を通して実モジュールで会話し、HT
   assert.equal(n.get('chat-messages').querySelector('script'), null);
   assert.equal((await f.chat('get')).turns[0].status, 'complete');
   assert.equal(n.get('chat-input').value, '');
+  assert.equal(f.document.activeElement, n.get('chat-input'));
   assert.deepEqual(JSON.parse(f.requests[1].init.body).messages, [{ role: 'user', content: 'hello\nworld' }]);
 });
 test('権限拒否時にはAPIへ接続せず、既存の設定・お気に入りを利用できる', async t => {
@@ -235,4 +236,16 @@ test('接続・モデル・説明・履歴案内をLLM設定に置き、設定�
   n.get('nav-chat').onclick();assert.equal(n.get('chat-send').disabled,false);
   n.get('chat-input').value='設定から戻って会話';n.get('chat-form').fire('submit');await flush();
   assert.equal((await f.chat('get')).turns[0].status,'complete');assert.match(n.get('chat-status').textContent,/応答が完了/);
+});
+test('送信直後に入力へフォーカスを戻し、生成中の下書きを応答完了後も保持する',async t=>{
+  let finish;
+  const f=await fixture(t,{stream:()=>new Response(new ReadableStream({start(controller){finish=()=>{controller.enqueue(new TextEncoder().encode(JSON.stringify({message:{role:'assistant',content:'回答'},done:true})+'\n'));controller.close();};}}))}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();
+  n.get('chat-input').value='最初の質問';n.get('chat-send').focus();n.get('chat-form').fire('submit');await flush();
+  assert.equal(f.document.activeElement,n.get('chat-input'));assert.equal(n.get('chat-input').disabled,false);
+  assert.equal(n.get('chat-send').disabled,true);
+  n.get('chat-input').value='次の質問の下書き';n.get('chat-input').fire('keydown',{key:'Enter',ctrlKey:true});
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,1);
+  finish();await flush();assert.equal(n.get('chat-input').value,'次の質問の下書き');assert.equal(n.get('chat-send').disabled,false);
+  assert.equal(f.document.activeElement,n.get('chat-input'));
 });

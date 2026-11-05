@@ -23,7 +23,7 @@
     const active = Boolean(state?.active);
     byId("connect-ollama").disabled = busy || !settings?.enabled || active || blocked;
     byId("chat-model").disabled = busy || !ready || blocked;
-    byId("chat-input").disabled = busy || active || !settings?.enabled || blocked;
+    byId("chat-input").disabled = busy || !settings?.enabled || blocked;
     byId("chat-send").disabled = busy || active || !ready || !settings?.ollamaModel || !settings?.enabled || blocked;
     byId("chat-stop").disabled = !active;
     byId("chat-new").disabled = busy || !settings;
@@ -180,6 +180,7 @@
       controller.signal.throwIfAborted();
       if (!visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
       render(started); byId("chat-input").value = ""; busy = false; controls();
+      if (visible && !byId("chat-input").disabled) byId("chat-input").focus({ preventScroll: true });
       status("応答を生成しています…");
       const response = await globalThis.OshaberiNoteOllama.chat(endpoint, model, started.messages, controller.signal, async answer => {
         controller.signal.throwIfAborted();
