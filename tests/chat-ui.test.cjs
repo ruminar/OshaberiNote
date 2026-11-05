@@ -374,6 +374,29 @@ test('送信直後に入力へフォーカスを戻し、生成中の下書き�
   finish();await flush();assert.equal(n.get('chat-input').value,'次の質問の下書き');assert.equal(n.get('chat-send').disabled,false);
   assert.equal(f.document.activeElement,n.get('chat-input'));
 });
+test('完了したAI回答の太字とタグ操作を両立し、保存・コピーはMarkdown原文を保持する',async t=>{
+  const reply='**要点整理**\n\n* **評価軸の重要性:** 内容。\n**おすすめ [#読書]**\n**<img src=x onerror=alert(1)>**';
+  const f=await fixture(t,{reply}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='**自分の文章**';n.get('chat-form').fire('submit');await flush();
+  const rows=n.get('chat-messages').children,body=rows[1].querySelector('p');
+  assert.deepEqual(body.querySelectorAll('strong').map(node=>node.textContent),['要点整理','評価軸の重要性:','おすすめ [#読書]','<img src=x onerror=alert(1)>']);
+  assert.equal(body.querySelector('img'),null);assert.equal(rows[0].querySelector('strong'),null);
+  assert.equal(rows[0].querySelector('p').textContent,'**自分の文章**');
+  body.querySelector('button[aria-haspopup="dialog"]').onclick();assert.equal(n.get('chat-tag-dialog').open,true);
+  assert.equal(n.get('chat-tag-heading').textContent,'#読書');
+  await rows[1].querySelector('button[aria-label="AIの回答をコピー"]').onclick();
+  assert.deepEqual(f.copies,[reply]);assert.equal((await f.chat('get')).turns[0].assistant,reply);
+});
+
+test('閉じていない太字・改行をまたぐ強調・タグ名の中の星印は原文で残す',async t=>{
+  const reply='未完了 **見出し\n**行を\nまたぐ**\n[#a**b**]';
+  const f=await fixture(t,{reply}),n=f.nodes;
+  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='確認';n.get('chat-form').fire('submit');await flush();
+  const body=n.get('chat-messages').children[1].querySelector('p');
+  assert.equal(body.querySelectorAll('strong').length,0);assert.equal(body.textContent,reply);
+  assert.equal(body.querySelector('button[aria-haspopup="dialog"]').textContent,'[#a**b**]');
+});
+
 test('自分の発言とAI回答は表示装飾を含めず、改行・タグ・HTML文字列を原文のままコピーする',async t=>{
   const user='  自分の文章\n改行と余白  ',reply='回答\n[#読書] <script>文字列</script>';
   const f=await fixture(t,{reply}),n=f.nodes;

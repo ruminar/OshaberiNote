@@ -1,4 +1,4 @@
-/* AIの出力は文字列のまま保持し、完了後の既知表記だけを手動操作へつなぐ。 */
+/* 原文を保持し、完了したAI回答の太字と既知のタグ表記だけを安全なDOMで表示する。 */
 (() => {
   "use strict";
   const core = globalThis.OshaberiNote;
@@ -63,27 +63,45 @@
     byId("chat-tag-close").onclick = () => dialog.close();
     dialog.addEventListener("close", () => { selected?.trigger.setAttribute("aria-expanded", "false"); selected = undefined; });
     function render(node, content, valid) {
-      const parsed = parts(content);
-      if (!parsed.some(part => part.tag)) { node.textContent = content; return; }
+      let offset = 0;
+      const parsed = parts(content).map(part => { const start = offset; offset += part.text.length; return { ...part, start, end: offset }; });
+      // HTMLとして解釈せず、同一行の **本文** だけをstrongへ変換する。
+      const bold = [...content.matchAll(/(?<![\\*])\*\*(?!\*)(\S(?:[^\r\n]*?\S)?)(?<!\\)\*\*(?!\*)/gu)]
+        .map(match => ({ start: match.index, end: match.index + match[0].length }))
+        .filter(range => !parsed.some(part => part.tag && (
+          (range.start < part.end && range.start + 2 > part.start) ||
+          (range.end - 2 < part.end && range.end > part.start))));
+      if (!parsed.some(part => part.tag) && !bold.length) { node.textContent = content; return; }
       node.replaceChildren();
-      for (const part of parsed) {
-        const child = doc.createElement(part.tag ? "button" : "span"); child.textContent = part.text;
-        if (part.tag) {
-          child.type = "button"; child.className = "chat-tag-button";
-          child.setAttribute("aria-haspopup", "dialog"); child.setAttribute("aria-controls", "chat-tag-dialog");
-          child.setAttribute("aria-expanded", "false"); child.setAttribute("aria-label", `#${part.tag}の操作を選択`);
-          child.onclick = () => {
-            if (!valid() || saving) return;
-            selected = { tag: part.tag, trigger: child, valid };
-            byId("chat-tag-heading").textContent = `#${part.tag}`;
-            byId("chat-tag-search").href = core.tagUrl(part.tag);
-            byId("chat-tag-status").textContent = uncertain ? "登録結果が未確認です。ページを再読み込みして確認してください。" : "";
-            child.setAttribute("aria-expanded", "true");
-            dialog.showModal(); refresh();
-          };
+      function appendRange(parent, start, end) {
+        for (const part of parsed) {
+          const from = Math.max(start, part.start), to = Math.min(end, part.end);
+          if (from >= to) continue;
+          const child = doc.createElement(part.tag ? "button" : "span"); child.textContent = content.slice(from, to);
+          if (part.tag) {
+            child.type = "button"; child.className = "chat-tag-button";
+            child.setAttribute("aria-haspopup", "dialog"); child.setAttribute("aria-controls", "chat-tag-dialog");
+            child.setAttribute("aria-expanded", "false"); child.setAttribute("aria-label", `#${part.tag}の操作を選択`);
+            child.onclick = () => {
+              if (!valid() || saving) return;
+              selected = { tag: part.tag, trigger: child, valid };
+              byId("chat-tag-heading").textContent = `#${part.tag}`;
+              byId("chat-tag-search").href = core.tagUrl(part.tag);
+              byId("chat-tag-status").textContent = uncertain ? "登録結果が未確認です。ページを再読み込みして確認してください。" : "";
+              child.setAttribute("aria-expanded", "true");
+              dialog.showModal(); refresh();
+            };
+          }
+          parent.append(child);
         }
-        node.append(child);
       }
+      let cursor = 0;
+      for (const range of bold) {
+        appendRange(node, cursor, range.start);
+        const strong = doc.createElement("strong"); appendRange(strong, range.start + 2, range.end - 2); node.append(strong);
+        cursor = range.end;
+      }
+      appendRange(node, cursor, content.length);
     }
     return Object.freeze({ render, refresh, close() { if (dialog.open) dialog.close(); } });
   }
