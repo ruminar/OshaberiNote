@@ -81,6 +81,19 @@ test('ブラウザ再起動後は履歴と本文を復元し、古い受け渡�
  assert.notEqual(f.articleData.current.requestSessionId,seed.f.articleData.current.requestSessionId);assert.equal(f.articleData.current.articles[0].body,seed.article.body);
 });
 
+test('記事の121往復を画面に復元し、先頭の記事タイトルから再依頼できる',async t=>{
+ const seed=await articleTransfer();let state=await seed.f.chat('get',{actionId:'article'});
+ state=await seed.f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other',model:'local',text:'要約',requestToken:seed.hash.split('=')[1]});
+ await seed.f.chat('complete',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other',model:'local',id:state.active.id,text:'残しておく最初の回答'});
+ const record=seed.f.articleData.current,template=record.conversation.turns[0];
+ for(let i=0;i<120;i++)record.conversation.turns.push({...template,user:'質問'+i,assistant:'回答'+i,articleAction:'question'});
+ const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:record}),n=f.nodes;
+ assert.equal(n.get('chat-messages').querySelectorAll('article').length,242);assert.match(n.get('chat-history-info').textContent,/往復数の上限はありません/);assert.doesNotMatch(n.get('chat-history-info').textContent,/直近10往復/);
+ await n.get('chat-messages').querySelector('button[aria-haspopup="dialog"]').onclick();await flush();n.get('chat-article-impression').onclick();await flush();
+ assert.equal(n.get('chat-messages').querySelectorAll('article').length,244);assert.match(n.get('chat-messages').textContent,/残しておく最初の回答/);
+ const post=JSON.parse(f.requests.filter(r=>r.url.endsWith('/api/chat')).at(-1).init.body);assert.equal(post.messages.length,2);assert.match(post.messages[1].content,/感想/);
+});
+
 test('共有対象の変更を同期し、入力中や別タブに退避した下書きは確認するまで送らない',async t=>{
  const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,reply:'Aの最初の回答'}),n=f.nodes;
  n.get('chat-input').value='Aについての下書き';n.get('chat-input').fire('input');

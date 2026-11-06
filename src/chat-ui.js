@@ -192,7 +192,8 @@
     byId("chat-input-help").textContent = selectedAction === "article" ? "最大200,000文字。閲覧できる記事本文だけを使います。記事と今回の依頼文がモデルのコンテキストに収まらない場合はエラーにし、本文を自動で切り捨てません。" : "最大200,000文字。記事本文も貼り付けられます。長文や過去の会話は、Ollamaのコンテキスト長によって一部が参照されない場合があります。";
     const action = globalThis.OshaberiNoteChatActions.find(state.actionId);
     byId("chat-heading").textContent = action ? `おしゃべり（${action.title} v${action.version}）` : "おしゃべり";
-    byId("chat-history-info").textContent = `履歴は各会話タブで直近10往復・最大2MiBを保存し、古い分から自動で整理します。${state.droppedTurns ? ` これまでに${state.droppedTurns}往復を保存から外しました。` : ""}${state.contextTrimmedTurns ? ` 直近の送信では、保存履歴のうち古い${state.contextTrimmedTurns}往復を送信対象から外しました。` : ""}`;
+    const historyPolicy = state.actionId === "article" ? "記事の履歴に往復数の上限はありません。履歴は最大2MiBまで保存し、容量を超えると古い分から自動で整理します。記事本文を含む保存データ全体は最大8MiBです。" : "履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。";
+    byId("chat-history-info").textContent = `${historyPolicy}${state.droppedTurns ? ` これまでに${state.droppedTurns}往復を保存から外しました。` : ""}${state.contextTrimmedTurns ? ` 直近の送信では、保存履歴のうち古い${state.contextTrimmedTurns}往復を送信対象から外しました。` : ""}`;
     const container = byId("chat-messages"), previousTop = container.scrollTop || 0;
     container.replaceChildren();
     for (const turn of state.turns) {

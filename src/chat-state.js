@@ -8,8 +8,8 @@
   function fresh(endpoint, actionId = "chat") { return { schemaVersion: 1, epoch: crypto.randomUUID(), endpoint, actionId, approvedUrl: "", turns: [], active: null, droppedTurns: 0, contextTrimmedTurns: 0 }; }
   function readConversation(raw, endpoint) {
     if (raw === undefined) return fresh(endpoint);
-    // 以前の100往復までの履歴は読み込んだ後、現在の保存範囲へ移行する。
-    if (!raw || raw.schemaVersion !== 1 || typeof raw.epoch !== "string" || raw.endpoint !== endpoint || !["", endpoint].includes(raw.approvedUrl) || !Array.isArray(raw.turns) || raw.turns.length > 100 || bytes(raw) > limits.bytes) throw new Error("会話の保存データに異常があります。「新しい会話」で初期化してください。");
+    // 通常・タグ会話の旧形式は100往復まで読む。記事会話は件数では制限しない。
+    if (!raw || raw.schemaVersion !== 1 || typeof raw.epoch !== "string" || raw.endpoint !== endpoint || !["", endpoint].includes(raw.approvedUrl) || !Array.isArray(raw.turns) || (raw.actionId !== "article" && raw.turns.length > 100) || bytes(raw) > limits.bytes) throw new Error("会話の保存データに異常があります。「新しい会話」で初期化してください。");
     if (raw.turns.some(turn => !turn || typeof turn.user !== "string" || !turn.user.trim() || turn.user.length > limits.input || typeof turn.assistant !== "string" || turn.assistant.length > limits.response || !["complete", "interrupted", "pending"].includes(turn.status))) throw new Error("会話履歴の形式が不正です。");
     for (const turn of raw.turns) {
       if (turn.llmText !== undefined && (raw.actionId !== "article" || typeof turn.llmText !== "string" || !turn.llmText.trim() || turn.llmText.length > limits.input)) throw new Error("記事の送信本文が不正です。");
@@ -62,7 +62,7 @@
     return store;
   }
   function retainRecent(state, reserve = 0) {
-    while (state.turns.length > limits.turns || bytes(state) + reserve > limits.bytes) {
+    while ((state.actionId !== "article" && state.turns.length > limits.turns) || bytes(state) + reserve > limits.bytes) {
       if (state.turns.length <= 1 || state.turns[0].status === "pending") throw new Error("最新の入力を保存できません。入力を短くしてください。");
       state.turns.shift();
       state.droppedTurns = Math.min(Number.MAX_SAFE_INTEGER, state.droppedTurns + 1);
@@ -128,7 +128,7 @@
           if (item.active && port.isOwnerConnected && !port.isOwnerConnected(item.active.owner)) { interrupt(item); orphan = true; }
         }
         // 初回生成したepochと旧単一会話の移行も、同じ保存キューで確定する。
-        if (orphan || raw?.schemaVersion !== 2 || !Object.hasOwn(store.conversations, id) || state.turns.length > limits.turns) return save(store, state);
+        if (orphan || raw?.schemaVersion !== 2 || !Object.hasOwn(store.conversations, id) || (id !== "article" && state.turns.length > limits.turns)) return save(store, state);
         return view(store, state);
       }
       if (operation === "select") {

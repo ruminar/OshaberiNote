@@ -176,14 +176,14 @@ test('自由入力は共有の最新区間だけを使い、古い対象から�
  await f.chat('reset',{actionId:'article'});await assert.rejects(ask(f,aId),/未選択/);
 });
 
-test('起点が10往復から消えても区間と記事本文を維持し、中断回答と偽の参照を混ぜない',async()=>{
+test('10往復を超えても起点と記事本文を維持し、中断回答と偽の参照を混ぜない',async()=>{
  const f=await ready(),a=article(),first=await start(f,await importArticle(f,a)),id=first.turns.at(-1).articleSegmentId;
  await complete(f,first,'最初の要約');
  for(let i=0;i<12;i++)await complete(f,await ask(f,id,'追加質問'+i),'追加回答'+i);
- let state=await f.chat('get',{actionId:'article'});assert.equal(state.turns.length,10);assert.ok(state.turns.every(t=>t.articleAction==='question'));assert.equal(state.articleSegments[id].articleId,a.articleId);
+ let state=await f.chat('get',{actionId:'article'});assert.equal(state.turns.length,13);assert.equal(state.turns[0].articleAction,'summary');assert.equal(state.droppedTurns,0);assert.equal(state.articleSegments[id].articleId,a.articleId);
  const stopped=await ask(f,id,'中断する質問');await f.chat('progress',{actionId:'article',epoch:stopped.epoch,endpoint:stopped.endpoint,model:'local-model',owner:'owner',id:stopped.active.id,text:'中断回答の秘密'});await f.chat('stop',{actionId:'article'});
  const follow=await ask(f,id,'[&別記事] なぜ？');const serialized=JSON.stringify(follow.messages);
- assert.equal(serialized.split(a.body).length-1,1);assert.match(follow.messages[1].content,/極力意味を失わない/);assert.ok(!serialized.includes('中断回答の秘密'));assert.ok(!serialized.includes('最初の要約'));
+ assert.equal(serialized.split(a.body).length-1,1);assert.match(follow.messages[1].content,/極力意味を失わない/);assert.ok(!serialized.includes('中断回答の秘密'));assert.ok(serialized.includes('最初の要約'));
  assert.equal(follow.turns.at(-1).articleId,a.articleId);
  const session=f.articleData.current;assert.ok(!JSON.stringify(session.conversation).includes(a.body));assert.ok(session.conversation.turns.every(t=>!t.llmText&&!t.llmMessages&&!t.articleSegment));
 });
@@ -216,4 +216,24 @@ test('旧セッションから永続DBへ移行し、保存失敗では元デー
  const set=migrated.context.chrome.storage.local.set;migrated.context.chrome.storage.local.set=async()=>{throw Error('local failed');};
  await assert.rejects(migrated.chat('get',{actionId:'article'}),/local failed/);assert.equal(migrated.articleData.current,undefined);assert.deepEqual(migrated.sessionData[migrated.context.OshaberiNoteArticles.key],legacy);
  migrated.context.chrome.storage.local.set=set;const state=await migrated.chat('get',{actionId:'article'});assert.equal(state.turns[0].assistant,'旧形式の回答');assert.equal(migrated.articleData.current.articles[0].body,article().body);assert.equal(migrated.sessionData[migrated.context.OshaberiNoteArticles.key],undefined);
+});
+
+
+test('記事は100往復を超えても読込・再起動・追加送信で件数整理しない',async()=>{
+ const f=await ready(),first=await start(f,await importArticle(f));await complete(f,first,'最初の回答');
+ const record=f.articleData.current,template=record.conversation.turns[0],id=template.articleSegmentId;
+ for(let i=0;i<120;i++)record.conversation.turns.push({...template,user:'質問'+i,assistant:'回答'+i,articleAction:'question'});
+ const state=await f.chat('get',{actionId:'article'});assert.equal(state.turns.length,121);assert.equal(state.droppedTurns,0);
+ const restarted=backend();Object.assign(restarted.data,structuredClone(f.data));restarted.articleData.current=structuredClone(f.articleData.current);restarted.connect('owner');
+ assert.equal((await restarted.chat('get',{actionId:'article'})).turns.length,121);
+ const added=await ask(restarted,id);assert.equal(added.turns.length,122);assert.equal(added.droppedTurns,0);assert.equal(added.messages.length,244);await complete(restarted,added);
+});
+
+test('記事の件数制限を外しても履歴2MiBの容量整理と本文保持は維持する',async()=>{
+ const f=await ready(),first=await start(f,await importArticle(f));await complete(f,first);
+ const record=f.articleData.current,template=record.conversation.turns[0];
+ record.conversation.turns=Array.from({length:120},(_,i)=>({...template,user:'表示する依頼'+i,assistant:'文'.repeat(5500)}));
+ const state=await f.chat('get',{actionId:'article'});assert.equal(state.turns.length,120);
+ const next=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'要約',articleId:template.articleId,articleAction:'summary'});
+ assert.ok(next.droppedTurns>0);assert.ok(f.context.OshaberiNoteChatState.bytes(f.articleData.current.conversation)<=2097152);assert.equal(f.articleData.current.articles[0].body,article().body);await complete(f,next);
 });
