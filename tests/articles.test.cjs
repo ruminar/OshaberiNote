@@ -127,6 +127,34 @@ test('表示中の本文領域だけを抽出し、不可視・スクリプト�
  doc.getElementById('note-body').hidden=false;doc.getElementById('body').textContent='本文';const hidden=doc.createElement('div');hidden.hidden=true;doc.getElementById('note-article').append(hidden);hidden.append(doc.getElementById('title'));assert.throws(()=>api.extract(doc,win,article().url),/タイトル/);
 });
 
+test('リンクカードを本文順にタイトルとURLで保存し、送信本文にも含める',async()=>{
+ const f=await ready(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="before"></p><figure embedded-service="external-article" data-src="https://example.com/works"><a href="https://example.com/works"><strong class="external-article-widget-title" id="card-title"></strong><em id="description"></em></a><a href="https://example.com/works"></a></figure><figure embedded-service="note" data-src="https://note.com/other/n/n456"><iframe id="frame" src="https://note.com/embed/notes/n456"></iframe></figure><figure embedded-service="note" data-src="https://note.com/other/n/n789"><iframe></iframe></figure><p id="after"></p></div></div></article>');
+ for(const [id,text]of [['title','リンク集'],['author','著者'],['before','前の本文'],['after','後の本文'],['card-title','外部作品の題名'],['description','カードの説明文は送らない']])doc.getElementById(id).textContent=text;
+ const child=documentFromHtml('<a class="p-noteEmbed__link" href="https://note.com/other/n/n456"></a><div class="p-noteEmbed__title" id="linked-title"></div><p id="unrelated"></p>');
+ child.URL='https://note.com/embed/notes/n456';child.getElementById('linked-title').textContent='note作品の題名';child.getElementById('unrelated').textContent='作者やスキ数は送らない';doc.getElementById('frame').contentDocument=child;
+ const win={getComputedStyle:()=>({display:'block',visibility:'visible'})};
+ const value=f.context.OshaberiNoteArticles.extract(doc,win,article().url);
+ assert.ok(value.body.indexOf('前の本文')<value.body.indexOf('外部作品の題名'));
+ assert.ok(value.body.indexOf('外部作品の題名')<value.body.indexOf('note作品の題名'));
+ assert.ok(value.body.indexOf('note作品の題名')<value.body.indexOf('後の本文'));
+ for(const url of ['https://example.com/works','https://note.com/other/n/n456','https://note.com/other/n/n789'])assert.equal(value.body.split(url).length-1,1);
+ assert.match(value.body,/タイトル：（タイトル未取得）/);
+ assert.ok(!value.body.includes('説明文は送らない'));assert.ok(!value.body.includes('スキ数は送らない'));
+ const state=await start(f,await importArticle(f,value));assert.ok(state.messages.at(-1).content.includes(value.body));
+});
+
+test('カードの不可視情報・別URLのフレーム・危険なURLを取り込まない',()=>{
+ const f=backend(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="text"></p><figure hidden embedded-service="external-article" data-src="https://secret.test/"><a href="https://secret.test/"><strong class="external-article-widget-title" id="hidden-title"></strong></a></figure><figure embedded-service="external-article" data-src="javascript:alert(1)"></figure><figure embedded-service="external-article" data-src="https://user:password@example.com/"></figure><figure embedded-service="note" data-src="https://note.com/other/n/n456"><iframe id="frame" src="https://note.com/embed/notes/n456"></iframe></figure></div></div></article>');
+ for(const [id,text]of [['title','安全な記事'],['author','著者'],['text','本文'],['hidden-title','秘密のタイトル']])doc.getElementById(id).textContent=text;
+ const frame=doc.getElementById('frame'),child=documentFromHtml('<a class="p-noteEmbed__link" href="https://note.com/other/n/n456"></a><div class="p-noteEmbed__title" id="wrong"></div>');child.getElementById('wrong').textContent='別の記事のタイトル';child.URL='https://note.com/embed/notes/n999';frame.contentDocument=child;
+ const win={getComputedStyle:node=>({display:node.hidden?'none':'block',visibility:'visible'})},api=f.context.OshaberiNoteArticles;
+ let body=api.extract(doc,win,article().url).body;
+ for(const text of ['secret.test','秘密','javascript:','password','別の記事'])assert.ok(!body.includes(text));
+ assert.ok(body.includes('https://note.com/other/n/n456'));
+ Object.defineProperty(frame,'contentDocument',{get(){throw Error('SecurityError');}});
+ body=api.extract(doc,win,article().url).body;assert.ok(body.includes('https://note.com/other/n/n456'));
+});
+
 test('記事DB保存後に共通設定の保存が失敗したら、既存の記事Mapと選択を巻き戻す',async()=>{
  const f=await ready();await complete(f,await start(f,await importArticle(f)));await f.chat('select',{actionId:'chat',owner:'owner'});
  const beforeLocal=structuredClone(f.data),beforeSession=structuredClone(f.articleData),opened=f.opened.length;

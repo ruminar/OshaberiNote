@@ -131,9 +131,48 @@
     }
     const chunks = [], excluded = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "IFRAME", "NAV", "ASIDE", "BUTTON", "FORM", "INPUT", "TEXTAREA", "SVG", "CANVAS", "AUDIO", "VIDEO", "TITLE", "META", "LINK"]);
     const blocks = new Set(["P", "DIV", "SECTION", "H1", "H2", "H3", "H4", "H5", "H6", "LI", "BLOCKQUOTE", "PRE", "FIGCAPTION"]);
+    function linkUrl(value) {
+      try {
+        const parsed = new URL(value, address.url);
+        if (!value || !["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) return null;
+        return parsed.href;
+      } catch { return null; }
+    }
+    function linkCard(node) {
+      if (node.tagName !== "FIGURE") return null;
+      const service = node.getAttribute("embedded-service");
+      if (!["note", "external-article"].includes(service)) return null;
+      const url = linkUrl(node.getAttribute("data-src"));
+      if (!url) return null;
+      let title = "";
+      if (service === "external-article") {
+        const heading = node.querySelector('[class~="external-article-widget-title"]'), anchor = heading?.closest("a[href]");
+        if (heading && anchor && visible(heading) && linkUrl(anchor.getAttribute("href")) === url) title = visibleText(heading);
+      } else {
+        // 読み込み済みの同一オリジンnoteカードだけ参照する。srcの設定や追加通信は行わない。
+        for (const frame of node.querySelectorAll("iframe")) {
+          try {
+            if (!visible(frame)) continue;
+            const target = page(url), src = new URL(frame.getAttribute("src"), address.url);
+            if (src.origin !== "https://note.com" || src.pathname !== `/embed/notes/${target.articleId}`) continue;
+            const child = frame.contentDocument;
+            if (!child || new URL(child.URL).origin !== src.origin || new URL(child.URL).pathname !== src.pathname) continue;
+            const heading = child.querySelector('[class~="p-noteEmbed__title"]'), anchor = child.querySelector('a[class~="p-noteEmbed__link"]');
+            if (heading && anchor && visible(heading) && linkUrl(anchor.getAttribute("href")) === url) { title = visibleText(heading); break; }
+          } catch { /* 未読込・別オリジンのフレームはURLだけを残す。 */ }
+        }
+      }
+      return { url, title: title.replace(/\s+/g, " ") || "（タイトル未取得）" };
+    }
     function walk(node) {
       if (node.nodeType === 3) { chunks.push(node.nodeValue); return; }
       if (node.nodeType !== 1 || excluded.has(node.tagName) || node.hasAttribute("data-oshaberi-note-owned") || !visible(node)) return;
+      const card = linkCard(node);
+      if (card) {
+        chunks.push(`\n[リンクカード]\nタイトル：${card.title}\nURL：${card.url}\n`);
+        for (const caption of node.querySelectorAll("figcaption")) walk(caption);
+        return;
+      }
       if (node.tagName === "BR") { chunks.push("\n"); return; }
       if (blocks.has(node.tagName)) chunks.push("\n");
       for (const child of node.childNodes) walk(child);
