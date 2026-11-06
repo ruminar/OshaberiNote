@@ -66,7 +66,7 @@
     if (new TextEncoder().encode(JSON.stringify(session)).length > maxBytes || Object.keys(session.requests).length > 64) throw invalid("記事データの容量上限です。「記事について」で新しい会話を始めてから取り込んでください。記事を自動で削除・切り捨てることはしません。");
   }
   function display(article, action) { if (!actions[action]) throw invalid("記事の操作を確認してください。"); return `[&${article.title}]${actions[action].suffix}`; }
-  function request(session, patch, epoch, conversation = session.conversation) {
+  function request(session, patch, epoch, conversation = session.conversation, settings = {}) {
     const map = new Map(session.articles.map(article => [article.articleId, article]));
     let articleId = patch.articleId, action = patch.articleAction;
     if (patch.requestToken) {
@@ -86,12 +86,14 @@
     const article = map.get(articleId);
     if (!article || (action !== "question" && !actions[action])) throw invalid("参照する記事がありません。記事ページから取り込み直してください。");
     const instruction = action === "question" ? patch.text : actions[action].instruction;
-    const llmText = `${instruction}\nーーー\nタイトル：${article.title}\n著者：${article.author}\n本文：\n${article.body}`;
+    const authorId = new URL(article.url).pathname.split("/")[1];
+    const relation = globalThis.OshaberiNote.isSelf(settings, authorId) ? "\n利用者と著者の関係：利用者本人が書いた記事です。" : "";
+    const context = `\nーーー\nタイトル：${article.title}\n著者：${article.author}${relation}\n本文：\n${article.body}`;
+    const llmText = instruction + context;
     if (llmText.length > 200000) throw invalid("記事と依頼文が送信上限200,000文字を超えています。本文は切り捨てず、送信を中止しました。");
     let llmMessages = [{ role: "user", content: llmText }];
     if (action === "question") {
       const history = conversation.turns.filter(turn => turn.articleSegmentId === segmentId && turn.status === "complete");
-      const context = `\nーーー\nタイトル：${article.title}\n著者：${article.author}\n本文：\n${article.body}`;
       llmMessages = history.flatMap(turn => [{ role: "user", content: turn.articleAction === "question" ? turn.user : actions[turn.articleAction].instruction }, { role: "assistant", content: turn.assistant }]);
       if (llmMessages.length) {
         llmMessages[0].content = actions[segment.action].instruction + context + (history[0].articleAction === "question" ? `\n追加の質問：${history[0].user}` : "");

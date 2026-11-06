@@ -162,7 +162,7 @@
         if (!settings.ollamaModel || patch.model !== settings.ollamaModel) throw new Error("モデルを選択し直してください。");
         if (typeof patch.owner !== "string" || patch.owner.length > 100 || !patch.owner || typeof patch.text !== "string" || !patch.text.trim() || patch.text.length > limits.input) throw Object.assign(new Error("メッセージは1～200,000文字で入力してください。入力を直して、そのまま再送できます。"), { code: "INVALID_INPUT" });
         if (port.isOwnerConnected && !port.isOwnerConnected(patch.owner)) throw new Error("会話画面との接続を確認できません。再読み込みしてください。");
-        const message = id === "article" ? await port.prepareArticleMessage(patch, state) : { user: patch.text };
+        const message = id === "article" ? await port.prepareArticleMessage(patch, state, settings) : { user: patch.text };
         const { llmText, llmMessages, articleSegment, ...displayMessage } = message;
         if (id === "article") {
           state.articleSegments ??= {};

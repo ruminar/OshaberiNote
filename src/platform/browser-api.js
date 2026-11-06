@@ -84,9 +84,9 @@
     else if (Object.keys(localPatch).length) await api.storage.local.set(localPatch);
   }
 
-  async function prepareArticleMessage(patch, state) {
+  async function prepareArticleMessage(patch, state, settings) {
     const session = articles.read(await articleRaw(), state.endpoint);
-    return articles.request(session, patch, state.epoch, state);
+    return articles.request(session, patch, state.epoch, state, settings);
   }
   async function articleOperation(operation, patch = {}, sender) {
     return run(async () => {
@@ -110,7 +110,7 @@
         const map = new Map(session.articles.map(item => [item.articleId, item])); map.set(article.articleId, article); session.articles = [...map.values()];
         session.activeArticleId = article.articleId;
         const token = crypto.randomUUID(); session.requests[token] = { articleId: article.articleId, action: "summary", epoch: session.conversation.epoch };
-        articles.request(session, { requestToken: token }, session.conversation.epoch);
+        articles.request(session, { requestToken: token }, session.conversation.epoch, session.conversation, settings);
         store.conversations.article = session.conversation; store.selectedActionId = articles.id;
         await persistChat(store, { articleSession: session });
         try { await api.tabs.create({ url: api.runtime.getURL("home.html") + "#article-request=" + token }); }
@@ -128,7 +128,7 @@
       }
       if (operation === "request") {
         if (typeof patch.requestToken !== "string" || !Object.hasOwn(session.requests, patch.requestToken)) throw Object.assign(new Error("この記事の依頼は処理済みか無効です。自動再送は行いません。"), { code: "INVALID_INPUT" });
-        const message = articles.request(session, { requestToken: patch.requestToken }, session.conversation?.epoch);
+        const message = articles.request(session, { requestToken: patch.requestToken }, session.conversation?.epoch, session.conversation, settings);
         return { articleId: message.articleId, articleAction: message.articleAction, displayText: message.user, requestToken: patch.requestToken };
       }
       if (operation === "info") {

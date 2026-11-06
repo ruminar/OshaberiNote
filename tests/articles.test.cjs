@@ -265,3 +265,24 @@ test('記事の件数制限を外しても履歴2MiBの容量整理と本文保�
  const next=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'要約',articleId:template.articleId,articleAction:'summary'});
  assert.ok(next.droppedTurns>0);assert.ok(f.context.OshaberiNoteChatState.bytes(f.articleData.current.conversation)<=2097152);assert.equal(f.articleData.current.articles[0].body,article().body);await complete(f,next);
 });
+
+
+test('記事の本人情報は送信時のユーザーIDで判断し、全操作と自由入力へ付与するが記事や表示履歴には保存しない',async()=>{
+ const f=await ready(),value=article('n123','自分の作品','本人の本文');value.author='るみなー先生';
+ const relation='利用者と著者の関係：利用者本人が書いた記事です。';
+ let state=await start(f,await importArticle(f,value));const system=state.messages[0].content;
+ assert.ok(!state.messages.at(-1).content.includes(relation));await complete(f,state);
+ await f.save({noteUserId:'TeSt'});
+ for(const action of ['summary','impression','revision','citations']){
+  state=await f.chat('get',{actionId:'article'});
+  state=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'owner',model:'local-model',text:'依頼',articleId:value.articleId,articleAction:action});
+  assert.equal(state.messages[0].content,system);assert.equal(state.messages[1].content.split(relation).length-1,1);
+  assert.ok(state.messages[1].content.includes('著者：るみなー先生\n'+relation));
+  assert.ok(!state.turns.at(-1).user.includes(relation));await complete(f,state);
+ }
+ const follow=async()=>{const current=await f.chat('get',{actionId:'article'});return f.chat('start',{actionId:'article',epoch:current.epoch,endpoint:current.endpoint,owner:'owner',model:'local-model',text:'続きを教えて',articleSegmentId:current.activeArticleSegmentId});};
+ await f.save({noteUserId:'someone_else'});state=await follow();assert.ok(state.messages.every(m=>!m.content.includes(relation)));await complete(f,state);
+ await f.save({noteUserId:'test'});state=await follow();assert.equal(state.messages.map(m=>m.content).join('\n').split(relation).length-1,1);await complete(f,state);
+ await f.save({noteUserId:''});state=await follow();assert.ok(state.messages.every(m=>!m.content.includes(relation)));await complete(f,state);
+ assert.equal(f.articleData.current.articles[0].author,'るみなー先生');assert.ok(!JSON.stringify(f.articleData.current).includes(relation));
+});
