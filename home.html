@@ -130,6 +130,13 @@
         <section id="panel-settings" aria-labelledby="settings-heading" hidden>
           <h2 id="settings-heading">設定</h2>
           <form id="settings">
+            <label for="theme">テーマ</label>
+            <select id="theme" disabled>
+              <option value="system">システム</option>
+              <option value="dark">ダーク</option>
+              <option value="light">ライト</option>
+            </select>
+            <p class="muted">専用ホームの配色を選びます。「システム」は端末・ブラウザの配色設定に追従します。</p>
             <label for="note-user">noteユーザー名 または 公開プロフィールURL</label>
             <input id="note-user" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="例：ruminar または https://note.com/ruminar" disabled>
             <p class="muted">空欄で保存すると登録を解除します。ブラウザ内にのみ保存します。</p>

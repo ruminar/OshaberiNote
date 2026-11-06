@@ -53,7 +53,7 @@
       }),
       save: (patch, expectedToken) => run(async () => {
         if (!patch || typeof patch !== "object" || Array.isArray(patch) ||
-            Object.keys(patch).some(key => !["enabled", "noteUserId", "dashboardDisabled", "ollamaUrl", "ollamaModel", "ollamaSystemPrompt", "hideArticleRecommendations", "hidePaidArticles", "hideLikeCounts", "keepNoteHeaderVisible"].includes(key))) {
+            Object.keys(patch).some(key => !["enabled", "theme", "noteUserId", "dashboardDisabled", "ollamaUrl", "ollamaModel", "ollamaSystemPrompt", "hideArticleRecommendations", "hidePaidArticles", "hideLikeCounts", "keepNoteHeaderVisible"].includes(key))) {
           throw new Error("設定の形式が正しくありません。");
         }
         if (Object.hasOwn(patch, "enabled") && typeof patch.enabled !== "boolean") {
@@ -71,6 +71,7 @@
         if (Object.hasOwn(patch, "hideArticleRecommendations") && typeof patch.hideArticleRecommendations !== "boolean") throw new Error("おすすめ表示設定の値が正しくありません。");
         if (Object.hasOwn(patch, "keepNoteHeaderVisible") && typeof patch.keepNoteHeaderVisible !== "boolean") throw new Error("ヘッダ表示設定の値が正しくありません。");
         const next = { ...previous, ...patch };
+        if (!["system", "light", "dark"].includes(next.theme)) throw new Error("テーマの値が正しくありません。");
         next.ollamaUrl = core.normalizeOllamaUrl(next.ollamaUrl);
         next.ollamaModel = core.validateModel(next.ollamaModel);
         next.ollamaSystemPrompt = core.validateSystemPrompt(next.ollamaSystemPrompt);

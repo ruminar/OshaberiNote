@@ -4,7 +4,7 @@
   const platform = globalThis.OshaberiNotePlatform;
   const byId = id => document.getElementById(id);
   const views = ["chat", "tags", "authors", "llm", "settings", "transfer"];
-  const fields = { hideLikeCounts: "hide-like-counts", hidePaidArticles: "hide-paid-articles", noteUserId: "note-user", dashboardDisabled: "dashboard-disabled", hideArticleRecommendations: "hide-article-recommendations", keepNoteHeaderVisible: "keep-note-header-visible" };
+  const fields = { theme: "theme", hideLikeCounts: "hide-like-counts", hidePaidArticles: "hide-paid-articles", noteUserId: "note-user", dashboardDisabled: "dashboard-disabled", hideArticleRecommendations: "hide-article-recommendations", keepNoteHeaderVisible: "keep-note-header-visible" };
   const drafts = new Map();
   function draft(id) { if (!drafts.has(id)) drafts.set(id, { tag: "", name: "", nameDirty: false, expectedName: "" }); return drafts.get(id); }
   const dirty = new Set();
@@ -176,6 +176,7 @@
     const previous = state?.selectedTagGroupId;
     if (previous) draft(previous).tag = byId("tag-input").value;
     state = core.readSettings(value);
+    document.querySelector("html").setAttribute("data-theme", state.theme);
     // 背景処理が正常項目と一緒に返した診断を、再正規化で消さない。
     if (typeof value?.tagWarning === "string" && value.tagWarning) state.tagWarning = value.tagWarning;
     if (value?.groupSelectionInvalid) state.groupSelectionInvalid = true;
@@ -194,7 +195,7 @@
     if (core.usesTags(state) && selected === "intro") selected = "tags";
     for (const [field, id] of Object.entries(fields)) {
       if (dirty.has(field)) continue;
-      if (["noteUserId", "mode"].includes(field)) byId(id).value = state[field];
+      if (["noteUserId", "mode", "theme"].includes(field)) byId(id).value = state[field];
       else byId(id).checked = state[field];
     }
     byId("home-menu").hidden = false;
@@ -275,7 +276,7 @@
   byId("settings").onsubmit = event => {
     event.preventDefault();
     const patch = {};
-    for (const field of dirty) patch[field] = ["noteUserId", "mode"].includes(field) ? byId(fields[field]).value : byId(fields[field]).checked;
+    for (const field of dirty) patch[field] = ["noteUserId", "mode", "theme"].includes(field) ? byId(fields[field]).value : byId(fields[field]).checked;
     try { if (Object.hasOwn(patch, "noteUserId")) patch.noteUserId = core.normalizeUserId(patch.noteUserId); }
     catch (error) { byId("status").textContent = error.message; byId("note-user").focus(); return; }
     void perform(() => platform.save(patch), { kind: "settings" });

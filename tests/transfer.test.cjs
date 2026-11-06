@@ -6,13 +6,15 @@ function own(settings) { return JSON.stringify({ format: 'oshaberi-note-settings
 function legacy(settings, schemaVersion = 7) { return JSON.stringify({ format: 'hikikomori-note-settings', schemaVersion, settings }); }
 test('自製JSONは独立形式1で全対応設定を往復し、モード・権限・会話を出力しない', async () => {
   const f = backend(), core = f.context.OshaberiNote;
-  await f.save({ ollamaModel: 'local', noteUserId: 'sample', hidePaidArticles: true });
+  await f.save({ theme: 'dark', ollamaModel: 'local', noteUserId: 'sample', hidePaidArticles: true });
   const state = await f.settings(), json = core.exportSettings(state), doc = JSON.parse(json);
   assert.equal(doc.format, 'oshaberi-note-settings'); assert.equal(doc.schemaVersion, 1);
   for (const key of ['mode', 'legacyMode', 'turns', 'active', 'approvedUrl', 'tagGroupsRevision']) assert.equal(Object.hasOwn(doc.settings, key), false);
   assert.equal(doc.settings.ollamaModel, 'local');
   assert.equal(core.parseSettingsExport(json).noteUserId, 'sample');
   assert.equal(core.parseSettingsExport(json).hidePaidArticles, true);
+  assert.equal(core.parseSettingsExport(json).theme, 'dark');
+  assert.equal(core.parseSettingsExport(own({ enabled: false }), state).theme, 'dark');
 });
 test('旧形式1～7の存在する項目だけを適用し、モード・Ollama値・未知項目を捨てる', async () => {
   const f = backend(), core = f.context.OshaberiNote;

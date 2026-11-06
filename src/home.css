@@ -1,6 +1,6 @@
-/* 専用ホーム全体の配色。手動設定を増やさず、利用者の配色設定に追従する。 */
+/* 専用ホーム全体の配色。明示設定を優先し、システム選択時はOSに追従する。 */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --page: #f6f7f2; --text: #283b35; --surface: #ffffff; --field: #ffffff;
   --muted: #59685e; --border: #d9dfd5; --field-border: #728579;
   --accent: #285d4b; --button-bg: #285d4b; --button-text: #ffffff; --link: #245c49;
@@ -11,7 +11,8 @@
   color: var(--text); background: var(--page); font: 16px/1.7 system-ui, sans-serif;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    color-scheme: dark;
     --page: #151a18; --text: #e1e9e4; --surface: #202823; --field: #171e1a;
     --muted: #aebeb3; --border: #435249; --field-border: #73897b;
     --accent: #91d4b6; --button-bg: #285f49; --button-text: #effff5; --link: #a0dfc3;
@@ -20,6 +21,16 @@
     --row-border: #435249; --warning-bg: #362d1e; --warning-border: #ad8a50;
     --origin-bg: #362d1e; --origin-border: #ad8a50;
   }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #151a18; --text: #e1e9e4; --surface: #202823; --field: #171e1a;
+  --muted: #aebeb3; --border: #435249; --field-border: #73897b;
+  --accent: #91d4b6; --button-bg: #285f49; --button-text: #effff5; --link: #a0dfc3;
+  --focus: #efc078; --status: #efc58d; --divider: #435249; --nav-border: #61766a;
+  --hover: rgba(145,212,182,.10); --user-message: #29392f; --ai-message: #30332b; --speaker: #b9cbbf;
+  --row-border: #435249; --warning-bg: #362d1e; --warning-border: #ad8a50;
+  --origin-bg: #362d1e; --origin-border: #ad8a50;
 }
 input, select, textarea { background: var(--field); color: var(--text); border-color: var(--field-border); }
 input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
@@ -31,7 +42,7 @@ h1 { font-size: 24px; margin: 0; } h2 { font-size: 20px; margin-top: 0; }
 p { margin: 12px 0; } .muted { color: var(--muted); font-size: 14px; }
 section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; margin: 24px 0; }
 label { display: block; font-weight: 600; margin-bottom: 8px; }
-input, #operation-mode { width: 100%; max-width: 520px; padding: 12px; border: 1px solid var(--field-border); border-radius: 6px; font: inherit; }
+input, #operation-mode, #theme { width: 100%; max-width: 520px; padding: 12px; border: 1px solid var(--field-border); border-radius: 6px; font: inherit; }
 input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
 .check-option { display: flex; align-items: center; gap: 10px; margin: 20px 0 8px; }
 .settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
