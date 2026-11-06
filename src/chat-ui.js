@@ -103,7 +103,9 @@
     const container = byId("chat-messages"), rows = container.querySelectorAll("article");
     // 最後の短い発言も、先頭を会話欄の上端まで移動できるよう余白を確保する。
     if (scrollTail) {
-      const style = `height: ${Math.max(0, (container.clientHeight || 0) - (rows[rows.length - 1]?.getBoundingClientRect().height || 0))}px`;
+      // 短い初回は余白自身がflex領域を伸ばすため、CSSの表示上限を基準にする。
+      const viewport = Math.max(container.clientHeight || 0, Number.parseFloat(globalThis.getComputedStyle?.(container)?.maxHeight) || 0);
+      const style = `height: ${Math.max(0, viewport - (rows[rows.length - 1]?.getBoundingClientRect().height || 0))}px`;
       if (scrollTail.getAttribute("style") !== style) scrollTail.setAttribute("style", style);
     }
   }
@@ -118,10 +120,11 @@
   }
   function refreshMessageNavigation() { updateScrollTail(); updateMessageNavigation(); }
   function alignMessage(index) {
-    if (!visible || state.turns.length <= 1 || scrollRange() <= 1) return;
+    if (!visible || scrollRange() <= 1) return;
     const target = messagePositions()[index];
     if (target === undefined) return;
-    byId("chat-messages").scrollTop = target;
+    const container = byId("chat-messages");
+    if (Math.abs(container.scrollTop - target) > 1) container.scrollTop = target;
     updateMessageNavigation();
   }
   function moveMessage(direction) {
@@ -244,10 +247,10 @@
     }
     if (!state.turns.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "新しい会話です。メッセージを入力してください。"; container.append(empty); }
     scrollTail = undefined;
-    // 初回の1往復には余白を足さず、短い会話に人工的なスクロールを作らない。
-    if (state.turns.length > 1) { scrollTail = document.createElement("div"); scrollTail.className = "chat-scroll-tail"; scrollTail.setAttribute("aria-hidden", "true"); container.append(scrollTail); }
+    // 初回も含め、短いAI発言の先頭を上端へ合わせられる余白を設ける。
+    if (state.turns.length) { scrollTail = document.createElement("div"); scrollTail.className = "chat-scroll-tail"; scrollTail.setAttribute("aria-hidden", "true"); container.append(scrollTail); }
     refreshMessageNavigation();
-    if (state.turns.length > 1 && scrollRange() > 1) container.scrollTop = previousTop;
+    if (scrollRange() > 1 && Math.abs(container.scrollTop - previousTop) > 1) container.scrollTop = previousTop;
     if (accepted) alignMessage(state.turns.length * 2 - 2);
     else if (completed) alignMessage(state.turns.length * 2 - 1);
     updateMessageNavigation();

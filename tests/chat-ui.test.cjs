@@ -533,7 +533,7 @@ test('前後の発言へ自分・AIの順で移動し、手動スクロール後
   await n.get('chat-new').onclick();await flush();assert.equal(previous.disabled,true);assert.equal(next.disabled,true);assert.equal(n.get('chat-message-position').textContent,'発言なし');
 });
 
-test('初回1往復では余白とスクロール書込を作らず、次の往復から段階的に移動する',async t=>{
+test('初回も受付で1/2、生成中は維持、完了で2/2へ合わせ、scrollとresizeで往復しない',async t=>{
   let finish,count=0;const encoder=new TextEncoder();
   const f=await fixture(t,{stream:()=>++count===1?new Response(new ReadableStream({start(controller){
     controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'短い回答'},done:false})+'\n'));
@@ -545,21 +545,22 @@ test('初回1往復では余白とスクロール書込を作らず、次の往�
   f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='初回';n.get('chat-form').fire('submit');await flush();
   for(let i=0;i<3;i++){container.fire('scroll');f.events.get('resize')();}
-  assert.deepEqual(writes,[]);assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');
-  assert.equal(n.get('chat-next-message').disabled,true);assert.equal(container.querySelector('div[aria-hidden="true"]'),null);
-  finish();await flush();assert.deepEqual(writes,[]);
+  assert.deepEqual(writes,[]);assert.equal(n.get('chat-message-position').textContent,'1 / 2 発言');
+  assert.equal(n.get('chat-next-message').disabled,false);assert.ok(container.querySelector('div[aria-hidden="true"]'));
+  finish();await flush();assert.equal(top,80);assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');
+  const completedWrites=writes.length;for(let i=0;i<20;i++){container.fire('scroll');f.events.get('resize')();}assert.equal(writes.length,completedWrites);
   n.get('chat-input').value='次の質問';n.get('chat-form').fire('submit');await flush();
   assert.ok(writes.length>0);assert.ok(top>0);assert.equal(n.get('chat-message-position').textContent,'4 / 4 発言');
 });
 
-test('初回1往復は長文でも送信受付・生成・完了で自動移動しない',async t=>{
+test('初回の長文も完了時は回答末尾ではなく2/2の先頭へ合わせる',async t=>{
   const f=await fixture(t,{reply:'長'.repeat(500)}),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
   container.clientHeight=200;container.getBoundingClientRect=()=>({top:0});
   Object.defineProperty(container,'scrollHeight',{get:()=>container.textContent.includes('長'.repeat(500))?680:200});
   let top=0;Object.defineProperty(container,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(value,container.scrollHeight-200));}});
   f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='長文の確認';n.get('chat-form').fire('submit');await flush();
-  assert.equal(top,0);assert.equal(n.get('chat-message-position').textContent,'1 / 2 発言');assert.equal(container.querySelector('div[aria-hidden="true"]'),null);
+  assert.equal(top,80);assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');assert.ok(container.querySelector('div[aria-hidden="true"]'));
 });
 
 test('4往復目は受付で7/8、生成中は維持、完了で8/8の先頭へ移動し、中止では進めない',async t=>{
@@ -599,7 +600,7 @@ test('過去を閲覧中でも自分の送信受付後は最終発言へ移動�
   assert.equal(n.get('chat-next-message').disabled,true);assert.equal(f.document.activeElement,n.get('chat-input'));
 });
 
-test('前の発言を読んでいる間は生成更新・完了で末尾へ引き戻さない',async t=>{
+test('前の発言を読んでいても完了時はAIの先頭へ合わせる',async t=>{
   let finish;const encoder=new TextEncoder();
   const f=await fixture(t,{stream:()=>new Response(new ReadableStream({start(controller){
     controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'生成途中'},done:false})+'\n'));
@@ -609,7 +610,7 @@ test('前の発言を読んでいる間は生成更新・完了で末尾へ引�
   f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-(container.scrollTop||0),height:60});return node;};
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='質問';n.get('chat-form').fire('submit');await flush();
   container.scrollTop=80;container.fire('scroll');n.get('chat-previous-message').onclick();assert.equal(container.scrollTop,0);
-  finish();await flush();assert.equal(container.scrollTop,0);assert.match(n.get('chat-status').textContent,/完了/);
+  finish();await flush();assert.equal(container.scrollTop,80);assert.match(n.get('chat-status').textContent,/完了/);
 });
 
 test('AI回答の箇条書きと入れ子を太字・タグ操作と併用し、保存とコピーは原文のまま保つ',async t=>{
