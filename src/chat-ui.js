@@ -15,19 +15,12 @@
   let selectedAction = "chat";
   const drafts = new Map(), articles = globalThis.OshaberiNoteArticles;
   let pendingArticleRequest, articleReference, articleSnapshot, localActive = false;
-  let articleContext;
-  const articleContextKey = "oshaberiNote.articleContext.v1";
-  function pinArticleContext(epoch, segmentId) {
-    articleContext = segmentId ? { epoch, segmentId } : undefined;
-    try {
-      if (articleContext) globalThis.sessionStorage?.setItem(articleContextKey, JSON.stringify(articleContext));
-      else globalThis.sessionStorage?.removeItem(articleContextKey);
-    } catch { /* この画面のメモリ内では選択を保持する。 */ }
-  }
+  let articleDraftContext;
+  const currentArticleContext = () => ({ epoch: state?.epoch, segmentId: state?.activeArticleSegmentId ?? null });
   function renderArticleLibrary() {
-    const target = state?.articleSegments?.[articleContext?.segmentId];
+    const target = state?.articleSegments?.[state?.activeArticleSegmentId];
     const items = articleSnapshot?.endpoint === state?.endpoint && articleSnapshot?.conversation?.epoch === state?.epoch ? articleSnapshot.articles : [];
-    byId("chat-article-target").textContent = target ? `自由入力の対象：${items.find(item => item.articleId === target.articleId)?.title ?? target.articleId}（${target.articleId}）` : "自由入力の対象が未選択です。記事タイトルまたは取り込み済み記事から操作を選んでください。";
+    byId("chat-article-target").textContent = target ? `自由入力の対象（全画面で共有）：${items.find(item => item.articleId === target.articleId)?.title ?? target.articleId}（${target.articleId}）` : "自由入力の対象が未選択です。記事タイトルまたは取り込み済み記事から操作を選んでください。";
     const library = byId("chat-article-library"); library.replaceChildren();
     for (const item of items) {
       const button = document.createElement("button"), epoch = state.epoch;
@@ -80,7 +73,7 @@
       const reference = articleReference;
       if (!reference?.valid() || byId(`chat-article-${action}`).disabled) return;
       discardPendingArticle();
-      pinArticleContext(); renderArticleLibrary();
+      articleDraftContext = undefined;
       pendingArticleRequest = { articleId: reference.articleId, articleAction: action, displayText: articles.display(reference, action) };
       byId("chat-input").value = pendingArticleRequest.displayText; closeArticleDialog();
       status("記事の依頼を用意しました。未接続の場合は「LLMの設定」で接続してください。"); maybeSendArticle();
@@ -88,7 +81,13 @@
   }
   byId("chat-article-close").onclick = closeArticleDialog;
   articleDialog.addEventListener("close", () => { articleReference = undefined; });
-  byId("chat-input").addEventListener("input", () => { if (pendingArticleRequest && byId("chat-input").value !== pendingArticleRequest.displayText) discardPendingArticle(); });
+  byId("chat-input").addEventListener("input", () => {
+    if (pendingArticleRequest && byId("chat-input").value !== pendingArticleRequest.displayText) discardPendingArticle();
+    if (selectedAction === "article") {
+      if (!byId("chat-input").value) articleDraftContext = undefined;
+      else articleDraftContext ??= currentArticleContext();
+    }
+  });
   let scrollTail, navigatingHistory = false;
   function scrollRange() {
     const container = byId("chat-messages");
@@ -166,7 +165,7 @@
     let result;
     try { result = await api.runtime.sendMessage({ type: "chat-operation", operation, patch: { actionId: selectedAction, ...patch } }); }
     catch { blocked = true; controls(); throw new Error("保存結果を確認できません。ページを再読み込みして状態を確認してください。自動再送は行いません。"); }
-    if (!result?.ok) { if (!["INVALID_INPUT", "STALE_CHAT", "CHAT_BUSY"].includes(result?.code)) blocked = true; controls(); throw Object.assign(new Error(result?.error || "会話の処理結果を確認できません。"), { code: result?.code }); }
+    if (!result?.ok) { if (!["INVALID_INPUT", "STALE_CHAT", "STALE_ARTICLE_CONTEXT", "CHAT_BUSY"].includes(result?.code)) blocked = true; controls(); throw Object.assign(new Error(result?.error || "会話の処理結果を確認できません。"), { code: result?.code }); }
     return result.settings;
   }
   function renderModels() {
@@ -181,16 +180,16 @@
       navigatingHistory = false;
       abort(); generatingId = undefined; tagUI.close(); closeArticleDialog();
       if (state.actionId !== next.actionId) {
-        drafts.set(state.actionId, { epoch: state.epoch, text: byId("chat-input").value, articleRequest: pendingArticleRequest });
+        drafts.set(state.actionId, { epoch: state.epoch, text: byId("chat-input").value, articleRequest: pendingArticleRequest, articleDraftContext });
         const draft = drafts.get(next.actionId);
         byId("chat-input").value = draft?.epoch === next.epoch ? draft.text : "";
         pendingArticleRequest = draft?.epoch === next.epoch ? draft.articleRequest : undefined;
-      } else { drafts.delete(next.actionId); byId("chat-input").value = ""; pendingArticleRequest = undefined; }
+        articleDraftContext = draft?.epoch === next.epoch ? draft.articleDraftContext : undefined;
+      } else { drafts.delete(next.actionId); byId("chat-input").value = ""; pendingArticleRequest = undefined; articleDraftContext = undefined; }
     }
     if (generatingId && next.active?.id !== generatingId) { abort(); generatingId = undefined; }
     state = next; selectedAction = state.actionId;
     if (selectedAction === "article") {
-      if (articleContext && (articleContext.epoch !== state.epoch || !state.articleSegments?.[articleContext.segmentId])) pinArticleContext();
       renderArticleLibrary();
     }
     for (const button of actionButtons) {
@@ -253,7 +252,7 @@
     renderModels();
     render(await call(restoreSelection ? "restore" : "get"));
   }
-  function patch(extra = {}) { return { epoch: state.epoch, endpoint: settings.ollamaUrl, ...(selectedAction === "article" ? { articleSegmentId: articleContext?.segmentId } : {}), ...extra }; }
+  function patch(extra = {}) { return { epoch: state.epoch, endpoint: settings.ollamaUrl, ...(selectedAction === "article" ? { articleSegmentId: state.activeArticleSegmentId } : {}), ...extra }; }
   const tabs = [{ id: "chat", title: "通常の会話" }, ...globalThis.OshaberiNoteChatActions.definitions];
   for (const action of tabs) {
     const button = document.createElement("button"); button.type = "button"; button.textContent = action.title; button.disabled = true;
@@ -380,6 +379,13 @@
   });
   byId("chat-form").onsubmit = async event => {
     event.preventDefault(); if (byId("chat-send").disabled) return;
+    if (selectedAction === "article" && !pendingArticleRequest) {
+      const current = currentArticleContext();
+      if (articleDraftContext && (articleDraftContext.epoch !== current.epoch || articleDraftContext.segmentId !== current.segmentId)) {
+        if (!confirm(`${byId("chat-article-target").textContent}\n入力中に対象の会話区間が変更されました。この文章を現在の対象へ送信しますか？`)) return;
+      }
+      articleDraftContext = current;
+    }
     const sequence = ++sendSequence;
     connectionHelp();
     busy = true; controls();
@@ -395,7 +401,7 @@
       if (sequence !== sendSequence || !visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
       if (pendingArticleRequest === articleRequest) pendingArticleRequest = undefined;
       if (articleRequest?.requestToken) globalThis.history?.replaceState?.(null, "", api.runtime.getURL("home.html"));
-      if (actionId === "article") pinArticleContext(epoch, started.turns.at(-1).articleSegmentId);
+      articleDraftContext = undefined;
       navigatingHistory = false; render(started); byId("chat-input").value = ""; busy = false; controls();
       const container = byId("chat-messages"); if (scrollRange() > 1) container.scrollTop = container.scrollHeight;
       updateMessageNavigation();
@@ -430,7 +436,8 @@
         try { const stopped = await call("stop", { actionId, id, owner }); if (sequence === sendSequence) render(stopped); }
         catch { blocked = true; }
       }
-      if (error.code === "CHAT_BUSY") { waitForArticle = true; await sync(); status("別の応答が完了するまで記事の依頼を待機します。"); }
+      if (error.code === "STALE_ARTICLE_CONTEXT") { await sync(); status(`${error.message} 入力は保持しています。自動再送は行いません。`); }
+      else if (error.code === "CHAT_BUSY") { waitForArticle = true; await sync(); status("別の応答が完了するまで記事の依頼を待機します。"); }
       else if (sequence === sendSequence) status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message}${error.status === 403 ? " 詳細は「LLMの設定」で確認してください。" : ""} 自動再送は行いません。`);
     } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) generatingId = undefined; if (sequence === sendSequence) busy = false; controls(); if (waitForArticle) Promise.resolve().then(maybeSendArticle); }
   };
@@ -504,7 +511,8 @@
   async function init() {
     try {
       connectionHelp();
-      try { articleContext = JSON.parse(globalThis.sessionStorage?.getItem(articleContextKey) ?? "null") ?? undefined; } catch { articleContext = undefined; }
+      // 旧版の画面別選択は共有区間へ移行したため使用しない。
+      try { globalThis.sessionStorage?.removeItem("oshaberiNote.articleContext.v1"); } catch { /* 旧選択が残っても参照しない。 */ }
       connection = api.runtime.connect({ name: `oshaberi-chat:${owner}` });
       connection.onDisconnect.addListener(() => { abort(); ready = false; blocked = true; status("背景処理との接続が切れました。再読み込みして状態を確認してください。"); controls(); });
       if (firefox) articleConsent = await api.permissions.contains({ data_collection: ["websiteContent"] });
@@ -515,7 +523,7 @@
       const incoming = /^#article-request=([a-zA-Z0-9-]{36})$/.exec(globalThis.location.hash);
       if (incoming) {
         render(await call("select", { actionId: "article", owner }));
-        try { pendingArticleRequest = await platform.article("request", { requestToken: incoming[1] }); pinArticleContext(); renderArticleLibrary(); byId("chat-input").value = pendingArticleRequest.displayText; }
+        try { pendingArticleRequest = await platform.article("request", { requestToken: incoming[1] }); articleDraftContext = undefined; byId("chat-input").value = pendingArticleRequest.displayText; }
         catch (error) { status(error.message); }
       }
       if ((visible || llmVisible) && state.approvedUrl === settings.ollamaUrl && settings.enabled) await probe(false);

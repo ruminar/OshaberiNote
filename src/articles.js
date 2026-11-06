@@ -51,6 +51,8 @@
         if (!/^[a-zA-Z0-9-]{36}$/.test(segmentId) || !segment || !map.has(segment.articleId) || !actions[segment.action]) throw invalid("記事の会話区間が不正です。");
       }
       if (conversation.turns.some(turn => turn.articleId && conversation.articleSegments[turn.articleSegmentId]?.articleId !== turn.articleId)) throw invalid("記事と会話区間が一致しません。");
+      if (conversation.activeArticleSegmentId === undefined) conversation.activeArticleSegmentId = conversation.turns.findLast(turn => turn.articleSegmentId)?.articleSegmentId ?? null;
+      if (conversation.activeArticleSegmentId !== null && !Object.hasOwn(conversation.articleSegments, conversation.activeArticleSegmentId)) throw invalid("共有の対象区間が不正です。");
     }
     result.activeArticleId ??= result.conversation?.turns.findLast(turn => turn.articleId)?.articleId ?? null;
     if (result.activeArticleId !== null && !map.has(result.activeArticleId)) throw new Error("対象記事の参照が不正です。");
@@ -76,6 +78,7 @@
       segmentId = patch.articleSegmentId;
       segment = conversation?.articleSegments?.[segmentId];
       if (!segment || conversation.epoch !== epoch) throw invalid("この画面の対象記事が未選択か、会話が初期化されました。記事タイトルまたは取り込み済み記事から操作を選んでください。");
+      if (segmentId !== conversation.activeArticleSegmentId) throw Object.assign(new Error("自由入力の対象区間が別の画面で変更されました。現在の対象を確認して、もう一度送信してください。"), { code: "STALE_ARTICLE_CONTEXT" });
       articleId = segment.articleId;
       action = "question";
     }

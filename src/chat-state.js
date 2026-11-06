@@ -167,6 +167,7 @@
         if (id === "article") {
           state.articleSegments ??= {};
           state.articleSegments[message.articleSegmentId] = articleSegment;
+          state.activeArticleSegmentId = message.articleSegmentId;
         }
         state.turns.push({ ...displayMessage, assistant: "", status: "pending" }); state.active = { id: crypto.randomUUID(), owner: patch.owner };
         retainRecent(state, limits.response * 6);

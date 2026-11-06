@@ -54,7 +54,7 @@
           </nav>
           <div id="chat-messages" role="tabpanel" role="log" aria-label="会話履歴" aria-live="off"></div>
           <div id="chat-article-help" hidden>
-            <p class="muted">要約・感想・修正点は記事1件だけで新しい会話区間を始めます。自由入力は、この画面で選んだ区間の依頼・回答を含めて送ります。他の記事や区間は送りません。記事とこの会話はブラウザ終了・「新しい会話」で削除します。</p>
+            <p class="muted">要約・感想・修正点は記事1件だけで新しい会話区間を始めます。自由入力は、全画面で共有する最新区間の依頼・回答を含めて送ります。入力中に対象区間が変わった場合は、送信前に確認します。他の記事や区間は送りません。記事とこの会話はブラウザ終了・「新しい会話」で削除します。</p>
             <p id="chat-article-target" class="muted"></p>
             <details><summary>取り込み済み記事</summary><div id="chat-article-library" class="settings-actions"></div></details>
           </div>
@@ -91,7 +91,7 @@
         </section>
         <section id="panel-llm" aria-labelledby="llm-heading" hidden>
           <h2 id="llm-heading">LLMの設定</h2>
-            <p class="muted">入力したメッセージ・完了済みの会話・システムプロンプトを、設定したOllamaへ送ります。「タグの提案」の会話では登録済みタグも参考情報として送ります。「記事について」の操作は対象記事1件で開始し、自由入力ではこの画面が参照する会話区間の依頼・回答も送ります。他の記事・区間の履歴は送りません。閲覧だけでは記事を取り込まず、Cookieや認証情報は収集・送信しません。</p>
+            <p class="muted">入力したメッセージ・完了済みの会話・システムプロンプトを、設定したOllamaへ送ります。「タグの提案」の会話では登録済みタグも参考情報として送ります。「記事について」の操作は対象記事1件で開始し、自由入力では全画面で共有する最新区間の依頼・回答も送ります。他の記事・区間の履歴は送りません。閲覧だけでは記事を取り込まず、Cookieや認証情報は収集・送信しません。</p>
           <form id="ollama-settings">
             <label for="ollama-url">Ollama接続URL</label>
             <input id="ollama-url" type="url" maxlength="2048" value="http://127.0.0.1:11434" autocomplete="off" spellcheck="false" required>

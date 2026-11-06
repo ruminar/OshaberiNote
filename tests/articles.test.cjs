@@ -162,18 +162,16 @@ async function ask(f,segment,text='なぜですか？') {
  return f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text,articleSegmentId:segment});
 }
 
-test('自由入力は送信元の区間だけを使い、交互のA/Bや同じ記事の別区間を混ぜない',async()=>{
+test('自由入力は共有の最新区間だけを使い、古い対象からの送信を保存前に拒否する',async()=>{
  const f=await ready(),a=article('n123','同名','Aだけの本文'),b=article('n456','同名','Bだけの本文');
  const first=await start(f,await importArticle(f,a)),aId=first.turns.at(-1).articleSegmentId;await complete(f,first,'Aだけの要約');
  const second=await start(f,await importArticle(f,b)),bId=second.turns.at(-1).articleSegmentId;await complete(f,second,'Bだけの要約');
- const followA=await ask(f,aId);assert.deepEqual(followA.messages.map(m=>m.role),['system','user','assistant','user']);
- assert.ok(followA.messages[1].content.includes(a.body));assert.equal(followA.messages[2].content,'Aだけの要約');assert.ok(!JSON.stringify(followA.messages).includes('Bだけ'));
- await complete(f,followA,'Aだけの追加回答');
- const followB=await ask(f,bId,'その説明を詳しく');assert.ok(JSON.stringify(followB.messages).includes('Bだけの要約'));assert.ok(!JSON.stringify(followB.messages).includes('Aだけ'));
- await complete(f,followB);
+ assert.equal((await f.chat('get',{actionId:'article'})).activeArticleSegmentId,bId);
+ const before=structuredClone(f.sessionData);await assert.rejects(ask(f,aId),e=>e.code==='STALE_ARTICLE_CONTEXT');assert.deepEqual(f.sessionData,before);
+ const followB=await ask(f,bId,'その説明を詳しく');assert.ok(JSON.stringify(followB.messages).includes('Bだけの要約'));assert.ok(!JSON.stringify(followB.messages).includes('Aだけ'));await complete(f,followB);
  let state=await f.chat('get',{actionId:'article'});
  const fresh=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'感想',articleId:a.articleId,articleAction:'impression'});
- assert.notEqual(fresh.turns.at(-1).articleSegmentId,aId);assert.equal(fresh.messages.length,2);assert.ok(!JSON.stringify(fresh.messages).includes('Aだけの要約'));await complete(f,fresh);
+ assert.notEqual(fresh.activeArticleSegmentId,aId);assert.equal(fresh.activeArticleSegmentId,fresh.turns.at(-1).articleSegmentId);assert.equal(fresh.messages.length,2);assert.ok(!JSON.stringify(fresh.messages).includes('Aだけの要約'));await complete(f,fresh);
  await assert.rejects(ask(f,undefined),/未選択/);await assert.rejects(ask(f,'unknown'),/未選択/);
  await f.chat('reset',{actionId:'article'});await assert.rejects(ask(f,aId),/未選択/);
 });
