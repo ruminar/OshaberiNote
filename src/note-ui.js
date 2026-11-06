@@ -952,22 +952,35 @@
     function syncArticleSummary(show, url) {
       if (!show || !core.isArticle(url) || typeof actions.summarizeArticle !== "function" || !globalThis.OshaberiNoteArticles) { clearArticleSummary(); return; }
       if (articleSummary?.isConnected) return;
-      const wrapper = doc.createElement("div"), button = doc.createElement("button"), status = doc.createElement("span");
+      const wrapper = doc.createElement("div"), button = doc.createElement("button"), copy = doc.createElement("button"), status = doc.createElement("span");
       wrapper.setAttribute(owned, ""); wrapper.className = "oshaberi-note-article-summary";
       button.type = "button"; button.textContent = "この記事を要約";
       button.setAttribute("title", "閲覧できる記事本文を、設定したOllamaへ送って要約します");
+      copy.type = "button"; copy.textContent = "記事全文を取得";
+      copy.setAttribute("title", "要約に使う記事本文をクリップボードへコピーします。Ollamaには送信しません");
       status.setAttribute("role", "status");
       button.onclick = async () => {
         if (articleSummaryBusy || button.disabled) return;
-        articleSummaryBusy = true; button.disabled = true; status.textContent = "記事を取り込んでいます…";
+        articleSummaryBusy = true; button.disabled = true; copy.disabled = true; status.textContent = "記事を取り込んでいます…";
         try {
           const article = globalThis.OshaberiNoteArticles.extract(doc, win, currentUrl);
           await actions.summarizeArticle(article);
           if (wrapper.isConnected) status.textContent = "記事の会話を開きました。";
         } catch (error) { if (wrapper.isConnected) status.textContent = error.message || "記事を取得できませんでした。送信は行いません。"; }
-        finally { articleSummaryBusy = false; button.disabled = false; }
+        finally { articleSummaryBusy = false; button.disabled = false; copy.disabled = false; }
       };
-      wrapper.append(button, status); doc.body.append(wrapper); articleSummary = wrapper;
+      copy.onclick = async () => {
+        if (articleSummaryBusy || copy.disabled) return;
+        articleSummaryBusy = true; button.disabled = true; copy.disabled = true; status.textContent = "記事を取得しています…";
+        try {
+          const article = globalThis.OshaberiNoteArticles.extract(doc, win, currentUrl);
+          try { await actions.copyArticle(article); }
+          catch { throw new Error("クリップボードへのコピーに失敗しました。ページを選択してから、もう一度お試しください。"); }
+          if (wrapper.isConnected) status.textContent = "記事全文をクリップボードにコピーしました。";
+        } catch (error) { if (wrapper.isConnected) status.textContent = error.message || "記事を取得できませんでした。コピーは行いません。"; }
+        finally { articleSummaryBusy = false; button.disabled = false; copy.disabled = false; }
+      };
+      wrapper.append(button, copy, status); doc.body.append(wrapper); articleSummary = wrapper;
     }
     function syncArticleFollowing(settings, url) {
       const article = doc.querySelector('article[id="note-article"]');

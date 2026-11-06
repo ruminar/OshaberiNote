@@ -1,6 +1,32 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const backend=require('./helpers/chat.cjs'),{documentFromHtml}=require('./helpers/dom.cjs');
 const article=(articleId='n123',title='同じタイトル',body='これは表示できる記事の本文です。')=>({articleId,title,author:'著者',body,url:`https://note.com/test/n/${articleId}`});
+function articleCopyUi(options={}) {
+ const f=backend(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="text"></p><p><a href="https://example.com/source" id="link"></a></p><p hidden id="hidden"></p></div></div></article>');
+ doc.body=doc.root;for(const [id,text] of [['title','記事の題'],['author','著者'],['text','コピーする本文'],['link','参照先'],['hidden','非表示の秘密']])doc.getElementById(id).textContent=text;
+ doc.getElementById('note-article').getBoundingClientRect=()=>({left:240,width:700});
+ const win={matchMedia:()=>({matches:true}),getComputedStyle:node=>({display:node.hidden?'none':'block',visibility:'visible'})};
+ const copies=[],imports=[];require('node:vm').runInContext(require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/note-ui.js'),'utf8'),f.context);
+ const ui=f.context.OshaberiNoteUi.create(doc,win,{summarizeArticle:async value=>imports.push(value),copyArticle:async value=>{if(options.fail)throw Error('clipboard denied');copies.push(value.body);}});
+ const update=url=>ui.update(f.context.OshaberiNote.defaultSettings(),url||article().url);update();
+ const wrapper=doc.querySelectorAll('div').find(n=>n.className==='oshaberi-note-article-summary');
+ return {f,doc,win,copies,imports,update,wrapper,buttons:wrapper.querySelectorAll('button'),status:wrapper.querySelector('span')};
+}
+
+test('記事全文取得は要約と同じリンク付き本文だけをコピーし、送信や保存をしない',async()=>{
+ const f=articleCopyUi();assert.deepEqual(f.buttons.map(n=>n.textContent),['この記事を要約','記事全文を取得']);
+ const expected=f.f.context.OshaberiNoteArticles.extract(f.doc,f.win,article().url).body;
+ await f.buttons[1].onclick();assert.deepEqual(f.copies,[expected]);assert.match(expected,/https:\/\/example.com\/source/);assert.ok(!expected.includes('非表示の秘密'));assert.ok(!expected.includes('記事の題'));
+ assert.deepEqual(f.imports,[]);assert.equal(f.f.articleData.current,undefined);assert.match(f.status.textContent,/コピーしました/);
+ await f.buttons[0].onclick();assert.equal(f.imports[0].body,expected);
+});
+
+test('記事全文取得はURLとDOMの不一致を拒否し、コピー失敗後にも再試行できる',async()=>{
+ const options={fail:true},f=articleCopyUi(options);
+ await f.buttons[1].onclick();assert.match(f.status.textContent,/コピーに失敗/);assert.equal(f.buttons[1].disabled,false);
+ options.fail=false;f.update(article('n456').url);await f.buttons[1].onclick();assert.match(f.status.textContent,/本文と記事URL/);assert.equal(f.copies.length,0);
+ f.update();await f.buttons[1].onclick();assert.equal(f.copies.length,1);assert.deepEqual(f.imports,[]);
+});
 async function ready(){const f=backend();f.connect('owner');await f.save({ollamaModel:'local-model'});const state=await f.chat('get');await f.chat('approve',{epoch:state.epoch,endpoint:state.endpoint});return f;}
 async function importArticle(f,value=article()){
  f.context.chrome.tabs.get=async()=>({url:value.url});
