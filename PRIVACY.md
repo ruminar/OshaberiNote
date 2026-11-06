@@ -11,3 +11,5 @@
 参考：[Ollama公式FAQ](https://docs.ollama.com/faq)、[Firefoxのデータ送信同意](https://extensionworkshop.com/documentation/develop/firefox-builtin-data-consent/)。
 
 記事本文にあるnote記事カード・外部リンクカードは、取得できるタイトル・著者名とリンク先URLを本文の一部として保存・送信します。タイトルと著者名は表示中のDOMまたは読み込み済みの同一オリジンnote埋め込みから取得し、未読み込み時もURLを残します。リンク先の記事本文の取得や、カードを読み込むための追加通信は行いません。
+
+記事本文中の文字列に設定されたHTTP(S)リンクと添付ファイルのリンクも、表示文字とリンク先URLを本文の一部として保存・送信します。リンク先の内容や添付ファイル本体は取得しません。

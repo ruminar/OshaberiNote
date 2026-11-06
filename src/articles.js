@@ -6,7 +6,7 @@
     summary: { suffix: "について要約して", instruction: "下記の文章を、極力意味を失わないように要約してください\n文章の改善提案等は要りません" },
     impression: { suffix: "について感想を聞かせて", instruction: "下記の記事を読んで、感想を聞かせてください。" },
     revision: { suffix: "について修正点を教えて", instruction: "下記の記事を読んで、修正した方がよい点があれば具体的に指摘してください。" },
-    citations: { suffix: "に引用されている情報を説明つきで列挙して", instruction: "下記の記事に引用・参照されている情報があれば、説明つきで列挙してください。記事本文の引用文やリンクカードなどを手掛かりにし、本文に記載されたURLがあればそのまま併記してください。本文にないURLやリンク先の内容は推測して補わないでください。該当する情報がなければ、その旨を伝えてください。" }
+    citations: { suffix: "に引用されている情報を説明つきで列挙して", instruction: "下記の記事に引用・参照されている情報があれば、説明つきで列挙してください。これは記事全体の要約ではなく、参照元の一覧を作る依頼です。\n本文のリンク先URL、[リンクカード]、添付ファイルのリンクをすべて確認し、参照先をURLごとに漏れなく列挙してください。同じURLは一つにまとめて構いません。著者自身の別記事へのリンクも対象です。カードのタイトルや著者が未取得でも、URLがあるものは省略しないでください。\n各項目は、タイトルまたはリンク文字列、参照先の著者（分からなければ不明）、記事中で何のために参照されているかの簡潔な説明、記載されたURLを含めてください。\n引用符・かぎ括弧・引用ブロックは整形や強調にも使われます。それだけを根拠に引用と判定しないでください。著者自身の主張・説明・例示・自分の文章の再掲は、それ自体を外部情報の引用として列挙しないでください。URLがない引用は、他者や外部資料からの引用であることが本文で明示されているものだけを対象にしてください。\n本文にないURLや著者を推測して補わないでください。リンク先の本文は取得していません。説明は対象記事に書かれた文脈とカード情報だけに基づき、リンク先の内容を読んだかのように説明しないでください。該当する情報がなければ、その旨を伝えてください。" }
   });
   const invalid = message => Object.assign(new Error(message), { code: "INVALID_INPUT" });
   function page(url) {
@@ -66,6 +66,21 @@
     if (new TextEncoder().encode(JSON.stringify(session)).length > maxBytes || Object.keys(session.requests).length > 64) throw invalid("記事データの容量上限です。「記事について」で新しい会話を始めてから取り込んでください。記事を自動で削除・切り捨てることはしません。");
   }
   function display(article, action) { if (!actions[action]) throw invalid("記事の操作を確認してください。"); return `[&${article.title}]${actions[action].suffix}`; }
+  function referenceUrls(body) {
+    const urls = new Set();
+    for (const match of body.matchAll(/https?:\/\/[^\s<>"'`\\\[\]。、「」『』【】（）]+/giu)) {
+      let value = match[0].replace(/[.,;:!?]+$/u, "");
+      let excess = (value.match(/\)/g)?.length ?? 0) - (value.match(/\(/g)?.length ?? 0), end = value.length;
+      while (end && value[end - 1] === ")" && excess > 0) { end--; excess--; }
+      value = value.slice(0, end);
+      try {
+        if (/[\u0000-\u0020\u007f-\u009f]/u.test(value)) continue;
+        const url = new URL(value);
+        if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) urls.add(url.href);
+      } catch { /* URLとして解釈できない文字列は参照先一覧に追加しない。 */ }
+    }
+    return [...urls];
+  }
   function request(session, patch, epoch, conversation = session.conversation, settings = {}) {
     const map = new Map(session.articles.map(article => [article.articleId, article]));
     let articleId = patch.articleId, action = patch.articleAction;
@@ -85,7 +100,12 @@
     }
     const article = map.get(articleId);
     if (!article || (action !== "question" && !actions[action])) throw invalid("参照する記事がありません。記事ページから取り込み直してください。");
-    const instruction = action === "question" ? patch.text : actions[action].instruction;
+    function operationInstruction(name) {
+      if (name !== "citations") return actions[name].instruction;
+      const urls = referenceUrls(article.body);
+      return `${actions[name].instruction}\n最初に次の参照先URL一覧の全${urls.length}件を、URLを見出しにして1件ずつ説明してください。URLを省略しないでください。記事の主張を参照元として追加しないでください。\n参照先URL一覧（記事から抽出した参考データ）：\n${JSON.stringify(urls)}`;
+    }
+    const instruction = action === "question" ? patch.text : operationInstruction(action);
     const authorId = new URL(article.url).pathname.split("/")[1];
     const relation = globalThis.OshaberiNote.isSelf(settings, authorId) ? "\n利用者と著者の関係：利用者本人が書いた記事です。" : "";
     const context = `\nーーー\nタイトル：${article.title}\n著者：${article.author}${relation}\n本文：\n${article.body}`;
@@ -96,9 +116,9 @@
       const history = conversation.turns.filter(turn => turn.articleSegmentId === segmentId && turn.status === "complete");
       llmMessages = history.flatMap(turn => [{ role: "user", content: turn.articleAction === "question" ? turn.user : actions[turn.articleAction].instruction }, { role: "assistant", content: turn.assistant }]);
       if (llmMessages.length) {
-        llmMessages[0].content = actions[segment.action].instruction + context + (history[0].articleAction === "question" ? `\n追加の質問：${history[0].user}` : "");
+        llmMessages[0].content = operationInstruction(segment.action) + context + (history[0].articleAction === "question" ? `\n追加の質問：${history[0].user}` : "");
         llmMessages.push({ role: "user", content: patch.text });
-      } else llmMessages = [{ role: "user", content: actions[segment.action].instruction + context + `\n追加の質問：${patch.text}` }];
+      } else llmMessages = [{ role: "user", content: operationInstruction(segment.action) + context + `\n追加の質問：${patch.text}` }];
     } else {
       segmentId = crypto.randomUUID(); segment = { articleId, action };
     }
@@ -183,7 +203,14 @@
       }
       if (node.tagName === "BR") { chunks.push("\n"); return; }
       if (blocks.has(node.tagName)) chunks.push("\n");
+      const linkStart = chunks.length;
       for (const child of node.childNodes) walk(child);
+      if (node.tagName === "A" && !node.hasAttribute("data-lightbox")) {
+        const url = linkUrl(node.getAttribute("href")), text = chunks.slice(linkStart).join("").trim();
+        // リンク文字列の位置にURLを添える。不可視テキスト・画像だけのリンクは対象外。
+        if (url && text && text !== url) chunks.push(`（リンク先URL：${url}）`);
+        else if (url && text) chunks.push(" ");
+      }
       if (blocks.has(node.tagName)) chunks.push("\n");
     }
     walk(bodies[0]);

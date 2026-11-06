@@ -288,3 +288,28 @@ test('記事の本人情報は送信時のユーザーIDで判断し、全操作
  await f.save({noteUserId:''});state=await follow();assert.ok(state.messages.every(m=>!m.content.includes(relation)));await complete(f,state);
  assert.equal(f.articleData.current.articles[0].author,'るみなー先生');assert.ok(!JSON.stringify(f.articleData.current).includes(relation));
 });
+
+
+test('本文中の文字列リンクと添付ファイルのURLを文字の位置に残し、非表示・画像だけ・危険なリンクを除外する',async()=>{
+ const f=await ready(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="intro"></p><p><a href="https://note.com/other/n/n456"><strong id="link-text"></strong></a></p><figure embedded-service="attachment"><a href="https://note.com/api/v2/attachments/download/key"><strong id="file"></strong></a></figure><a id="url-text" href="https://example.org/plain"></a><a hidden href="https://hidden.example/"><span id="hidden"></span></a><a href="javascript:alert(1)" id="unsafe"></a><a href="https://user:secret@example.com/" id="credentials"></a><a href="https://image.example/full"><img></a><p id="end"></p></div></div></article>');
+ for(const [id,text]of [['title','リンク付き記事'],['author','筆者'],['intro','私の考えです。'],['link-text','鳥ランド'],['file','参照プロンプト.md'],['url-text','https://example.org/plain'],['hidden','秘密'],['unsafe','危険リンクの文字'],['credentials','認証リンクの文字'],['end','記事の終わり']])doc.getElementById(id).textContent=text;
+ const win={getComputedStyle:node=>({display:node.hidden?'none':'block',visibility:'visible'})};
+ const value=f.context.OshaberiNoteArticles.extract(doc,win,article().url);
+ assert.ok(value.body.includes('鳥ランド（リンク先URL：https://note.com/other/n/n456）'));
+ assert.ok(value.body.includes('参照プロンプト.md（リンク先URL：https://note.com/api/v2/attachments/download/key）'));
+ assert.equal(value.body.split('https://example.org/plain').length-1,1);
+ for(const excluded of ['hidden.example','秘密','javascript:','secret@example.com','image.example'])assert.ok(!value.body.includes(excluded));
+ assert.ok(value.body.indexOf('鳥ランド')<value.body.indexOf('参照プロンプト.md'));assert.ok(value.body.indexOf('参照プロンプト.md')<value.body.indexOf('記事の終わり'));
+ const state=await start(f,await importArticle(f,value));assert.ok(state.messages[1].content.includes(value.body));
+
+ await complete(f,state);
+ const current=await f.chat('get',{actionId:'article'});
+ const citation=await f.chat('start',{actionId:'article',epoch:current.epoch,endpoint:current.endpoint,owner:'owner',model:'local-model',text:'列挙',articleId:value.articleId,articleAction:'citations'});
+ const index='["https://note.com/other/n/n456","https://note.com/api/v2/attachments/download/key","https://example.org/plain"]';
+ assert.ok(citation.messages[1].content.includes('全3件'));assert.ok(citation.messages[1].content.includes(index));
+ await complete(f,citation);const active=await f.chat('get',{actionId:'article'});
+ const follow=await f.chat('start',{actionId:'article',epoch:active.epoch,endpoint:active.endpoint,owner:'owner',model:'local-model',text:'その参照先を詳しく',articleSegmentId:active.activeArticleSegmentId});
+ assert.ok(follow.messages[1].content.includes(index));assert.ok(!JSON.stringify(f.articleData.current).includes('参照先URL一覧'));
+ const prompt=f.context.OshaberiNoteArticles.actions.citations.instruction;
+ for(const rule of ['参照元の一覧','[リンクカード]','添付ファイル','著者自身の別記事','省略しない','それだけを根拠に引用と判定しない','他者や外部資料からの引用','リンク先の本文は取得していません'])assert.ok(prompt.includes(rule));
+});
