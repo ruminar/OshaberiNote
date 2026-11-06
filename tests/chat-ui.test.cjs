@@ -79,14 +79,14 @@ test('共有対象の変更を同期し、入力中や別タブに退避した�
  let state=await f.chat('get',{actionId:'article'});const token=f.opened.at(-1).url.split('=')[1];
  state=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other',model:'local',text:'Bの依頼',requestToken:token});
  await f.chat('complete',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other',model:'local',id:state.active.id,text:'Bの回答の秘密'});await flush();
- await n.get('chat-actions').children[2].onclick();await flush();assert.match(n.get('chat-article-target').textContent,/n456/);assert.equal(n.get('chat-input').value,'Aについての下書き');
+ await n.get('chat-actions').children[2].onclick();await flush();assert.equal((await f.chat('get',{actionId:'article'})).articleSegments[(await f.chat('get',{actionId:'article'})).activeArticleSegmentId].articleId,'n456');assert.equal(n.get('chat-input').value,'Aについての下書き');
  const beforePosts=f.requests.filter(r=>r.url.endsWith('/api/chat')).length;
  f.c.confirm=()=>false;n.get('chat-form').fire('submit');await flush();assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,beforePosts);assert.equal(n.get('chat-input').value,'Aについての下書き');
  f.c.confirm=text=>{assert.match(text,/会話区間が変更/);assert.match(text,/別の記事B/);return true;};n.get('chat-form').fire('submit');await flush();
  const posts=f.requests.filter(r=>r.url.endsWith('/api/chat')).map(r=>JSON.parse(r.init.body));assert.equal(posts.length,beforePosts+1);assert.ok(JSON.stringify(posts.at(-1).messages).includes(b.body));assert.ok(!JSON.stringify(posts.at(-1).messages).includes(seed.article.body));
  const reloaded=await fixture(t,{storedChat:f.data[seed.key],storedArticles:f.sessionData[seed.sessionKey],sessionValues:new Map([['oshaberiNote.articleContext.v1','old A selection']])});
- assert.match(reloaded.nodes.get('chat-article-target').textContent,/n456/);assert.equal(reloaded.sessionValues.get('oshaberiNote.articleContext.v1'),undefined);
- await reloaded.chat('reset',{actionId:'article'});await flush();assert.match(reloaded.nodes.get('chat-article-target').textContent,/未選択/);
+ assert.equal((await reloaded.chat('get',{actionId:'article'})).articleSegments[(await reloaded.chat('get',{actionId:'article'})).activeArticleSegmentId].articleId,'n456');assert.equal(reloaded.sessionValues.get('oshaberiNote.articleContext.v1'),undefined);
+ await reloaded.chat('reset',{actionId:'article'});await flush();assert.equal((await reloaded.chat('get',{actionId:'article'})).turns.length,0);
 });
 
 test('送信直前の共有対象変更は背景で拒否し、下書きを保持して自動再送しない',async t=>{
@@ -102,25 +102,24 @@ test('送信直前の共有対象変更は背景で拒否し、下書きを保�
   return original(message);
  };
  n.get('chat-input').value='Aについての質問';n.get('chat-input').fire('input');n.get('chat-form').fire('submit');await flush();
- assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,1);assert.equal(n.get('chat-input').value,'Aについての質問');assert.match(n.get('chat-status').textContent,/対象区間.*変更/);assert.match(n.get('chat-article-target').textContent,/nRaceB/);assert.equal(n.get('chat-send').disabled,false);
+ assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,1);assert.equal(n.get('chat-input').value,'Aについての質問');assert.match(n.get('chat-status').textContent,/対象区間.*変更/);assert.equal((await f.chat('get',{actionId:'article'})).articleSegments[(await f.chat('get',{actionId:'article'})).activeArticleSegmentId].articleId,'nRaceB');assert.equal(n.get('chat-send').disabled,false);
  f.c.confirm=()=>false;n.get('chat-form').fire('submit');await flush();assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,1);
 });
 
-test('10往復より前の記事も一覧から再操作でき、同名の記事をIDで区別する',async t=>{
+test('一覧を置かず、過去の同名記事のタイトルから再操作して自由入力を続けられる',async t=>{
  const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash}),n=f.nodes;
- f.connect('library-owner');
- for(let i=0;i<11;i++){
-  const b={...seed.article,articleId:'n456',body:'Bの本文',url:'https://note.com/test/n/n456'};f.c.chrome.tabs.get=async()=>({url:b.url});
-  await f.send({type:'import-article',patch:{article:b,pageUrl:b.url}},{id:'test',url:b.url,frameId:0,tab:{id:9}});
-  let state=await f.chat('get',{actionId:'article'});state=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'library-owner',model:'local',text:'B',requestToken:f.opened.at(-1).url.split('=')[1]});
-  await f.chat('complete',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:state.active.owner,model:'local',id:state.active.id,text:'Bの回答'});
- }
- await flush();assert.equal(n.get('chat-messages').querySelectorAll('article').length,20);
- assert.ok(!n.get('chat-messages').textContent.includes('n123'));
- const buttons=n.get('chat-article-library').querySelectorAll('button');assert.equal(buttons.length,2);
- const a=buttons.find(b=>b.textContent.includes('n123'));await a.onclick();await flush();n.get('chat-article-impression').onclick();await flush();
- const post=JSON.parse(f.requests.filter(r=>r.url.endsWith('/api/chat')).at(-1).init.body);assert.equal(post.messages.length,2);assert.ok(post.messages[1].content.includes(seed.article.body));assert.match(post.messages[1].content,/感想/);
- await n.get('chat-new').onclick();await flush();assert.equal(n.get('chat-article-library').querySelectorAll('button').length,0);
+ for(const id of ['chat-article-help','chat-article-target','chat-article-library'])assert.equal(n.has(id),false);
+ f.connect('other-article');const b={...seed.article,articleId:'n456',body:'別記事Bの本文',url:'https://note.com/test/n/n456'};f.c.chrome.tabs.get=async()=>({url:b.url});
+ await f.send({type:'import-article',patch:{article:b,pageUrl:b.url}},{id:'test',url:b.url,frameId:0,tab:{id:9}});
+ let state=await f.chat('get',{actionId:'article'});state=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other-article',model:'local',text:'B',requestToken:f.opened.at(-1).url.split('=')[1]});
+ await f.chat('complete',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:state.active.owner,model:'local',id:state.active.id,text:'別記事Bの回答'});await flush();
+ const refs=n.get('chat-messages').querySelectorAll('button[aria-haspopup="dialog"]');assert.equal(refs.length,2);assert.equal(refs[0].textContent,refs[1].textContent);
+ await refs[0].onclick();await flush();n.get('chat-article-impression').onclick();await flush();
+ const posts=()=>f.requests.filter(r=>r.url.endsWith('/api/chat')).map(r=>JSON.parse(r.init.body));
+ assert.equal(posts().at(-1).messages.length,2);assert.ok(posts().at(-1).messages[1].content.includes(seed.article.body));assert.match(posts().at(-1).messages[1].content,/感想/);
+ n.get('chat-input').value='もう少し詳しく';n.get('chat-input').fire('input');n.get('chat-form').fire('submit');await flush();
+ const follow=posts().at(-1);assert.equal(follow.messages.length,4);assert.ok(follow.messages[1].content.includes(seed.article.body));assert.ok(!JSON.stringify(follow.messages).includes('別記事B'));
+ await n.get('chat-new').onclick();await flush();assert.equal(n.get('chat-messages').querySelectorAll('article').length,0);
 });
 
 test('記事タブへ手入力した偽参照はボタン化せず、修正点の操作は保持中の記事本文を送る',async t=>{

@@ -53,11 +53,6 @@
             <button id="chat-next-message" type="button" class="secondary" aria-controls="chat-messages" disabled>▽ 次の発言</button>
           </nav>
           <div id="chat-messages" role="tabpanel" role="log" aria-label="会話履歴" aria-live="off"></div>
-          <div id="chat-article-help" hidden>
-            <p class="muted">要約・感想・修正点は記事1件だけで新しい会話区間を始めます。自由入力は、全画面で共有する最新区間の依頼・回答を含めて送ります。入力中に対象区間が変わった場合は、送信前に確認します。他の記事や区間は送りません。記事とこの会話はブラウザ終了・「新しい会話」で削除します。</p>
-            <p id="chat-article-target" class="muted"></p>
-            <details><summary>取り込み済み記事</summary><div id="chat-article-library" class="settings-actions"></div></details>
-          </div>
           <form id="chat-form">
             <label for="chat-input">メッセージ</label>
             <textarea id="chat-input" rows="4" maxlength="200000" aria-describedby="chat-input-help" placeholder="メッセージを入力（Ctrl+Enterで送信、Enterで改行）" disabled></textarea>

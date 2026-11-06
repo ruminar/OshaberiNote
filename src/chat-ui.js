@@ -17,26 +17,10 @@
   let pendingArticleRequest, articleReference, articleSnapshot, localActive = false;
   let articleDraftContext;
   const currentArticleContext = () => ({ epoch: state?.epoch, segmentId: state?.activeArticleSegmentId ?? null });
-  function renderArticleLibrary() {
+  function articleTargetLabel() {
     const target = state?.articleSegments?.[state?.activeArticleSegmentId];
     const items = articleSnapshot?.endpoint === state?.endpoint && articleSnapshot?.conversation?.epoch === state?.epoch ? articleSnapshot.articles : [];
-    byId("chat-article-target").textContent = target ? `自由入力の対象（全画面で共有）：${items.find(item => item.articleId === target.articleId)?.title ?? target.articleId}（${target.articleId}）` : "自由入力の対象が未選択です。記事タイトルまたは取り込み済み記事から操作を選んでください。";
-    const library = byId("chat-article-library"); library.replaceChildren();
-    for (const item of items) {
-      const button = document.createElement("button"), epoch = state.epoch;
-      const valid = () => selectedAction === "article" && state?.epoch === epoch && articleSnapshot?.articles.some(article => article.articleId === item.articleId);
-      button.type = "button"; button.textContent = `${item.title}（${item.articleId}）`; button.setAttribute("aria-haspopup", "dialog");
-      button.onclick = async () => {
-        if (!valid()) return;
-        try {
-          const info = await platform.article("info", { epoch, articleId: item.articleId });
-          if (!valid()) return;
-          articleReference = { ...info, epoch, valid }; byId("chat-article-title").textContent = info.title; articleDialog.showModal(); controls();
-        } catch (error) { status(error.message); }
-      };
-      library.append(button);
-    }
-    if (!items.length) library.textContent = "取り込み済みの記事はありません。";
+    return target ? `現在の送信対象：${items.find(item => item.articleId === target.articleId)?.title ?? target.articleId}（${target.articleId}）` : "対象記事が未選択です。過去の発言の記事タイトルから操作を選ぶか、記事ページから取り込んでください。";
   }
   const articleDialog = byId("chat-article-dialog");
   function discardPendingArticle() {
@@ -200,15 +184,11 @@
     }
     if (generatingId && next.active?.id !== generatingId) { abort(); generatingId = undefined; }
     state = next; selectedAction = state.actionId;
-    if (selectedAction === "article") {
-      renderArticleLibrary();
-    }
     for (const button of actionButtons) {
       const selected = button.getAttribute("data-chat-action") === selectedAction;
       button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1;
     }
     byId("chat-messages").setAttribute("aria-labelledby", `chat-tab-${selectedAction}`);
-    byId("chat-article-help").hidden = selectedAction !== "article";
     byId("chat-input-help").textContent = selectedAction === "article" ? "最大200,000文字。閲覧できる記事本文だけを使います。記事と今回の依頼文がモデルのコンテキストに収まらない場合はエラーにし、本文を自動で切り捨てません。" : "最大200,000文字。記事本文も貼り付けられます。長文や過去の会話は、Ollamaのコンテキスト長によって一部が参照されない場合があります。";
     const action = globalThis.OshaberiNoteChatActions.find(state.actionId);
     byId("chat-heading").textContent = action ? `おしゃべり（${action.title} v${action.version}）` : "おしゃべり";
@@ -394,7 +374,7 @@
     if (selectedAction === "article" && !pendingArticleRequest) {
       const current = currentArticleContext();
       if (articleDraftContext && (articleDraftContext.epoch !== current.epoch || articleDraftContext.segmentId !== current.segmentId)) {
-        if (!confirm(`${byId("chat-article-target").textContent}\n入力中に対象の会話区間が変更されました。この文章を現在の対象へ送信しますか？`)) return;
+        if (!confirm(`${articleTargetLabel()}\n入力中に対象の会話区間が変更されました。この文章を現在の対象へ送信しますか？`)) return;
       }
       articleDraftContext = current;
     }

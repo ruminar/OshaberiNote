@@ -77,7 +77,7 @@
     if (!articleId && !action) {
       segmentId = patch.articleSegmentId;
       segment = conversation?.articleSegments?.[segmentId];
-      if (!segment || conversation.epoch !== epoch) throw invalid("この画面の対象記事が未選択か、会話が初期化されました。記事タイトルまたは取り込み済み記事から操作を選んでください。");
+      if (!segment || conversation.epoch !== epoch) throw invalid("この画面の対象記事が未選択か、会話が初期化されました。過去の発言の記事タイトルから操作を選ぶか、記事ページから取り込んでください。");
       if (segmentId !== conversation.activeArticleSegmentId) throw Object.assign(new Error("自由入力の対象区間が別の画面で変更されました。現在の対象を確認して、もう一度送信してください。"), { code: "STALE_ARTICLE_CONTEXT" });
       articleId = segment.articleId;
       action = "question";
