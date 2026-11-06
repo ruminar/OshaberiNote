@@ -30,6 +30,28 @@
     const result = structuredClone(raw), map = new Map();
     for (const item of result.articles) { const article = validate(item); if (map.has(article.articleId)) throw new Error("記事IDが重複しています。"); map.set(article.articleId, article); }
     if (result.conversation) result.conversation = globalThis.OshaberiNoteChatState.read(result.conversation, endpoint, id);
+    if (result.conversation) {
+      const conversation = result.conversation;
+      conversation.articleSegments ??= {};
+      if (!conversation.articleSegments || typeof conversation.articleSegments !== "object" || Array.isArray(conversation.articleSegments)) throw invalid("記事の会話区間が不正です。");
+      // 旧版の表示履歴にも区間を付ける。本文はMapだけに保持する。
+      let previous;
+      for (const turn of conversation.turns) {
+        if (!turn.articleId) continue;
+        if (!turn.articleSegmentId) {
+          if (turn.articleAction !== "question" || previous?.articleId !== turn.articleId) {
+            previous = { id: crypto.randomUUID(), articleId: turn.articleId, action: actions[turn.articleAction] ? turn.articleAction : "summary" };
+            conversation.articleSegments[previous.id] = { articleId: previous.articleId, action: previous.action };
+          }
+          turn.articleSegmentId = previous.id;
+        }
+        previous = { id: turn.articleSegmentId, ...conversation.articleSegments[turn.articleSegmentId] };
+      }
+      for (const [segmentId, segment] of Object.entries(conversation.articleSegments)) {
+        if (!/^[a-zA-Z0-9-]{36}$/.test(segmentId) || !segment || !map.has(segment.articleId) || !actions[segment.action]) throw invalid("記事の会話区間が不正です。");
+      }
+      if (conversation.turns.some(turn => turn.articleId && conversation.articleSegments[turn.articleSegmentId]?.articleId !== turn.articleId)) throw invalid("記事と会話区間が一致しません。");
+    }
     result.activeArticleId ??= result.conversation?.turns.findLast(turn => turn.articleId)?.articleId ?? null;
     if (result.activeArticleId !== null && !map.has(result.activeArticleId)) throw new Error("対象記事の参照が不正です。");
     for (const [token, request] of Object.entries(result.requests)) {
@@ -41,7 +63,7 @@
     if (new TextEncoder().encode(JSON.stringify(session)).length > maxBytes || Object.keys(session.requests).length > 64) throw invalid("記事セッションの容量上限です。「記事について」で新しい会話を始めてから取り込んでください。記事を自動で削除・切り捨てることはしません。");
   }
   function display(article, action) { if (!actions[action]) throw invalid("記事の操作を確認してください。"); return `[&${article.title}]${actions[action].suffix}`; }
-  function request(session, patch, epoch) {
+  function request(session, patch, epoch, conversation = session.conversation) {
     const map = new Map(session.articles.map(article => [article.articleId, article]));
     let articleId = patch.articleId, action = patch.articleAction;
     if (patch.requestToken) {
@@ -49,9 +71,12 @@
       if (!pending || pending.epoch !== epoch) throw invalid("この記事の依頼は処理済みか、会話の初期化で無効になりました。自動再送は行いません。");
       articleId = pending.articleId; action = pending.action;
     }
+    let segmentId, segment;
     if (!articleId && !action) {
-      articleId = session.activeArticleId;
-      if (!articleId) throw invalid("対象の記事がありません。記事ページから取り込んでください。");
+      segmentId = patch.articleSegmentId;
+      segment = conversation?.articleSegments?.[segmentId];
+      if (!segment || conversation.epoch !== epoch) throw invalid("この画面の対象記事が未選択か、会話が初期化されました。記事タイトルまたは取り込み済み記事から操作を選んでください。");
+      articleId = segment.articleId;
       action = "question";
     }
     const article = map.get(articleId);
@@ -59,7 +84,19 @@
     const instruction = action === "question" ? patch.text : actions[action].instruction;
     const llmText = `${instruction}\nーーー\nタイトル：${article.title}\n著者：${article.author}\n本文：\n${article.body}`;
     if (llmText.length > 200000) throw invalid("記事と依頼文が送信上限200,000文字を超えています。本文は切り捨てず、送信を中止しました。");
-    return { user: action === "question" ? patch.text : display(article, action), llmText, articleId, articleTitle: article.title, articleAction: action };
+    let llmMessages = [{ role: "user", content: llmText }];
+    if (action === "question") {
+      const history = conversation.turns.filter(turn => turn.articleSegmentId === segmentId && turn.status === "complete");
+      const context = `\nーーー\nタイトル：${article.title}\n著者：${article.author}\n本文：\n${article.body}`;
+      llmMessages = history.flatMap(turn => [{ role: "user", content: turn.articleAction === "question" ? turn.user : actions[turn.articleAction].instruction }, { role: "assistant", content: turn.assistant }]);
+      if (llmMessages.length) {
+        llmMessages[0].content = actions[segment.action].instruction + context + (history[0].articleAction === "question" ? `\n追加の質問：${history[0].user}` : "");
+        llmMessages.push({ role: "user", content: patch.text });
+      } else llmMessages = [{ role: "user", content: actions[segment.action].instruction + context + `\n追加の質問：${patch.text}` }];
+    } else {
+      segmentId = crypto.randomUUID(); segment = { articleId, action };
+    }
+    return { user: action === "question" ? patch.text : display(article, action), llmText, llmMessages, articleSegment: segment, articleSegmentId: segmentId, articleId, articleTitle: article.title, articleAction: action };
   }
   function extract(doc, win, url) {
     const address = page(url), article = doc.querySelector('article[id="note-article"]');
@@ -73,8 +110,11 @@
     };
     const visibleText = node => (typeof node.innerText === "string" ? node.innerText : node.textContent).trim();
     if (!article || bodies?.length !== 1 || bodies[0].getAttribute("data-name") !== "body" || !visible(article) || !visible(bodies[0])) throw invalid("閲覧できる記事本文を特定できません。");
+    const region = bodies[0].closest('[data-note-key]');
+    if (!region || !article.contains(region) || region.getAttribute("data-note-key") !== address.articleId || !visible(region)) throw invalid("表示中の本文と記事URLの一致を確認できません。読み込み完了後に取り込み直してください。");
     const headings = [...article.querySelectorAll("h1")].filter(node => !node.closest('[id="note-body"]') && visible(node));
     if (headings.length !== 1) throw invalid("記事タイトルを特定できません。");
+    if (!region.contains(headings[0])) throw invalid("記事タイトルと本文の対応を確認できません。");
     let author = "";
     for (const time of article.querySelectorAll("time")) {
       if (time.closest('[id="note-body"]')) continue;

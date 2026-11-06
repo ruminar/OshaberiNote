@@ -53,7 +53,7 @@
   }
   async function prepareArticleMessage(patch, state) {
     const session = articles.read(await sessionRaw(), state.endpoint);
-    return articles.request(session, patch, state.epoch);
+    return articles.request(session, patch, state.epoch, state);
   }
   async function articleOperation(operation, patch = {}, sender) {
     return run(async () => {

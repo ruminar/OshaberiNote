@@ -69,12 +69,13 @@
     }
     return state;
   }
-  function messagesFor(state, settings, text) {
+  function messagesFor(state, settings, text, articleMessages) {
     const system = globalThis.OshaberiNoteChatActions.systemPrompt(state.actionId, settings);
     if (system.length + text.length > limits.context) throw Object.assign(new Error("システムプロンプトと今回の入力が送信上限を超えています。入力または登録済みタグを整理してください。"), { code: "INVALID_INPUT" });
     if (state.actionId === "article") {
+      if (system.length + articleMessages.reduce((total, message) => total + message.content.length, 0) > limits.context) throw Object.assign(new Error("記事とこの会話区間が送信上限を超えています。記事タイトルから新しい操作を開始してください。本文は切り捨てません。"), { code: "INVALID_INPUT" });
       state.contextTrimmedTurns = 0;
-      return [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: text }];
+      return [...(system ? [{ role: "system", content: system }] : []), ...articleMessages];
     }
     let remaining = limits.context - system.length - text.length;
     const complete = state.turns.filter(turn => turn.status === "complete"), selected = [];
@@ -162,10 +163,14 @@
         if (typeof patch.owner !== "string" || patch.owner.length > 100 || !patch.owner || typeof patch.text !== "string" || !patch.text.trim() || patch.text.length > limits.input) throw Object.assign(new Error("メッセージは1～200,000文字で入力してください。入力を直して、そのまま再送できます。"), { code: "INVALID_INPUT" });
         if (port.isOwnerConnected && !port.isOwnerConnected(patch.owner)) throw new Error("会話画面との接続を確認できません。再読み込みしてください。");
         const message = id === "article" ? await port.prepareArticleMessage(patch, state) : { user: patch.text };
-        const { llmText, ...displayMessage } = message;
+        const { llmText, llmMessages, articleSegment, ...displayMessage } = message;
+        if (id === "article") {
+          state.articleSegments ??= {};
+          state.articleSegments[message.articleSegmentId] = articleSegment;
+        }
         state.turns.push({ ...displayMessage, assistant: "", status: "pending" }); state.active = { id: crypto.randomUUID(), owner: patch.owner };
         retainRecent(state, limits.response * 6);
-        const messages = messagesFor(state, settings, llmText ?? message.user);
+        const messages = messagesFor(state, settings, llmText ?? message.user, llmMessages);
         const started = await save(store, state, { requestToken: patch.requestToken, articleId: message.articleId }); return { ...started, messages };
       }
       if (!["progress", "complete"].includes(operation) || !state.active || patch.id !== state.active.id || patch.owner !== state.active.owner || patch.model !== settings.ollamaModel) throw Object.assign(new Error("生成は中止または初期化されました。"), { code: "STALE_CHAT" });

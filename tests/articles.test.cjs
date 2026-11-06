@@ -39,9 +39,9 @@ test('同名の記事A/Bを保持しながら、各操作は対象記事1件だ�
  assert.ok(state.messages.at(-1).content.includes(a.body));assert.ok(!state.messages.at(-1).content.includes(b.body));assert.match(state.messages.at(-1).content,/感想/);
  assert.deepEqual(state.messages.map(m=>m.role),['system','user']);assert.ok(state.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('Aの要約')&&!m.content.includes('Bの要約')&&!m.content.includes('[&同名]')));
  await complete(f,state);state=await f.chat('get',{actionId:'article'});
- const follow=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'根拠を詳しく'});
- assert.ok(follow.messages.at(-1).content.includes(a.body));assert.equal(follow.turns.at(-1).user,'根拠を詳しく');
- assert.deepEqual(follow.messages.map(m=>m.role),['system','user']);assert.ok(follow.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('Aの要約')&&!m.content.includes('Bの要約')));
+ const follow=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'根拠を詳しく',articleSegmentId:state.turns.at(-1).articleSegmentId});
+ assert.ok(follow.messages[1].content.includes(a.body));assert.equal(follow.turns.at(-1).user,'根拠を詳しく');
+ assert.deepEqual(follow.messages.map(m=>m.role),['system','user','assistant','user']);assert.ok(follow.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('Aの要約')&&!m.content.includes('Bの要約')));
  await complete(f,follow,'自由質問の回答');state=await f.chat('get',{actionId:'article'});
  const revised=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'修正点',articleId:a.articleId,articleAction:'revision'});
  assert.deepEqual(revised.messages.map(m=>m.role),['system','user']);assert.match(revised.messages[1].content,/修正した方がよい点/);assert.ok(revised.messages[1].content.includes(a.body));assert.ok(revised.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('自由質問の回答')));
@@ -115,9 +115,12 @@ test('同じ記事IDの再取り込みはMapを更新し、別記事を削除し
 });
 
 test('表示中の本文領域だけを抽出し、不可視・スクリプト・有料境界・コメントを除外する',async()=>{
- const f=backend(),doc=documentFromHtml('<article id="note-article"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="body"></p><p hidden id="hidden"></p><script id="script"></script></div><aside id="paywall"></aside></article><p id="comment"></p>');
+ const f=backend(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="body"></p><p hidden id="hidden"></p><script id="script"></script></div></div><aside id="paywall"></aside></article><p id="comment"></p>');
  for(const [id,text]of [['title','見える題'],['author','著者名'],['body','表示本文'],['hidden','非表示の秘密'],['script','実行しない'],['paywall','ここから先は購入'],['comment','コメント']])doc.getElementById(id).textContent=text;
  const win={getComputedStyle:node=>({display:node.hidden?'none':'block',visibility:'visible'})},api=f.context.OshaberiNoteArticles;
+ const region=doc.querySelector('[data-note-key]');
+ assert.throws(()=>api.extract(doc,win,article('n456').url),/本文と記事URL/);
+ region.removeAttribute('data-note-key');assert.throws(()=>api.extract(doc,win,article().url),/本文と記事URL/);region.setAttribute('data-note-key','n123');
  const extracted=api.extract(doc,win,article().url);assert.equal(extracted.body,'表示本文');assert.equal(extracted.title,'見える題');assert.equal(extracted.author,'著者名');
  doc.getElementById('body').textContent='';assert.throws(()=>api.extract(doc,win,article().url),/空/);
  doc.getElementById('note-body').hidden=true;assert.throws(()=>api.extract(doc,win,article().url),/本文/);
@@ -154,11 +157,44 @@ test('旧版の送信本文複製を読込時に削除し、表示履歴と記�
  assert.equal(next.messages.length,2);assert.ok(next.messages[1].content.includes(a.body));assert.ok(next.messages.every(m=>!m.content.includes('偽の古い本文')&&!m.content.includes('表示に残す過去の回答')));
 });
 
-test('自由入力も履歴を使わず、記事Mapで現在選択中の記事1件と今回の依頼だけを送る',async()=>{
- const f=await ready(),a=article('n123','A','Aだけの本文'),b=article('n456','B','Bだけの本文');
- await importArticle(f,a);await importArticle(f,b);
- const state=await f.chat('get',{actionId:'article'});assert.deepEqual(state.turns,[]);
- const current=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'この内容の論点を教えて'});
- assert.equal(current.messages.length,2);assert.ok(current.messages[1].content.includes('この内容の論点を教えて'));assert.ok(current.messages[1].content.includes(b.body));assert.ok(!current.messages[1].content.includes(a.body));
- assert.equal(current.turns[0].user,'この内容の論点を教えて');assert.equal(current.turns[0].articleId,b.articleId);assert.equal(current.turns[0].llmText,undefined);
+async function ask(f,segment,text='なぜですか？') {
+ const state=await f.chat('get',{actionId:'article'});
+ return f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text,articleSegmentId:segment});
+}
+
+test('自由入力は送信元の区間だけを使い、交互のA/Bや同じ記事の別区間を混ぜない',async()=>{
+ const f=await ready(),a=article('n123','同名','Aだけの本文'),b=article('n456','同名','Bだけの本文');
+ const first=await start(f,await importArticle(f,a)),aId=first.turns.at(-1).articleSegmentId;await complete(f,first,'Aだけの要約');
+ const second=await start(f,await importArticle(f,b)),bId=second.turns.at(-1).articleSegmentId;await complete(f,second,'Bだけの要約');
+ const followA=await ask(f,aId);assert.deepEqual(followA.messages.map(m=>m.role),['system','user','assistant','user']);
+ assert.ok(followA.messages[1].content.includes(a.body));assert.equal(followA.messages[2].content,'Aだけの要約');assert.ok(!JSON.stringify(followA.messages).includes('Bだけ'));
+ await complete(f,followA,'Aだけの追加回答');
+ const followB=await ask(f,bId,'その説明を詳しく');assert.ok(JSON.stringify(followB.messages).includes('Bだけの要約'));assert.ok(!JSON.stringify(followB.messages).includes('Aだけ'));
+ await complete(f,followB);
+ let state=await f.chat('get',{actionId:'article'});
+ const fresh=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'感想',articleId:a.articleId,articleAction:'impression'});
+ assert.notEqual(fresh.turns.at(-1).articleSegmentId,aId);assert.equal(fresh.messages.length,2);assert.ok(!JSON.stringify(fresh.messages).includes('Aだけの要約'));await complete(f,fresh);
+ await assert.rejects(ask(f,undefined),/未選択/);await assert.rejects(ask(f,'unknown'),/未選択/);
+ await f.chat('reset',{actionId:'article'});await assert.rejects(ask(f,aId),/未選択/);
+});
+
+test('起点が10往復から消えても区間と記事本文を維持し、中断回答と偽の参照を混ぜない',async()=>{
+ const f=await ready(),a=article(),first=await start(f,await importArticle(f,a)),id=first.turns.at(-1).articleSegmentId;
+ await complete(f,first,'最初の要約');
+ for(let i=0;i<12;i++)await complete(f,await ask(f,id,'追加質問'+i),'追加回答'+i);
+ let state=await f.chat('get',{actionId:'article'});assert.equal(state.turns.length,10);assert.ok(state.turns.every(t=>t.articleAction==='question'));assert.equal(state.articleSegments[id].articleId,a.articleId);
+ const stopped=await ask(f,id,'中断する質問');await f.chat('progress',{actionId:'article',epoch:stopped.epoch,endpoint:stopped.endpoint,model:'local-model',owner:'owner',id:stopped.active.id,text:'中断回答の秘密'});await f.chat('stop',{actionId:'article'});
+ const follow=await ask(f,id,'[&別記事] なぜ？');const serialized=JSON.stringify(follow.messages);
+ assert.equal(serialized.split(a.body).length-1,1);assert.match(follow.messages[1].content,/極力意味を失わない/);assert.ok(!serialized.includes('中断回答の秘密'));assert.ok(!serialized.includes('最初の要約'));
+ assert.equal(follow.turns.at(-1).articleId,a.articleId);
+ const session=f.sessionData[f.context.OshaberiNoteArticles.key];assert.ok(!JSON.stringify(session.conversation).includes(a.body));assert.ok(session.conversation.turns.every(t=>!t.llmText&&!t.llmMessages&&!t.articleSegment));
+});
+
+test('区間履歴と本文が上限を超えたときは、他区間へ切り替えず履歴を変更しない',async()=>{
+ const f=await ready(),first=await start(f,await importArticle(f)),id=first.turns.at(-1).articleSegmentId;
+ await complete(f,first,'回答'.repeat(16000));
+ for(let i=0;i<7;i++)await complete(f,await ask(f,id,'質問'+i),'回答'.repeat(16000));
+ const before=structuredClone(f.sessionData);
+ await assert.rejects(ask(f,id,'上限の確認'),/会話区間が送信上限/);
+ assert.deepEqual(f.sessionData,before);
 });

@@ -53,7 +53,11 @@
             <button id="chat-next-message" type="button" class="secondary" aria-controls="chat-messages" disabled>▽ 次の発言</button>
           </nav>
           <div id="chat-messages" role="tabpanel" role="log" aria-label="会話履歴" aria-live="off"></div>
-          <p id="chat-article-help" class="muted" hidden>履歴は表示用です。送信は今回の依頼と記事1件だけです。記事とこの会話はブラウザ終了・「新しい会話」で削除します。</p>
+          <div id="chat-article-help" hidden>
+            <p class="muted">要約・感想・修正点は記事1件だけで新しい会話区間を始めます。自由入力は、この画面で選んだ区間の依頼・回答を含めて送ります。他の記事や区間は送りません。記事とこの会話はブラウザ終了・「新しい会話」で削除します。</p>
+            <p id="chat-article-target" class="muted"></p>
+            <details><summary>取り込み済み記事</summary><div id="chat-article-library" class="settings-actions"></div></details>
+          </div>
           <form id="chat-form">
             <label for="chat-input">メッセージ</label>
             <textarea id="chat-input" rows="4" maxlength="200000" aria-describedby="chat-input-help" placeholder="メッセージを入力（Ctrl+Enterで送信、Enterで改行）" disabled></textarea>
@@ -87,7 +91,7 @@
         </section>
         <section id="panel-llm" aria-labelledby="llm-heading" hidden>
           <h2 id="llm-heading">LLMの設定</h2>
-          <p class="muted">入力したメッセージ・完了済みの会話・システムプロンプトを、設定したOllamaへ送ります。「タグの提案」の会話では登録済みタグも参考情報として送ります。「記事について」では過去の履歴を送らず、今回の依頼と対象記事1件のタイトル・著者名・閲覧できる本文だけを送ります。閲覧だけでは記事を取り込まず、Cookieや認証情報は収集・送信しません。</p>
+            <p class="muted">入力したメッセージ・完了済みの会話・システムプロンプトを、設定したOllamaへ送ります。「タグの提案」の会話では登録済みタグも参考情報として送ります。「記事について」の操作は対象記事1件で開始し、自由入力ではこの画面が参照する会話区間の依頼・回答も送ります。他の記事・区間の履歴は送りません。閲覧だけでは記事を取り込まず、Cookieや認証情報は収集・送信しません。</p>
           <form id="ollama-settings">
             <label for="ollama-url">Ollama接続URL</label>
             <input id="ollama-url" type="url" maxlength="2048" value="http://127.0.0.1:11434" autocomplete="off" spellcheck="false" required>
@@ -102,14 +106,19 @@
             <select id="chat-model" disabled><option value="">モデルを選択してください</option></select>
           </div>
           <p id="llm-connection-status" role="status" aria-live="polite">初回は「接続・再試行」を押してください。</p>
-          <div id="ollama-origin-help" class="warning" role="alert" hidden>
+          <details id="ollama-start-help">
+            <summary>Ollamaの起動手順（Windows・長い記事を扱う場合）</summary>
+            <div id="ollama-origin-help" class="warning" role="alert" hidden>
             <p>モデル一覧を取得できても、会話送信だけがOllama側で拒否される場合があります。Ollamaの <code>OLLAMA_ORIGINS</code> に、この拡張だけを許可してください。</p>
+            </div>
             <p>許可するOrigin：<code id="ollama-extension-origin"></code></p>
-            <p>Windowsの場合：Ollamaを動かしているPCで、タスクトレイのOllamaを終了し、PowerShellで以下を実行してください。既存の許可先を保持し、この拡張だけを追加して起動します。このPowerShellを閉じると、そのOllamaサーバーも終了します。</p>
+            <p>Ollamaを動かしているPCで、タスクトレイのOllamaを終了してください。PowerShellで既に <code>ollama serve</code> を実行している場合は、Ctrl+Cで停止してから以下を実行します。既存の許可先を保持し、この拡張だけを追加して起動します。このPowerShellを閉じると、そのOllamaサーバーも終了します。</p>
+            <p>記事を扱うため、コンテキスト長を16,384トークンに設定します。Ollamaアプリのスライダーを操作できない場合も、このコマンドで設定できます。長い記事ではさらに大きな枠が必要になる場合があり、枠を増やすほどメモリ使用量も増えます。</p>
             <label for="ollama-origin-command">今回の起動用コマンド（環境変数の永続設定は変更しません）</label>
             <textarea id="ollama-origin-command" rows="5" readonly spellcheck="false"></textarea>
             <p>起動後、この画面の「接続・再試行」から試してください。他のWebサイトや拡張まで一括で許可しないでください。既に許可済みの場合は、接続先の認証・プロキシ設定も確認してください。</p>
-          </div>
+            <p>記事を送信した後、別のPowerShellで <code>ollama ps</code> を実行し、CONTEXT欄が <code>16384</code> になっていることを確認できます。</p>
+          </details>
           <p class="muted">未接続の場合はOllamaの起動、接続URL、モデルの登録を確認してください。クラウドモデルではOllama側から外部へ通信します。詳細は同梱の導入手順をご覧ください。</p>
           <p id="chat-history-info" class="muted" role="status">履歴は各会話タブで直近10往復・最大2MiBを保存し、古い分から自動で整理します。</p>
           <hr>

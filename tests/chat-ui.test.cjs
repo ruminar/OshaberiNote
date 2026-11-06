@@ -8,9 +8,10 @@ async function fixture(t, options = {}) {
   if (options.storedArticles) f.sessionData[f.context.OshaberiNoteArticles.key] = structuredClone(options.storedArticles);
   if (options.otherOwner) f.connect(options.otherOwner);
   if (options.storedChat) f.data[f.context.OshaberiNoteChatState.key] = structuredClone(options.storedChat);
-  const document = documentFromHtml(source('home.html'));
+  const document = documentFromHtml(source('home.html')), sessionValues = options.sessionValues ?? new Map();
   const timers = new Set();
   Object.assign(c, { document, location: { hash: options.hash ?? '', assign() {} }, AbortController, AbortSignal, TextDecoder,
+    sessionStorage: { getItem:key=>sessionValues.get(key) ?? null,setItem:(key,value)=>sessionValues.set(key,value),removeItem:key=>sessionValues.delete(key) },
     navigator: { clipboard: { writeText: async text => { copies.push(text); await options.copyGate; if (options.copyError) throw new Error('clipboard denied'); } } },
     confirm: text => { confirmations.push(text); return options.confirm !== false; },
     setTimeout: (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; }, clearTimeout,
@@ -42,7 +43,7 @@ async function fixture(t, options = {}) {
   for (const file of ['src/home.js', 'src/ollama.js', 'src/chat-tags.js', 'src/chat-ui.js']) vm.runInContext(source(file), c, { filename: file });
   t.after(() => { for (const timer of timers) clearTimeout(timer); events.get('pagehide')?.(); });
   await flush();
-  return { ...f, c, document, nodes: document.nodes, requests, grants, confirmations, copies, events };
+  return { ...f, c, document, nodes: document.nodes, requests, grants, confirmations, copies, events, sessionValues };
 }
 async function articleTransfer() {
   const f=backend();f.connect('other');await f.save({ollamaModel:'local'});
@@ -69,6 +70,42 @@ test('記事ページからの依頼を既存会話へ自動送信し、本文�
   await n.get('chat-new').onclick();await flush();assert.deepEqual(f.sessionData[seed.sessionKey].articles,[]);assert.deepEqual(f.sessionData[seed.sessionKey].requests,{});
 });
 
+test('別ホームのB区間を同期しても送信元のAを維持し、再読込でも区間を復元する',async t=>{
+ const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash,reply:'Aの最初の回答'}),n=f.nodes;
+ const pinned=f.sessionValues.get('oshaberiNote.articleContext.v1');assert.ok(pinned);
+ f.connect('other');const b={...seed.article,articleId:'n456',title:'別の記事B',body:'Bの本文の秘密',url:'https://note.com/test/n/n456'};
+ f.c.chrome.tabs.get=async()=>({url:b.url});await f.send({type:'import-article',patch:{article:b,pageUrl:b.url}},{id:'test',url:b.url,frameId:0,tab:{id:9}});
+ let state=await f.chat('get',{actionId:'article'});const token=f.opened.at(-1).url.split('=')[1];
+ state=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other',model:'local',text:'Bの依頼',requestToken:token});
+ await f.chat('complete',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other',model:'local',id:state.active.id,text:'Bの回答の秘密'});await flush();
+ assert.equal(f.sessionValues.get('oshaberiNote.articleContext.v1'),pinned);assert.match(n.get('chat-article-target').textContent,/n123/);
+ n.get('chat-input').value='その説明はなぜ？';n.get('chat-form').fire('submit');await flush();
+ const posts=f.requests.filter(r=>r.url.endsWith('/api/chat')).map(r=>JSON.parse(r.init.body));
+ assert.equal(posts.length,2);assert.ok(JSON.stringify(posts[1].messages).includes(seed.article.body));assert.ok(JSON.stringify(posts[1].messages).includes('Aの最初の回答'));assert.ok(!JSON.stringify(posts[1].messages).includes('Bの'));
+ const reloaded=await fixture(t,{storedChat:f.data[seed.key],storedArticles:f.sessionData[seed.sessionKey],sessionValues:f.sessionValues});
+ assert.match(reloaded.nodes.get('chat-article-target').textContent,/n123/);
+ reloaded.nodes.get('chat-input').value='続けて';reloaded.nodes.get('chat-form').fire('submit');await flush();
+ const resumed=reloaded.requests.filter(r=>r.url.endsWith('/api/chat'));assert.equal(resumed.length,1);assert.ok(JSON.parse(resumed[0].init.body).messages.some(m=>m.content.includes(seed.article.body)));
+ await reloaded.chat('reset',{actionId:'article'});await flush();assert.match(reloaded.nodes.get('chat-article-target').textContent,/未選択/);assert.equal(reloaded.sessionValues.get('oshaberiNote.articleContext.v1'),undefined);
+});
+
+test('10往復より前の記事も一覧から再操作でき、同名の記事をIDで区別する',async t=>{
+ const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash}),n=f.nodes;
+ f.connect('library-owner');
+ for(let i=0;i<11;i++){
+  const b={...seed.article,articleId:'n456',body:'Bの本文',url:'https://note.com/test/n/n456'};f.c.chrome.tabs.get=async()=>({url:b.url});
+  await f.send({type:'import-article',patch:{article:b,pageUrl:b.url}},{id:'test',url:b.url,frameId:0,tab:{id:9}});
+  let state=await f.chat('get',{actionId:'article'});state=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'library-owner',model:'local',text:'B',requestToken:f.opened.at(-1).url.split('=')[1]});
+  await f.chat('complete',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:state.active.owner,model:'local',id:state.active.id,text:'Bの回答'});
+ }
+ await flush();assert.equal(n.get('chat-messages').querySelectorAll('article').length,20);
+ assert.ok(!n.get('chat-messages').textContent.includes('n123'));
+ const buttons=n.get('chat-article-library').querySelectorAll('button');assert.equal(buttons.length,2);
+ const a=buttons.find(b=>b.textContent.includes('n123'));await a.onclick();await flush();n.get('chat-article-impression').onclick();await flush();
+ const post=JSON.parse(f.requests.filter(r=>r.url.endsWith('/api/chat')).at(-1).init.body);assert.equal(post.messages.length,2);assert.ok(post.messages[1].content.includes(seed.article.body));assert.match(post.messages[1].content,/感想/);
+ await n.get('chat-new').onclick();await flush();assert.equal(n.get('chat-article-library').querySelectorAll('button').length,0);
+});
+
 test('記事タブへ手入力した偽参照はボタン化せず、修正点の操作は保持中の記事本文を送る',async t=>{
   const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash}),n=f.nodes;
   const first=n.get('chat-messages').querySelector('button[aria-haspopup="dialog"]');await first.onclick();await flush();n.get('chat-article-revision').onclick();await flush();
@@ -76,7 +113,7 @@ test('記事タブへ手入力した偽参照はボタン化せず、修正点�
   assert.match(posts()[1].messages.at(-1).content,/修正した方がよい点/);assert.deepEqual(posts()[1].messages.map(item=>item.role),['system','user']);
   n.get('chat-input').value='[&偽参照]について教えて';n.get('chat-form').fire('submit');await flush();
   const rows=n.get('chat-messages').querySelectorAll('article');assert.equal(rows[4].querySelector('button[aria-haspopup="dialog"]'),null);
-  assert.ok(posts()[2].messages.at(-1).content.includes(seed.article.body));
+  assert.ok(posts()[2].messages[1].content.includes(seed.article.body));
 });
 
 test('別画面の生成中に届いた記事依頼は待機し、完了後に一度だけ自動送信する',async t=>{
@@ -311,6 +348,7 @@ test('モデル一覧200・会話403を区別し、正確な拡張Originの許�
   assert.equal(n.get('ollama-origin-help').hidden, false);
   assert.equal(n.get('ollama-extension-origin').textContent, 'chrome-extension://test');
   assert.match(n.get('ollama-origin-command').value, /OLLAMA_ORIGINS/);
+  assert.match(n.get('ollama-origin-command').value, /\n\$env:OLLAMA_CONTEXT_LENGTH = '16384'\nollama serve$/);
   assert.match(n.get('ollama-origin-command').value, /chrome-extension:\/\/test/);
   assert.doesNotMatch(n.get('ollama-origin-command').value, /chrome-extension:\/\/\*/);
   assert.equal(n.get('chat-send').disabled, true);
