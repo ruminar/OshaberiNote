@@ -232,7 +232,8 @@
     refreshMessageNavigation();
     if (scrollRange() > 1 && Math.abs(container.scrollTop - previousTop) > 1) container.scrollTop = previousTop;
     if (accepted) alignMessage(state.turns.length * 2 - 2);
-    else if (completed) alignMessage(state.turns.length * 2 - 1);
+    // 記事操作のタイトルボタンを残す。自由入力の回答だけはAI発言へ移動する。
+    else if (completed && !(state.actionId === "article" && articles.actions[state.turns.at(-1).articleAction])) alignMessage(state.turns.length * 2 - 1);
     updateMessageNavigation();
     controls();
   }

@@ -562,6 +562,28 @@ test('初回の長文も完了時は回答末尾ではなく2/2の先頭へ合�
   assert.equal(top,80);assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');assert.ok(container.querySelector('div[aria-hidden="true"]'));
 });
 
+test('記事の要約・感想・修正点は完了後も依頼位置に留まり、自由入力だけAIへ移動する',async t=>{
+ let finish;const encoder=new TextEncoder(),seed=await articleTransfer();
+ const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash,stream:()=>new Response(new ReadableStream({start(controller){
+  controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'生成途中'},done:false})+'\n'));
+  finish=()=>{controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'完了'},done:true})+'\n'));controller.close();};
+ }}))}),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
+ container.clientHeight=200;container.getBoundingClientRect=()=>({top:0});
+ Object.defineProperty(container,'scrollHeight',{get:()=>Math.max(200,container.querySelectorAll('article').length*80+200)});
+ let top=0;Object.defineProperty(container,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(value,container.scrollHeight-200));}});
+ f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
+ finish();await flush();assert.equal(top,0);assert.equal(n.get('chat-message-position').textContent,'1 / 2 発言');
+ let turns=1;
+ for(const action of ['impression','revision','summary']){
+  await n.get('chat-messages').querySelector('button[aria-haspopup="dialog"]').onclick();await flush();n.get('chat-article-'+action).onclick();await flush();turns++;
+  const expected=(turns*2-2)*80;assert.equal(top,expected);assert.equal(n.get('chat-message-position').textContent,`${turns*2-1} / ${turns*2} 発言`);
+  finish();await flush();assert.equal(top,expected);assert.equal(n.get('chat-message-position').textContent,`${turns*2-1} / ${turns*2} 発言`);
+ }
+ assert.equal(n.get('chat-message-position').textContent,'7 / 8 発言');
+ n.get('chat-input').value='その説明を詳しく';n.get('chat-input').fire('input');n.get('chat-form').fire('submit');await flush();assert.equal(n.get('chat-message-position').textContent,'9 / 10 発言');
+ finish();await flush();assert.equal(top,720);assert.equal(n.get('chat-message-position').textContent,'10 / 10 発言');
+});
+
 test('4往復目は受付で7/8、生成中は維持、完了で8/8の先頭へ移動し、中止では進めない',async t=>{
  let count=0,finish,grow;const encoder=new TextEncoder();
  const f=await fixture(t,{stream:()=>++count<4?new Response(JSON.stringify({message:{role:'assistant',content:'完了回答'},done:true})+'\n'):new Response(new ReadableStream({start(controller){
