@@ -147,7 +147,7 @@
       if (!["note", "external-article"].includes(service)) return null;
       const url = linkUrl(node.getAttribute("data-src"));
       if (!url) return null;
-      let title = "";
+      let title = "", author = "";
       if (service === "external-article") {
         const heading = node.querySelector('[class~="external-article-widget-title"]'), anchor = heading?.closest("a[href]");
         if (heading && anchor && visible(heading) && linkUrl(anchor.getAttribute("href")) === url) title = visibleText(heading);
@@ -161,18 +161,23 @@
             const child = frame.contentDocument;
             if (!child || new URL(child.URL).origin !== src.origin || new URL(child.URL).pathname !== src.pathname) continue;
             const heading = child.querySelector('[class~="p-noteEmbed__title"]'), anchor = child.querySelector('a[class~="p-noteEmbed__link"]');
-            if (heading && anchor && visible(heading) && linkUrl(anchor.getAttribute("href")) === url) { title = visibleText(heading); break; }
+            if (!anchor || linkUrl(anchor.getAttribute("href")) !== url) continue;
+            if (heading && visible(heading)) title = visibleText(heading);
+            const name = child.querySelector('[class~="p-noteEmbed__name"]');
+            const profile = name && [...name.querySelectorAll("a[href]")].find(a => linkUrl(a.getAttribute("href"))?.replace(/\/$/, "") === target.authorUrl && visible(a));
+            if (profile) author = visibleText(profile);
+            if (title || author) break;
           } catch { /* 未読込・別オリジンのフレームはURLだけを残す。 */ }
         }
       }
-      return { url, title: title.replace(/\s+/g, " ") || "（タイトル未取得）" };
+      return { url, title: title.replace(/\s+/g, " ") || "（タイトル未取得）", author: author.replace(/\s+/g, " ") || "（著者未取得）" };
     }
     function walk(node) {
       if (node.nodeType === 3) { chunks.push(node.nodeValue); return; }
       if (node.nodeType !== 1 || excluded.has(node.tagName) || node.hasAttribute("data-oshaberi-note-owned") || !visible(node)) return;
       const card = linkCard(node);
       if (card) {
-        chunks.push(`\n[リンクカード]\nタイトル：${card.title}\nURL：${card.url}\n`);
+        chunks.push(`\n[リンクカード]\nタイトル：${card.title}\n著者：${card.author}\nURL：${card.url}\n`);
         for (const caption of node.querySelectorAll("figcaption")) walk(caption);
         return;
       }
