@@ -63,7 +63,11 @@ test('記事ページからの依頼を既存会話へ自動送信し、本文�
   assert.equal(rows[1].querySelector('button[aria-haspopup="dialog"]'),null);
   const reference=rows[0].querySelector('button[aria-haspopup="dialog"]');assert.equal(reference.textContent,'[&同じ題]');
   await reference.onclick();await flush();assert.equal(n.get('chat-article-dialog').open,true);
+  const open=n.get('chat-article-open');assert.equal(open.parentElement.children[0],open);assert.equal(open.href,seed.article.url);
+  assert.equal(open.getAttribute('target'),'_blank');assert.equal(open.getAttribute('rel'),'noopener noreferrer');
+  assert.equal(open.fire('click').defaultPrevented,undefined);assert.equal(n.get('chat-article-dialog').open,true);assert.equal(posts().length,1);
   n.get('chat-article-impression').onclick();await flush();assert.equal(n.get('chat-article-dialog').open,false);
+  assert.equal(open.hasAttribute('href'),false);
   assert.equal(posts().length,2);assert.deepEqual(posts()[1].messages.map(item=>item.role),['system','user']);assert.equal(n.get('chat-messages').querySelectorAll('article').length,4);assert.match(posts()[1].messages.at(-1).content,/感想を聞かせて/);assert.ok(posts()[1].messages.at(-1).content.includes(seed.article.body));
   const replay=await fixture(t,{storedChat:f.data[seed.key],storedArticles:f.articleData.current,hash:seed.hash});
   assert.equal(replay.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);assert.match(replay.nodes.get('chat-messages').textContent,/感想を聞かせて/);

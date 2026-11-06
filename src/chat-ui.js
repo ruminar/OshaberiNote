@@ -47,6 +47,7 @@
         const info = await platform.article("info", { epoch, articleId: turn.articleId });
         if (!valid()) return;
         articleReference = { ...info, epoch, valid };
+        byId("chat-article-open").href = info.url;
         byId("chat-article-title").textContent = info.title; articleDialog.showModal(); controls();
       } catch (error) { status(error.message); }
     };
@@ -64,7 +65,10 @@
     };
   }
   byId("chat-article-close").onclick = closeArticleDialog;
-  articleDialog.addEventListener("close", () => { articleReference = undefined; });
+  byId("chat-article-open").onclick = event => {
+    if (!articleReference?.valid()) { event.preventDefault(); closeArticleDialog(); }
+  };
+  articleDialog.addEventListener("close", () => { articleReference = undefined; byId("chat-article-open").removeAttribute("href"); });
   byId("chat-input").addEventListener("input", () => {
     if (pendingArticleRequest && byId("chat-input").value !== pendingArticleRequest.displayText) discardPendingArticle();
     if (selectedAction === "article") {

@@ -135,7 +135,7 @@
         if (patch.epoch !== session.conversation?.epoch) throw new Error("記事の会話が変更されました。");
         const article = session.articles.find(item => item.articleId === patch.articleId);
         if (!article) throw new Error("記事情報がありません。記事ページから取り込み直してください。");
-        return { articleId: article.articleId, title: article.title };
+        return { articleId: article.articleId, title: article.title, url: article.url };
       }
       throw new Error("記事操作が不正です。");
     });
