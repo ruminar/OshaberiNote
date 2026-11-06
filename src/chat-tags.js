@@ -1,4 +1,4 @@
-/* 原文を保持し、完了したAI回答の箇条書き・太字と既知のタグ表記だけを安全なDOMで表示する。 */
+/* 原文を保持し、完了したAI回答の箇条書き・太字・HTTP(S)リンク・タグを安全なDOMで表示する。 */
 (() => {
   "use strict";
   const core = globalThis.OshaberiNote;
@@ -18,6 +18,32 @@
     }
     if (offset < text.length) result.push({ text: text.slice(offset) });
     return result;
+  }
+  function links(text) {
+    function address(value) {
+      try {
+        if (/[\u0000-\u0020\u007f-\u009f\\]/u.test(value)) return null;
+        const url = new URL(value);
+        return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password ? url.href : null;
+      } catch { return null; }
+    }
+    const result = [];
+    // 単純なMarkdownリンクを先に確保し、ラベル中のURLやタグを二重に解釈しない。
+    for (const match of text.matchAll(/\[([^\[\]\r\n]+)\]\((https?:\/\/(?:[^\s<>"'`\\\[\]()]|\([^\s<>"'`\\\[\]()]*\))+)\)/giu)) {
+      const href = address(match[2]);
+      if (href) result.push({ start: match.index, end: match.index + match[0].length, href, label: match[1] });
+    }
+    for (const match of text.matchAll(/https?:\/\/[^\s<>"'`\\\[\]。、「」『』【】（）]+/giu)) {
+      if (result.some(part => match.index < part.end && match.index + match[0].length > part.start)) continue;
+      let value = match[0].replace(/[.,;:!?、。！？；：]+$/u, "").replace(/\*\*$/u, "");
+      // 文章やMarkdownの閉じ括弧を除き、URL自体の釣り合った括弧は保つ。
+      let excess = (value.match(/\)/g)?.length ?? 0) - (value.match(/\(/g)?.length ?? 0), end = value.length;
+      while (end && value[end - 1] === ")" && excess > 0) { end--; excess--; }
+      value = value.slice(0, end);
+      const href = address(value);
+      if (href) result.push({ start: match.index, end: match.index + value.length, href, label: value });
+    }
+    return result.sort((a, b) => a.start - b.start);
   }
   function create({ document: doc, platform, getSettings, onSaved }) {
     const byId = id => doc.getElementById(id), dialog = byId("chat-tag-dialog");
@@ -64,21 +90,34 @@
     dialog.addEventListener("close", () => { selected?.trigger.setAttribute("aria-expanded", "false"); selected = undefined; });
     function render(node, content, valid) {
       let offset = 0;
-      const parsed = parts(content).map(part => { const start = offset; offset += part.text.length; return { ...part, start, end: offset }; });
+      const linkParts = links(content);
+      const tags = parts(content).map(part => { const start = offset; offset += part.text.length; return { ...part, start, end: offset }; })
+        .filter(part => part.tag && !linkParts.some(link => part.start < link.end && part.end > link.start));
+      const parsed = []; offset = 0;
+      for (const part of [...linkParts, ...tags].sort((a, b) => a.start - b.start)) {
+        if (part.start > offset) parsed.push({ start: offset, end: part.start });
+        parsed.push(part); offset = part.end;
+      }
+      if (offset < content.length) parsed.push({ start: offset, end: content.length });
       // HTMLとして解釈せず、同一行の **本文** だけをstrongへ変換する。
       const bold = [...content.matchAll(/(?<![\\*])\*\*(?!\*)(\S(?:[^\r\n]*?\S)?)(?<!\\)\*\*(?!\*)/gu)]
         .map(match => ({ start: match.index, end: match.index + match[0].length }))
-        .filter(range => !parsed.some(part => part.tag && (
+        .filter(range => !parsed.some(part => (part.tag || part.href) && (
           (range.start < part.end && range.start + 2 > part.start) ||
           (range.end - 2 < part.end && range.end > part.start))));
       const hasList = /^[ \t]*\*[ \t]+\S/m.test(content);
-      if (!hasList && !parsed.some(part => part.tag) && !bold.length) { node.textContent = content; return; }
+      if (!hasList && !parsed.some(part => part.tag || part.href) && !bold.length) { node.textContent = content; return; }
       node.replaceChildren();
       function appendRange(parent, start, end) {
         for (const part of parsed) {
           const from = Math.max(start, part.start), to = Math.min(end, part.end);
           if (from >= to) continue;
-          const child = doc.createElement(part.tag ? "button" : "span"); child.textContent = content.slice(from, to);
+          const isLink = part.href && from === part.start && to === part.end;
+          const child = doc.createElement(isLink ? "a" : part.tag ? "button" : "span"); child.textContent = isLink ? part.label : content.slice(from, to);
+          if (isLink) {
+            child.href = part.href; child.setAttribute("target", "_blank"); child.setAttribute("rel", "noopener noreferrer");
+            child.setAttribute("title", part.href);
+          }
           if (part.tag) {
             child.type = "button"; child.className = "chat-tag-button";
             child.setAttribute("aria-haspopup", "dialog"); child.setAttribute("aria-controls", "chat-tag-dialog");

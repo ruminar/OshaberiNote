@@ -13,7 +13,7 @@
     if (raw.turns.some(turn => !turn || typeof turn.user !== "string" || !turn.user.trim() || turn.user.length > limits.input || typeof turn.assistant !== "string" || turn.assistant.length > limits.response || !["complete", "interrupted", "pending"].includes(turn.status))) throw new Error("会話履歴の形式が不正です。");
     for (const turn of raw.turns) {
       if (turn.llmText !== undefined && (raw.actionId !== "article" || typeof turn.llmText !== "string" || !turn.llmText.trim() || turn.llmText.length > limits.input)) throw new Error("記事の送信本文が不正です。");
-      if (turn.articleId !== undefined && (raw.actionId !== "article" || !/^n[a-zA-Z0-9]+$/.test(turn.articleId) || typeof turn.articleTitle !== "string" || !turn.articleTitle.trim() || turn.articleTitle.length > 500 || !["summary", "impression", "revision", "question"].includes(turn.articleAction))) throw new Error("記事の参照情報が不正です。");
+      if (turn.articleId !== undefined && (raw.actionId !== "article" || !/^n[a-zA-Z0-9]+$/.test(turn.articleId) || typeof turn.articleTitle !== "string" || !turn.articleTitle.trim() || turn.articleTitle.length > 500 || !["summary", "impression", "revision", "citations", "question"].includes(turn.articleAction))) throw new Error("記事の参照情報が不正です。");
     }
     if (raw.active !== null && (!raw.active || typeof raw.active.id !== "string" || typeof raw.active.owner !== "string" || raw.turns.at(-1)?.status !== "pending")) throw new Error("生成状態が不正です。");
     if (raw.turns.filter(turn => turn.status === "pending").length !== (raw.active ? 1 : 0)) throw new Error("未完了の生成状態が不正です。");

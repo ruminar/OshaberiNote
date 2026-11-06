@@ -586,7 +586,7 @@ test('初回の長文も完了時は回答末尾ではなく2/2の先頭へ合�
   assert.equal(top,80);assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');assert.ok(container.querySelector('div[aria-hidden="true"]'));
 });
 
-test('記事の要約・感想・修正点は完了後も依頼位置に留まり、自由入力だけAIへ移動する',async t=>{
+test('記事の要約・感想・修正点・引用列挙は完了後も依頼位置に留まり、自由入力だけAIへ移動する',async t=>{
  let finish;const encoder=new TextEncoder(),seed=await articleTransfer();
  const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,stream:()=>new Response(new ReadableStream({start(controller){
   controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'生成途中'},done:false})+'\n'));
@@ -598,7 +598,7 @@ test('記事の要約・感想・修正点は完了後も依頼位置に留ま�
  f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
  finish();await flush();assert.equal(top,0);assert.equal(n.get('chat-message-position').textContent,'1 / 2 発言');
  let turns=1;
- for(const action of ['impression','revision','summary']){
+ for(const action of ['impression','revision','citations']){
   await n.get('chat-messages').querySelector('button[aria-haspopup="dialog"]').onclick();await flush();n.get('chat-article-'+action).onclick();await flush();turns++;
   const expected=(turns*2-2)*80;assert.equal(top,expected);assert.equal(n.get('chat-message-position').textContent,`${turns*2-1} / ${turns*2} 発言`);
   finish();await flush();assert.equal(top,expected);assert.equal(n.get('chat-message-position').textContent,`${turns*2-1} / ${turns*2} 発言`);
@@ -791,4 +791,44 @@ test('登録中の連打を止め、結果未確認なら自動再送せず登�
   u.get('chat-messages').querySelector('button[aria-haspopup="dialog"]').onclick();u.get('chat-tag-groups').children[0].onclick();await flush();
   assert.match(u.get('chat-tag-status').textContent,/自動再送は行いません/);assert.equal(u.get('chat-tag-groups').children[1].disabled,true);
   assert.deepEqual((await uncertain.settings()).tagGroups[0].tags,[]);
+});
+
+
+test('記事タイトルから引用列挙を独立送信し、保存・復元後の自由入力もその区間だけを送る',async t=>{
+ const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,reply:'引用の説明 https://example.com/source'}),n=f.nodes;
+ const posts=()=>f.requests.filter(item=>item.url.endsWith('/api/chat')).map(item=>JSON.parse(item.init.body));
+ await n.get('chat-messages').querySelector('button[aria-haspopup="dialog"]').onclick();await flush();
+ n.get('chat-article-citations').onclick();await flush();
+ assert.equal(n.get('chat-article-dialog').open,false);assert.equal(posts().length,2);
+ assert.equal(posts()[1].messages.length,2);assert.match(posts()[1].messages[1].content,/引用・参照されている情報/);
+ assert.ok(posts()[1].messages[1].content.includes(seed.article.body));assert.ok(!posts()[1].messages[1].content.includes('引用の説明'));
+ const state=await f.chat('get',{actionId:'article'});assert.equal(state.turns.at(-1).articleAction,'citations');assert.match(state.turns.at(-1).user,/引用されている情報/);
+ n.get('chat-input').value='引用について詳しく';n.get('chat-input').fire('input');n.get('chat-form').fire('submit');await flush();
+ assert.equal(posts()[2].messages.length,4);assert.match(posts()[2].messages[1].content,/引用・参照されている情報/);
+ assert.equal(posts()[2].messages[2].content,'引用の説明 https://example.com/source');
+ assert.equal(posts()[2].messages[3].content,'引用について詳しく');
+ const restored=await fixture(t,{storedChat:f.data[seed.key],storedArticles:f.articleData.current});
+ assert.equal(restored.nodes.get('chat-messages').querySelectorAll('article').length,6);
+});
+
+test('AI回答のURLとMarkdownリンクを安全な新規タブリンクにし、太字・タグ・コピーを維持する',async t=>{
+ const reply='* **参照:** [作品の説明](https://note.com/author/n/n123)\n* [https://github.com/ruminar/OpenGepa](https://github.com/ruminar/OpenGepa)\n* https://example.com/path_(one)?a=1&b=2。\n* <https://example.org/info>\n**https://example.net/bold**\n[#読書] [ラベル [#リンク内タグ]](https://example.com/nested)';
+ const f=await fixture(t,{reply}),n=f.nodes;n.get('connect-ollama').onclick();await flush();
+ n.get('chat-input').value='https://user.example/test';n.get('chat-form').fire('submit');await flush();
+ const rows=n.get('chat-messages').querySelectorAll('article'),body=rows[1].querySelector('[data-chat-body]'),links=body.querySelectorAll('a');
+ assert.deepEqual(links.map(a=>a.href),['https://note.com/author/n/n123','https://github.com/ruminar/OpenGepa','https://example.com/path_(one)?a=1&b=2','https://example.org/info','https://example.net/bold','https://example.com/nested']);
+ assert.equal(links[0].textContent,'作品の説明');assert.equal(links[1].textContent,'https://github.com/ruminar/OpenGepa');
+ for(const a of links){assert.equal(a.getAttribute('target'),'_blank');assert.equal(a.getAttribute('rel'),'noopener noreferrer');assert.equal(a.getAttribute('title'),a.href);}
+ assert.equal(body.querySelector('strong').textContent,'参照:');assert.equal(rows[0].querySelector('a'),null);
+ body.querySelector('button[aria-haspopup="dialog"]').onclick();assert.equal(n.get('chat-tag-heading').textContent,'#読書');
+ await rows[1].querySelector('button[aria-label="AIの回答をコピー"]').onclick();assert.deepEqual(f.copies,[reply]);assert.equal((await f.chat('get')).turns[0].assistant,reply);
+});
+
+test('危険なスキームや認証付きURLをリンク化せず、壊れたMarkdown内もHTTP(S)のURLだけを扱う',async t=>{
+ const reply='[危険](javascript:alert(1)) [ファイル](file:///C:/test) data:text/html,test mailto:test@example.com https://user:pass@example.com/\n<img src=x onerror=alert(1)>\n[[https://note.com/test/n/n123]\\(https://note.com/test/n/n123)]\nhttps://example.com/test).';
+ const f=await fixture(t,{reply}),n=f.nodes;n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='確認';n.get('chat-form').fire('submit');await flush();
+ const body=n.get('chat-messages').querySelectorAll('article')[1].querySelector('[data-chat-body]');
+ assert.equal(body.querySelector('img'),null);assert.equal(body.querySelector('script'),null);
+ assert.deepEqual(body.querySelectorAll('a').map(a=>a.href),['https://note.com/test/n/n123','https://note.com/test/n/n123','https://example.com/test']);
+ assert.ok(body.textContent.includes('[危険](javascript:alert(1))'));assert.ok(body.textContent.includes('https://user:pass@example.com/'));
 });

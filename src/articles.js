@@ -5,7 +5,8 @@
   const actions = Object.freeze({
     summary: { suffix: "について要約して", instruction: "下記の文章を、極力意味を失わないように要約してください\n文章の改善提案等は要りません" },
     impression: { suffix: "について感想を聞かせて", instruction: "下記の記事を読んで、感想を聞かせてください。" },
-    revision: { suffix: "について修正点を教えて", instruction: "下記の記事を読んで、修正した方がよい点があれば具体的に指摘してください。" }
+    revision: { suffix: "について修正点を教えて", instruction: "下記の記事を読んで、修正した方がよい点があれば具体的に指摘してください。" },
+    citations: { suffix: "に引用されている情報を説明つきで列挙して", instruction: "下記の記事に引用・参照されている情報があれば、説明つきで列挙してください。記事本文の引用文やリンクカードなどを手掛かりにし、本文に記載されたURLがあればそのまま併記してください。本文にないURLやリンク先の内容は推測して補わないでください。該当する情報がなければ、その旨を伝えてください。" }
   });
   const invalid = message => Object.assign(new Error(message), { code: "INVALID_INPUT" });
   function page(url) {
