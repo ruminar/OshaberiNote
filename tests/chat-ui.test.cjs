@@ -533,7 +533,7 @@ test('前後の発言へ自分・AIの順で移動し、手動スクロール後
   await n.get('chat-new').onclick();await flush();assert.equal(previous.disabled,true);assert.equal(next.disabled,true);assert.equal(n.get('chat-message-position').textContent,'発言なし');
 });
 
-test('初回2/2が収まる間は余白とスクロール書込を作らず、次の往復から末尾へ移動する',async t=>{
+test('初回1往復では余白とスクロール書込を作らず、次の往復から段階的に移動する',async t=>{
   let finish,count=0;const encoder=new TextEncoder();
   const f=await fixture(t,{stream:()=>++count===1?new Response(new ReadableStream({start(controller){
     controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'短い回答'},done:false})+'\n'));
@@ -552,14 +552,35 @@ test('初回2/2が収まる間は余白とスクロール書込を作らず、�
   assert.ok(writes.length>0);assert.ok(top>0);assert.equal(n.get('chat-message-position').textContent,'4 / 4 発言');
 });
 
-test('初回2/2でも長文で実際のスクロールが必要なら末尾追従する',async t=>{
+test('初回1往復は長文でも送信受付・生成・完了で自動移動しない',async t=>{
   const f=await fixture(t,{reply:'長'.repeat(500)}),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
   container.clientHeight=200;container.getBoundingClientRect=()=>({top:0});
   Object.defineProperty(container,'scrollHeight',{get:()=>container.textContent.includes('長'.repeat(500))?680:200});
   let top=0;Object.defineProperty(container,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(value,container.scrollHeight-200));}});
   f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='長文の確認';n.get('chat-form').fire('submit');await flush();
-  assert.equal(top,480);assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');assert.equal(container.querySelector('div[aria-hidden="true"]'),null);
+  assert.equal(top,0);assert.equal(n.get('chat-message-position').textContent,'1 / 2 発言');assert.equal(container.querySelector('div[aria-hidden="true"]'),null);
+});
+
+test('4往復目は受付で7/8、生成中は維持、完了で8/8の先頭へ移動し、中止では進めない',async t=>{
+ let count=0,finish,grow;const encoder=new TextEncoder();
+ const f=await fixture(t,{stream:()=>++count<4?new Response(JSON.stringify({message:{role:'assistant',content:'完了回答'},done:true})+'\n'):new Response(new ReadableStream({start(controller){
+  controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'生成中'},done:false})+'\n'));
+  grow=()=>controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'長'.repeat(500)},done:false})+'\n'));
+  finish=()=>{controller.enqueue(encoder.encode(JSON.stringify({message:{role:'assistant',content:'完了'},done:true})+'\n'));controller.close();};
+ }}))}),n=f.nodes,container=n.get('chat-messages'),create=f.document.createElement.bind(f.document);
+ container.clientHeight=200;container.getBoundingClientRect=()=>({top:0});
+ Object.defineProperty(container,'scrollHeight',{get:()=>Math.max(200,container.querySelectorAll('article').length*80+200+(container.textContent.includes('長'.repeat(500))?500:0))});
+ let top=0;Object.defineProperty(container,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(value,container.scrollHeight-200));}});
+ f.document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
+ n.get('connect-ollama').onclick();await flush();
+ for(const text of ['1回目','2回目','3回目']){n.get('chat-input').value=text;n.get('chat-form').fire('submit');await flush();}
+ n.get('chat-input').value='4回目';n.get('chat-form').fire('submit');await flush();
+ assert.equal(top,480);assert.equal(n.get('chat-message-position').textContent,'7 / 8 発言');
+ grow();await flush();assert.equal(top,480);assert.equal(n.get('chat-message-position').textContent,'7 / 8 発言');
+ finish();await flush();assert.equal(top,560);assert.equal(n.get('chat-message-position').textContent,'8 / 8 発言');assert.notEqual(top,container.scrollHeight-200);
+ n.get('chat-input').value='中止する5回目';n.get('chat-form').fire('submit');await flush();assert.equal(top,640);
+ await n.get('chat-stop').onclick();await flush();assert.equal(top,640);assert.equal(n.get('chat-message-position').textContent,'9 / 10 発言');
 });
 
 test('過去を閲覧中でも自分の送信受付後は最終発言へ移動し、入力中や送信拒否時は位置を保つ',async t=>{
