@@ -206,7 +206,7 @@
     }
     const authorControls = createAuthorControls(doc, win, actions, profileSlot);
     let host, menu, signature;
-    let articleFollowing;
+    let articleFollowing, articleSummary, articleSummaryBusy = false;
     let articleAuthor, articleAuthorSearch, authorSignature;
     let questionFollowing, questionAuthor, questionSelf, questionAuthorSignature;
     let searchAuthorInfo, searchAuthorDirty = true;
@@ -755,7 +755,7 @@
           const container = profile.parentElement;
           if (profile.closest("article") || profile.closest('[id="note-body"]') ||
               container?.tagName !== "DIV" || !["fixed", "top-24", "left-8"].every(name => container.classList.contains(name))) continue;
-          const offset = articleAuthorSearch?.isConnected
+          const offset = articleSummary?.isConnected ? "article-summary" : articleAuthorSearch?.isConnected
             ? articleFollowing?.isConnected ? "author-search" : "author-search-only"
             : articleAuthor?.isConnected && articleFollowing?.isConnected ? "author" : "following";
           if (container.getAttribute(sideProfileOffset) !== offset) container.setAttribute(sideProfileOffset, offset);
@@ -948,11 +948,33 @@
         doc.body.append(questionSelf);
       }
     }
+    function clearArticleSummary() { articleSummary?.remove(); articleSummary = undefined; }
+    function syncArticleSummary(show, url) {
+      if (!show || !core.isArticle(url) || typeof actions.summarizeArticle !== "function" || !globalThis.OshaberiNoteArticles) { clearArticleSummary(); return; }
+      if (articleSummary?.isConnected) return;
+      const wrapper = doc.createElement("div"), button = doc.createElement("button"), status = doc.createElement("span");
+      wrapper.setAttribute(owned, ""); wrapper.className = "oshaberi-note-article-summary";
+      button.type = "button"; button.textContent = "この記事を要約";
+      button.setAttribute("title", "閲覧できる記事本文を、設定したOllamaへ送って要約します");
+      status.setAttribute("role", "status");
+      button.onclick = async () => {
+        if (articleSummaryBusy || button.disabled) return;
+        articleSummaryBusy = true; button.disabled = true; status.textContent = "記事を取り込んでいます…";
+        try {
+          const article = globalThis.OshaberiNoteArticles.extract(doc, win, currentUrl);
+          await actions.summarizeArticle(article);
+          if (wrapper.isConnected) status.textContent = "記事の会話を開きました。";
+        } catch (error) { if (wrapper.isConnected) status.textContent = error.message || "記事を取得できませんでした。送信は行いません。"; }
+        finally { articleSummaryBusy = false; button.disabled = false; }
+      };
+      wrapper.append(button, status); doc.body.append(wrapper); articleSummary = wrapper;
+    }
     function syncArticleFollowing(settings, url) {
       const article = doc.querySelector('article[id="note-article"]');
       const show = settings.enabled && (core.isArticle(url) || core.isPreviewArticle(url)) &&
         win.matchMedia("(min-width: 1100px)").matches && article && visible(article) &&
         article.getBoundingClientRect().left >= 228 && doc.body;
+      syncArticleSummary(show, url);
       if (!show) { articleFollowing?.remove(); articleFollowing = undefined; clearArticleAuthor(); syncSideProfiles(false); return; }
       if (!core.usesFollowing(settings)) { articleFollowing?.remove(); articleFollowing = undefined; }
       else if (!articleFollowing?.isConnected) {
@@ -1605,7 +1627,7 @@
         syncHeaderSettings(false);
         syncSearchClear(false);
         articleFollowing?.remove();
-        articleFollowing = undefined;
+        articleFollowing = undefined; clearArticleSummary();
         clearArticleAuthor();
         syncSideProfiles(false);
         for (const profile of sideProfileFollowRoots) profile.removeAttribute(sideProfileFollowHidden);

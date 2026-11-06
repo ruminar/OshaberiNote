@@ -9,6 +9,7 @@
   <script defer src="src/common.js"></script>
   <script defer src="src/platform/browser-api.js"></script>
   <script defer src="src/home.js"></script>
+  <script defer src="src/articles.js"></script>
   <script defer src="src/chat-actions.js"></script>
   <script defer src="src/chat-state.js"></script>
   <script defer src="src/ollama.js"></script>
@@ -52,6 +53,7 @@
             <button id="chat-next-message" type="button" class="secondary" aria-controls="chat-messages" disabled>▽ 次の発言</button>
           </nav>
           <div id="chat-messages" role="tabpanel" role="log" aria-label="会話履歴" aria-live="off"></div>
+          <p id="chat-article-help" class="muted" hidden>履歴は表示用です。送信は今回の依頼と記事1件だけです。記事とこの会話はブラウザ終了・「新しい会話」で削除します。</p>
           <form id="chat-form">
             <label for="chat-input">メッセージ</label>
             <textarea id="chat-input" rows="4" maxlength="200000" aria-describedby="chat-input-help" placeholder="メッセージを入力（Ctrl+Enterで送信、Enterで改行）" disabled></textarea>
@@ -85,7 +87,7 @@
         </section>
         <section id="panel-llm" aria-labelledby="llm-heading" hidden>
           <h2 id="llm-heading">LLMの設定</h2>
-          <p class="muted">入力したメッセージ・完了済みの会話・システムプロンプトを、設定したOllamaへ送ります。「タグの提案」の会話では登録済みタグも参考情報として送ります。noteの記事や認証情報を自動で収集・送信しません。</p>
+          <p class="muted">入力したメッセージ・完了済みの会話・システムプロンプトを、設定したOllamaへ送ります。「タグの提案」の会話では登録済みタグも参考情報として送ります。「記事について」では過去の履歴を送らず、今回の依頼と対象記事1件のタイトル・著者名・閲覧できる本文だけを送ります。閲覧だけでは記事を取り込まず、Cookieや認証情報は収集・送信しません。</p>
           <form id="ollama-settings">
             <label for="ollama-url">Ollama接続URL</label>
             <input id="ollama-url" type="url" maxlength="2048" value="http://127.0.0.1:11434" autocomplete="off" spellcheck="false" required>
@@ -176,6 +178,16 @@
     <p class="muted">ブラウザの拡張アイコンを押すと、ONに戻してこの画面を開きます。</p>
     <footer>非公式拡張 · 0.1.0 · note株式会社とは関係ありません。<br>この画面は拡張内にあり、noteの通常ホームを読み込みません。記事の取得・表示・操作はnote公式画面で行います。</footer>
   </main>
+  <dialog id="chat-article-dialog" class="chat-tag-dialog" aria-labelledby="chat-article-heading">
+    <h2 id="chat-article-heading">この記事について</h2>
+    <p id="chat-article-title"></p>
+    <div class="chat-tag-actions">
+      <button id="chat-article-summary" type="button">この記事の要約</button>
+      <button id="chat-article-impression" type="button">この記事の感想</button>
+      <button id="chat-article-revision" type="button">この記事の修正点</button>
+      <button id="chat-article-close" type="button" class="secondary">閉じる</button>
+    </div>
+  </dialog>
   <dialog id="chat-tag-dialog" class="chat-tag-dialog" aria-labelledby="chat-tag-heading">
     <h2 id="chat-tag-heading">タグの操作</h2>
     <div class="chat-tag-actions">

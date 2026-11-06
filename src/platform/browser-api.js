@@ -8,6 +8,104 @@
   let queue = Promise.resolve();
   const chatOwners = new Set();
   function run(task) { const result = queue.then(task); queue = result.catch(() => {}); return result; }
+  const articles = globalThis.OshaberiNoteArticles;
+  async function sessionRaw() { return api.storage.session ? (await api.storage.session.get(articles.key))[articles.key] : undefined; }
+  async function loadChat() {
+    const raw = (await api.storage.local.get(chatKey))[chatKey], temporary = await sessionRaw();
+    if (temporary === undefined) return raw;
+    const settings = globalThis.OshaberiNote.readSettings((await api.storage.local.get(key))[key]);
+    const session = articles.read(temporary, settings.ollamaUrl), store = globalThis.OshaberiNoteChatState.readStore(raw, settings.ollamaUrl);
+    // 旧版が履歴へ複製した送信本文も、読込時にMapを残して取り除く。
+    if (JSON.stringify(temporary) !== JSON.stringify(session)) await api.storage.session.set({ [articles.key]: session });
+    if (session.conversation) store.conversations.article = session.conversation;
+    return store;
+  }
+  async function persistChat(store, options = {}, settingsPatch = {}) {
+    const previous = await sessionRaw(), local = structuredClone(store), conversation = local.conversations.article;
+    delete local.conversations.article;
+    let session;
+    if (conversation || previous !== undefined || options.articleSession) {
+      if (!api.storage.session) throw new Error("記事機能にはブラウザのセッションストレージが必要です。");
+      session = options.articleSession ?? (previous?.endpoint === store.endpoint ? articles.read(previous, store.endpoint) : articles.fresh(store.endpoint));
+      if (conversation) {
+        if (session.conversation && session.conversation.epoch !== conversation.epoch) session = articles.fresh(store.endpoint);
+        session.conversation = structuredClone(conversation);
+      } else {
+        session = articles.fresh(store.endpoint);
+        session.conversation = globalThis.OshaberiNoteChatState.fresh(store.endpoint, articles.id);
+      }
+      if (options.requestToken) delete session.requests[options.requestToken];
+      if (options.articleId) session.activeArticleId = options.articleId;
+      articles.bounded(session);
+    }
+    const oldLocal = (await api.storage.local.get(chatKey))[chatKey];
+    const changedSession = session !== undefined && JSON.stringify(previous) !== JSON.stringify(session);
+    if (changedSession) await api.storage.session.set({ [articles.key]: session });
+    try {
+      if (Object.keys(settingsPatch).length || JSON.stringify(oldLocal) !== JSON.stringify(local)) await api.storage.local.set({ ...settingsPatch, [chatKey]: local });
+    } catch (error) {
+      if (changedSession) {
+        try { if (previous === undefined) await api.storage.session.remove(articles.key); else await api.storage.session.set({ [articles.key]: previous }); }
+        catch { throw new Error("設定と記事セッションの保存結果を確認できません。再読み込みして状態を確認してください。自動再送は行いません。"); }
+      }
+      throw error;
+    }
+  }
+  async function prepareArticleMessage(patch, state) {
+    const session = articles.read(await sessionRaw(), state.endpoint);
+    return articles.request(session, patch, state.epoch);
+  }
+  async function articleOperation(operation, patch = {}, sender) {
+    return run(async () => {
+      if (!articles || !api.storage.session) throw new Error("記事機能のセッションストレージを利用できません。");
+      const settings = globalThis.OshaberiNote.readSettings((await api.storage.local.get(key))[key]);
+      if (operation === "import") {
+        if (!settings.enabled || !isNoteSender(sender)) throw new Error("記事の取り込みが許可されていません。");
+        const tab = await api.tabs.get(sender.tab.id);
+        // note内の画面遷移ではsender.urlが最初の文書URLのままになる。
+        // 送信元の信頼性は上で検証し、記事の同一性は現在のタブと取得時URLで確認する。
+        let address;
+        try {
+          address = articles.page(tab.url);
+          if (articles.page(patch.pageUrl).url !== address.url || tab.pendingUrl && articles.page(tab.pendingUrl).url !== address.url) throw new Error();
+        } catch { throw new Error("記事ページが変更されました。取り込み直してください。"); }
+        const article = articles.validate(patch.article);
+        if (article.url !== address.url || article.articleId !== address.articleId) throw new Error("表示中の記事と取得した記事が一致しません。");
+        const store = globalThis.OshaberiNoteChatState.readStore(await loadChat(), settings.ollamaUrl);
+        const session = articles.read(await sessionRaw(), settings.ollamaUrl);
+        session.conversation ??= globalThis.OshaberiNoteChatState.fresh(settings.ollamaUrl, articles.id);
+        const map = new Map(session.articles.map(item => [item.articleId, item])); map.set(article.articleId, article); session.articles = [...map.values()];
+        session.activeArticleId = article.articleId;
+        const token = crypto.randomUUID(); session.requests[token] = { articleId: article.articleId, action: "summary", epoch: session.conversation.epoch };
+        articles.request(session, { requestToken: token }, session.conversation.epoch);
+        store.conversations.article = session.conversation; store.selectedActionId = articles.id;
+        await persistChat(store, { articleSession: session });
+        try { await api.tabs.create({ url: api.runtime.getURL("home.html") + "#article-request=" + token }); }
+        catch (error) { delete session.requests[token]; await api.storage.session.set({ [articles.key]: session }); throw error; }
+        return { opened: true };
+      }
+      const session = articles.read(await sessionRaw(), settings.ollamaUrl);
+      if (operation === "cancel") {
+        if (typeof patch.requestToken === "string" && Object.hasOwn(session.requests, patch.requestToken)) {
+          delete session.requests[patch.requestToken];
+          await api.storage.session.set({ [articles.key]: session });
+        }
+        return { cancelled: true };
+      }
+      if (operation === "request") {
+        if (typeof patch.requestToken !== "string" || !Object.hasOwn(session.requests, patch.requestToken)) throw Object.assign(new Error("この記事の依頼は処理済みか無効です。自動再送は行いません。"), { code: "INVALID_INPUT" });
+        const message = articles.request(session, { requestToken: patch.requestToken }, session.conversation?.epoch);
+        return { articleId: message.articleId, articleAction: message.articleAction, displayText: message.user, requestToken: patch.requestToken };
+      }
+      if (operation === "info") {
+        if (patch.epoch !== session.conversation?.epoch) throw new Error("記事の会話が変更されました。");
+        const article = session.articles.find(item => item.articleId === patch.articleId);
+        if (!article) throw new Error("記事情報がありません。記事ページから取り込み直してください。");
+        return { articleId: article.articleId, title: article.title };
+      }
+      throw new Error("記事操作が不正です。");
+    });
+  }
   function isNoteSender(sender) {
     if (sender?.id !== api.runtime.id || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id)) return false;
     try { return new URL(sender.url).origin === "https://note.com"; }
@@ -38,6 +136,8 @@
     addCurrentMagazine: (groupId, userId, magazineId, displayName) => request("add-current-magazine", { groupId, userId, magazineId, displayName, pageUrl: globalThis.location.href }),
     addCurrentMembership: (groupId, userId, displayName) => request("add-current-membership", { groupId, userId, displayName, pageUrl: globalThis.location.href }),
     tag: operation => request("tag-operation", operation),
+    article: (operation, patch) => request("article-operation", { operation, ...patch }),
+    importArticle: article => request("import-article", { article, pageUrl: globalThis.location.href }),
     addCurrentTag: (groupId, selectionRevision) => request("add-current-tag", { groupId, selectionRevision, pageUrl: globalThis.location.href }),
     selectGroup: groupId => request("select-tag-group", { groupId, pageUrl: globalThis.location.href }),
     subscribe(listener) {
@@ -61,19 +161,19 @@
         nextChat.selectedActionId = chat.preferredAction((await api.storage.local.get(chatKey))[chatKey]);
       }
       else if (settings.ollamaSystemPrompt !== previous.ollamaSystemPrompt) {
-        nextChat = chat.readStore((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl, "chat");
+        nextChat = chat.readStore(await loadChat(), previous.ollamaUrl, "chat");
         nextChat.conversations.chat = chat.fresh(settings.ollamaUrl);
         if (options.importing) { chat.interruptStore(nextChat); nextChat.approvedUrl = ""; }
       }
       else if (settings.enabled === false || settings.ollamaModel !== previous.ollamaModel || options.importing) {
-        nextChat = chat.interruptStore(chat.readStore((await api.storage.local.get(chatKey))[chatKey], previous.ollamaUrl));
+        nextChat = chat.interruptStore(chat.readStore(await loadChat(), previous.ollamaUrl));
         if (options.importing) nextChat.approvedUrl = "";
       }
-      await api.storage.local.set({ [key]: settings, ...(nextChat ? { [chatKey]: nextChat } : {}) });
+      if (nextChat) await persistChat(nextChat, {}, { [key]: settings });
+      else await api.storage.local.set({ [key]: settings });
     },
-    loadChat: async () => (await api.storage.local.get(chatKey))[chatKey],
-    storeChat: state => api.storage.local.set({ [chatKey]: state }),
-    hasPermission: endpoint => api.permissions.contains({ origins: [new URL(endpoint).protocol + "//" + new URL(endpoint).hostname + "/*"], ...(firefox ? { data_collection: ["personalCommunications"] } : {}) }),
+    loadChat, storeChat: persistChat, prepareArticleMessage, articleOperation,
+    hasPermission: (endpoint, options = {}) => api.permissions.contains({ origins: [new URL(endpoint).protocol + "//" + new URL(endpoint).hostname + "/*"], ...(firefox ? { data_collection: ["personalCommunications", ...(options.article ? ["websiteContent"] : [])] } : {}) }),
     onChatDisconnect: listener => api.runtime.onConnect.addListener(connection => {
       if (!globalThis.OshaberiNoteBackgroundPlatform.isHomeSender(connection.sender) || !connection.name.startsWith("oshaberi-chat:")) return;
       const owner = connection.name.slice("oshaberi-chat:".length);

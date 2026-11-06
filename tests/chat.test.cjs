@@ -357,6 +357,26 @@ test('中止されたストリームと巨大応答を停止する', async () =>
   await assert.rejects(client([encoded(line('a', true))]).api.chat('http://localhost:11434', 'local', [], signal, () => {}));
   await assert.rejects(client([encoded(line('a'.repeat(32001), true))]).api.chat('http://localhost:11434', 'local', [], new AbortController().signal, () => {}), /32,000/);
 });
+
+test('HTTP 400のコンテキスト不足をトークン数付きで案内し、本文を切り捨てない',async()=>{
+ const detail='request (5986 tokens) exceeds the available context size (4096 tokens), try increasing it';
+ const f=client([encoded(JSON.stringify({error:detail}))],{status:400});let updates=0;
+ await assert.rejects(f.api.chat('http://localhost:11434','local',[{role:'user',content:'本文を保持'}],new AbortController().signal,()=>{updates++;},{truncate:false}),error=>{
+  assert.equal(error.status,400);assert.match(error.message,/入力5986トークン／上限4096トークン/);assert.match(error.message,/短い質問でも対象記事の本文/);return true;
+ });
+ const body=JSON.parse(f.request.body);assert.equal(body.truncate,false);assert.equal(body.shift,false);assert.equal(body.messages[0].content,'本文を保持');assert.equal(updates,0);
+});
+
+test('HTTPエラー本文はサイズ制限内で扱い、未知の詳細や入力の反射を表示しない',async()=>{
+ for(const text of ['not json',JSON.stringify({error:'本文の秘密 <script> execute'}),JSON.stringify({error:'x'.repeat(17000)+' exceeds context length'})]){
+  const f=client([encoded(text)],{status:400});await assert.rejects(f.api.chat('http://localhost:11434','local',[],new AbortController().signal,()=>{}),error=>{assert.match(error.message,/HTTP 400/);assert.doesNotMatch(error.message,/秘密|script|xxxx/);return true;});
+ }
+});
+
+test('ストリーム内のコンテキスト不足も案内し、完了扱いにしない',async()=>{
+ const f=client([encoded(JSON.stringify({error:'the input length exceeds the context length'})+'\n')]);
+ await assert.rejects(f.api.chat('http://localhost:11434','local',[],new AbortController().signal,()=>{},{truncate:false}),/Ollamaのコンテキスト上限/);
+});
 test('モデル一覧の形式とモデル名を検証し、インストール済みモデルだけ返す', async () => {
   const f = client([encoded(JSON.stringify({ models: [{ name: 'local:a' }, { name: 'local:b' }] }))]);
   assert.deepEqual(Array.from(await f.api.models('http://localhost:11434', new AbortController().signal)), ['local:a', 'local:b']);

@@ -36,12 +36,12 @@ test("FirefoxのManifestだけ背景処理・ID・Android対応・データ収�
   assert.equal(chromium.background.service_worker, "src/background.js");
   assert.equal(chromium.background.scripts, undefined);
   assert.equal(firefox.background.service_worker, undefined);
-  assert.deepEqual(firefox.background.scripts, ["src/common.js", "src/chat-actions.js", "src/chat-state.js", "src/platform/browser-api.js", "src/routing.js", "src/background.js"]);
+  assert.deepEqual(firefox.background.scripts, ["src/common.js", "src/articles.js", "src/chat-actions.js", "src/chat-state.js", "src/platform/browser-api.js", "src/routing.js", "src/background.js"]);
   assert.equal(chromium.browser_specific_settings, undefined);
   assert.equal(firefox.browser_specific_settings.gecko_android, undefined);
   assert.equal(firefox.browser_specific_settings.gecko.id, "oshaberi-note@ruminar");
   assert.equal(firefox.browser_specific_settings.gecko.strict_min_version, "140.0");
-  assert.deepEqual(firefox.browser_specific_settings.gecko.data_collection_permissions, { required: ["none"], optional: ["personalCommunications"] });
+  assert.deepEqual(firefox.browser_specific_settings.gecko.data_collection_permissions, { required: ["none"], optional: ["personalCommunications", "websiteContent"] });
   for (const field of ["permissions", "host_permissions", "content_scripts", "web_accessible_resources", "version", "icons"]) assert.deepEqual(firefox[field], chromium[field]);
   await assert.rejects(createManifest("unknown"));
 });

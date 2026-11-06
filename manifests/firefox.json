@@ -2,6 +2,7 @@
   "background": {
     "scripts": [
       "src/common.js",
+      "src/articles.js",
       "src/chat-actions.js",
       "src/chat-state.js",
       "src/platform/browser-api.js",
@@ -18,7 +19,8 @@
           "none"
         ],
         "optional": [
-          "personalCommunications"
+          "personalCommunications",
+          "websiteContent"
         ]
       }
     }

@@ -11,11 +11,17 @@
     // 以前の100往復までの履歴は読み込んだ後、現在の保存範囲へ移行する。
     if (!raw || raw.schemaVersion !== 1 || typeof raw.epoch !== "string" || raw.endpoint !== endpoint || !["", endpoint].includes(raw.approvedUrl) || !Array.isArray(raw.turns) || raw.turns.length > 100 || bytes(raw) > limits.bytes) throw new Error("会話の保存データに異常があります。「新しい会話」で初期化してください。");
     if (raw.turns.some(turn => !turn || typeof turn.user !== "string" || !turn.user.trim() || turn.user.length > limits.input || typeof turn.assistant !== "string" || turn.assistant.length > limits.response || !["complete", "interrupted", "pending"].includes(turn.status))) throw new Error("会話履歴の形式が不正です。");
+    for (const turn of raw.turns) {
+      if (turn.llmText !== undefined && (raw.actionId !== "article" || typeof turn.llmText !== "string" || !turn.llmText.trim() || turn.llmText.length > limits.input)) throw new Error("記事の送信本文が不正です。");
+      if (turn.articleId !== undefined && (raw.actionId !== "article" || !/^n[a-zA-Z0-9]+$/.test(turn.articleId) || typeof turn.articleTitle !== "string" || !turn.articleTitle.trim() || turn.articleTitle.length > 500 || !["summary", "impression", "revision", "question"].includes(turn.articleAction))) throw new Error("記事の参照情報が不正です。");
+    }
     if (raw.active !== null && (!raw.active || typeof raw.active.id !== "string" || typeof raw.active.owner !== "string" || raw.turns.at(-1)?.status !== "pending")) throw new Error("生成状態が不正です。");
     if (raw.turns.filter(turn => turn.status === "pending").length !== (raw.active ? 1 : 0)) throw new Error("未完了の生成状態が不正です。");
     if (raw.actionId !== undefined && raw.actionId !== "chat" && !globalThis.OshaberiNoteChatActions?.find(raw.actionId)) throw new Error("未対応の会話の種類です。");
     for (const key of ["droppedTurns", "contextTrimmedTurns"]) if (raw[key] !== undefined && (!Number.isSafeInteger(raw[key]) || raw[key] < 0)) throw new Error("履歴の整理状態が不正です。");
-    return { ...structuredClone(raw), actionId: raw.actionId ?? "chat", droppedTurns: raw.droppedTurns ?? 0, contextTrimmedTurns: raw.contextTrimmedTurns ?? 0 };
+    const result = { ...structuredClone(raw), actionId: raw.actionId ?? "chat", droppedTurns: raw.droppedTurns ?? 0, contextTrimmedTurns: raw.contextTrimmedTurns ?? 0 };
+    if (result.actionId === "article") for (const turn of result.turns) delete turn.llmText;
+    return result;
   }
   const validAction = id => id === "chat" || Boolean(globalThis.OshaberiNoteChatActions?.find(id));
   const preferredAction = raw => validAction(raw?.selectedActionId) ? raw.selectedActionId : "chat";
@@ -66,6 +72,10 @@
   function messagesFor(state, settings, text) {
     const system = globalThis.OshaberiNoteChatActions.systemPrompt(state.actionId, settings);
     if (system.length + text.length > limits.context) throw Object.assign(new Error("システムプロンプトと今回の入力が送信上限を超えています。入力または登録済みタグを整理してください。"), { code: "INVALID_INPUT" });
+    if (state.actionId === "article") {
+      state.contextTrimmedTurns = 0;
+      return [...(system ? [{ role: "system", content: system }] : []), { role: "user", content: text }];
+    }
     let remaining = limits.context - system.length - text.length;
     const complete = state.turns.filter(turn => turn.status === "complete"), selected = [];
     for (let i = complete.length - 1; i >= 0; i--) {
@@ -91,12 +101,13 @@
       core.normalizeOllamaUrl(settings.ollamaUrl); core.validateModel(settings.ollamaModel); core.validateSystemPrompt(settings.ollamaSystemPrompt);
       return settings;
     }
-    async function permitted(settings, store) {
-      if (!settings.enabled || store.approvedUrl !== settings.ollamaUrl || !await port.hasPermission(settings.ollamaUrl)) throw new Error("接続が未許可です。拡張をONにし、「接続・再試行」から接続してください。");
+    async function permitted(settings, store, actionId) {
+      if (!settings.enabled || store.approvedUrl !== settings.ollamaUrl || !await port.hasPermission(settings.ollamaUrl, { article: actionId === "article" })) throw new Error("接続が未許可です。拡張をONにし、「接続・再試行」から接続してください。");
     }
-    async function save(store, state) {
+    function view(store, state) { return { ...state, anyActive: Object.values(store.conversations).some(item => Boolean(item.active)) }; }
+    async function save(store, state, options) {
       if (state) { retainRecent(state); store.conversations[state.actionId] = state; }
-      await port.store(store); return state;
+      await port.store(store, options); return state ? view(store, state) : undefined;
     }
     return Object.freeze({ execute: (operation, patch = {}) => run(async () => {
       if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("会話の要求が不正です。");
@@ -117,7 +128,7 @@
         }
         // 初回生成したepochと旧単一会話の移行も、同じ保存キューで確定する。
         if (orphan || raw?.schemaVersion !== 2 || !Object.hasOwn(store.conversations, id) || state.turns.length > limits.turns) return save(store, state);
-        return state;
+        return view(store, state);
       }
       if (operation === "select") {
         if (typeof patch.owner !== "string" || !port.isOwnerConnected?.(patch.owner)) throw new Error("会話画面との接続を確認できません。");
@@ -127,9 +138,9 @@
         }
         if (state.active?.owner === patch.owner) interrupt(state);
         store.selectedActionId = id;
-        await save(store, state);
+        const selected = await save(store, state);
         const action = globalThis.OshaberiNoteChatActions.find(id);
-        return { ...state, ...(first && action ? { initialMessage: action.initialMessage } : {}) };
+        return { ...selected, ...(first && action?.initialMessage ? { initialMessage: action.initialMessage } : {}) };
       }
       if (operation === "stop" || operation === "revoke") {
         for (const item of Object.values(store.conversations)) {
@@ -137,22 +148,25 @@
           interrupt(item);
         }
         if (operation === "revoke") store.approvedUrl = "";
-        state = select(store, id); await save(store); return state;
+        state = select(store, id); await save(store); return view(store, state);
       }
       if (patch.epoch !== state.epoch || patch.endpoint !== settings.ollamaUrl) throw Object.assign(new Error("接続先または会話が変更されました。状態を再確認してください。"), { code: "STALE_CHAT" });
       if (operation === "approve") {
-        if (!settings.enabled || !await port.hasPermission(settings.ollamaUrl)) throw new Error("接続先への権限がありません。");
+        if (!settings.enabled || !await port.hasPermission(settings.ollamaUrl, { article: id === "article" })) throw new Error("接続先への権限がありません。");
         store.approvedUrl = settings.ollamaUrl; state.approvedUrl = store.approvedUrl; return save(store, state);
       }
-      await permitted(settings, store);
+      await permitted(settings, store, id);
       if (operation === "start") {
-        if (Object.values(store.conversations).some(item => item.active)) throw new Error("別の画面またはタブで応答を生成中です。中止してから再試行してください。");
+        if (Object.values(store.conversations).some(item => item.active)) throw Object.assign(new Error("別の画面またはタブで応答を生成中です。終了するまで待ってください。"), { code: "CHAT_BUSY" });
         if (!settings.ollamaModel || patch.model !== settings.ollamaModel) throw new Error("モデルを選択し直してください。");
         if (typeof patch.owner !== "string" || patch.owner.length > 100 || !patch.owner || typeof patch.text !== "string" || !patch.text.trim() || patch.text.length > limits.input) throw Object.assign(new Error("メッセージは1～200,000文字で入力してください。入力を直して、そのまま再送できます。"), { code: "INVALID_INPUT" });
         if (port.isOwnerConnected && !port.isOwnerConnected(patch.owner)) throw new Error("会話画面との接続を確認できません。再読み込みしてください。");
-        state.turns.push({ user: patch.text, assistant: "", status: "pending" }); state.active = { id: crypto.randomUUID(), owner: patch.owner };
+        const message = id === "article" ? await port.prepareArticleMessage(patch, state) : { user: patch.text };
+        const { llmText, ...displayMessage } = message;
+        state.turns.push({ ...displayMessage, assistant: "", status: "pending" }); state.active = { id: crypto.randomUUID(), owner: patch.owner };
         retainRecent(state, limits.response * 6);
-        const messages = messagesFor(state, settings, patch.text); await save(store, state); return { ...state, messages };
+        const messages = messagesFor(state, settings, llmText ?? message.user);
+        const started = await save(store, state, { requestToken: patch.requestToken, articleId: message.articleId }); return { ...started, messages };
       }
       if (!["progress", "complete"].includes(operation) || !state.active || patch.id !== state.active.id || patch.owner !== state.active.owner || patch.model !== settings.ollamaModel) throw Object.assign(new Error("生成は中止または初期化されました。"), { code: "STALE_CHAT" });
       if (typeof patch.text !== "string" || patch.text.length > limits.response || !patch.text.startsWith(state.turns.at(-1).assistant)) throw new Error("応答の形式または長さが不正です。");

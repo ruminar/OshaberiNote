@@ -12,6 +12,7 @@
   }
   const noteUi = globalThis.OshaberiNoteUi?.create(document, window, {
     settingsUrl: () => platform.homeUrl() + "#settings",
+    summarizeArticle: article => platform.importArticle(article),
     async addCurrentMembership(groupId, userId, displayName) {
       const before = revision;
       const value = await platform.addCurrentMembership(groupId, userId, displayName);

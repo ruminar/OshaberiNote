@@ -1,11 +1,11 @@
 "use strict";
 // ChromiumはService Workerから読込。Firefoxはmanifestのbackground.scriptsで順に読込。
 if (typeof importScripts === "function") {
-  importScripts("common.js", "chat-actions.js", "chat-state.js", "platform/browser-api.js", "routing.js");
+  importScripts("common.js", "articles.js", "chat-actions.js", "chat-state.js", "platform/browser-api.js", "routing.js");
 }
 const port = globalThis.OshaberiNoteBackgroundPlatform;
 const controller = globalThis.OshaberiNoteRouting.createController(port);
-const chatController = globalThis.OshaberiNoteChatState.createController({ loadSettings: port.load, load: port.loadChat, store: port.storeChat, hasPermission: port.hasPermission, isOwnerConnected: port.isChatOwnerConnected }, port.run);
+const chatController = globalThis.OshaberiNoteChatState.createController({ loadSettings: port.load, load: port.loadChat, store: port.storeChat, hasPermission: port.hasPermission, isOwnerConnected: port.isChatOwnerConnected, prepareArticleMessage: port.prepareArticleMessage }, port.run);
 port.onChatDisconnect(owner => { void chatController.execute("stop", { owner }).catch(() => {}); });
 port.onPermissionRemoved(() => { void chatController.execute("revoke").catch(() => {}); });
 function reconcile() {
@@ -29,7 +29,8 @@ port.onAction(() => {
 port.onMessage((message, sender, respond) => {
   let operation;
   if (port.isHomeSender(sender)) {
-    if (message?.type === "chat-operation") operation = chatController.execute(message.operation, message.patch);
+    if (message?.type === "article-operation") operation = port.articleOperation(message.patch?.operation, message.patch, sender);
+    else if (message?.type === "chat-operation") operation = chatController.execute(message.operation, message.patch);
     else if (message?.type === "get-state") operation = controller.getState();
     else if (message?.type === "save-settings") operation = controller.save(message.patch);
     else if (message?.type === "save-llm-settings") operation = typeof message.patch?.expectedToken === "string"
@@ -41,6 +42,10 @@ port.onMessage((message, sender, respond) => {
     else if (message?.type === "select-tag-group") operation = controller.tag({ type: "SELECT_TAG_GROUP", groupId: message.patch?.groupId });
     else return false;
   } else {
+    if (message?.type === "import-article" && port.isNoteSender?.(sender)) {
+      port.articleOperation("import", message.patch, sender).then(settings => respond({ ok: true, settings }), error => respond({ ok: false, error: error.message, code: error.code || "OPERATION_FAILED" }));
+      return true;
+    }
     if (!["select-tag-group", "add-current-tag", "add-current-user", "add-current-magazine", "add-current-membership", "current-author-operation"].includes(message?.type) || !port.isNoteSender?.(sender)) return false;
     operation = (async () => {
       if (message.type === "add-current-membership") {

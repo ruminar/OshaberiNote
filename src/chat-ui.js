@@ -4,6 +4,7 @@
   const api = globalThis.browser ?? globalThis.chrome, byId = id => document.getElementById(id);
   const firefox = Boolean(api.runtime.getManifest?.().browser_specific_settings?.gecko);
   const owner = crypto.randomUUID(), chatKey = globalThis.OshaberiNoteChatState.key;
+  let articleConsent = !firefox;
   let settings, state, connection, requestAbort, generatingId, ready = false, busy = false, blocked = false;
   let modelNames = [], probeRevision = 0, visible = !byId("panel-chat").hidden;
   let llmVisible = !byId("panel-llm").hidden;
@@ -12,7 +13,51 @@
   let sendSequence = 0;
   const actionButtons = [];
   let selectedAction = "chat";
-  const drafts = new Map();
+  const drafts = new Map(), articles = globalThis.OshaberiNoteArticles;
+  let pendingArticleRequest, articleReference, articleSnapshot, localActive = false;
+  const articleDialog = byId("chat-article-dialog");
+  function discardPendingArticle() {
+    const previous = pendingArticleRequest; pendingArticleRequest = undefined;
+    if (previous?.requestToken) {
+      globalThis.history?.replaceState?.(null, "", api.runtime.getURL("home.html"));
+      void platform.article("cancel", { requestToken: previous.requestToken }).catch(error => { blocked = true; status(error.message); controls(); });
+    }
+  }
+  function closeArticleDialog() { if (articleDialog.open) articleDialog.close(); articleReference = undefined; }
+  function maybeSendArticle() {
+    if (pendingArticleRequest && visible && selectedAction === "article" && ready && articleConsent && settings?.enabled && settings.ollamaModel && !state?.anyActive && !state?.active && !busy && !actionStarting && !blocked) byId("chat-form").requestSubmit();
+  }
+  function articleReferenceNode(node, turn) {
+    const epoch = state.epoch, valid = () => selectedAction === "article" && state?.epoch === epoch && state.turns.some(item => item.user === turn.user && item.articleId === turn.articleId && item.articleAction === turn.articleAction);
+    const button = document.createElement("button"), suffix = document.createElement("span");
+    button.type = "button"; button.className = "chat-article-reference"; button.textContent = `[&${turn.articleTitle}]`;
+    button.setAttribute("aria-haspopup", "dialog"); button.setAttribute("title", turn.articleTitle);
+    button.setAttribute("aria-label", `${turn.articleTitle}の記事操作を選択`);
+    suffix.textContent = articles.actions[turn.articleAction].suffix;
+    button.onclick = async () => {
+      if (!valid()) return;
+      try {
+        const info = await platform.article("info", { epoch, articleId: turn.articleId });
+        if (!valid()) return;
+        articleReference = { ...info, epoch, valid };
+        byId("chat-article-title").textContent = info.title; articleDialog.showModal(); controls();
+      } catch (error) { status(error.message); }
+    };
+    node.append(button, suffix);
+  }
+  for (const action of Object.keys(articles.actions)) {
+    byId(`chat-article-${action}`).onclick = () => {
+      const reference = articleReference;
+      if (!reference?.valid() || byId(`chat-article-${action}`).disabled) return;
+      discardPendingArticle();
+      pendingArticleRequest = { articleId: reference.articleId, articleAction: action, displayText: articles.display(reference, action) };
+      byId("chat-input").value = pendingArticleRequest.displayText; closeArticleDialog();
+      status("記事の依頼を用意しました。未接続の場合は「LLMの設定」で接続してください。"); maybeSendArticle();
+    };
+  }
+  byId("chat-article-close").onclick = closeArticleDialog;
+  articleDialog.addEventListener("close", () => { articleReference = undefined; });
+  byId("chat-input").addEventListener("input", () => { if (pendingArticleRequest && byId("chat-input").value !== pendingArticleRequest.displayText) discardPendingArticle(); });
   let scrollTail, navigatingHistory = false;
   function scrollRange() {
     const container = byId("chat-messages");
@@ -74,13 +119,14 @@
     byId("connect-ollama").disabled = working || !settings?.enabled || active || blocked;
     byId("chat-model").disabled = working || !ready || blocked;
     byId("chat-input").disabled = working || !settings?.enabled || blocked;
-    byId("chat-send").disabled = working || active || !ready || !settings?.ollamaModel || !settings?.enabled || blocked;
+    byId("chat-send").disabled = working || active || state?.anyActive || (selectedAction === "article" && !articleConsent) || !ready || !settings?.ollamaModel || !settings?.enabled || blocked;
     byId("chat-stop").disabled = !active;
     byId("chat-new").disabled = working || !settings;
     byId("save-ollama-url").disabled = working || !settings;
     byId("system-prompt").disabled = working || !settings;
     byId("save-system-prompt").disabled = working || !settings;
     for (const button of actionButtons) button.disabled = working || !settings || !state || blocked;
+    for (const action of Object.keys(articles.actions)) byId(`chat-article-${action}`).disabled = working || !settings?.enabled || Boolean(state?.anyActive) || blocked;
     tagUI.refresh();
   }
   function abort() { requestAbort?.abort(); requestAbort = undefined; probeRevision++; }
@@ -88,7 +134,7 @@
     let result;
     try { result = await api.runtime.sendMessage({ type: "chat-operation", operation, patch: { actionId: selectedAction, ...patch } }); }
     catch { blocked = true; controls(); throw new Error("保存結果を確認できません。ページを再読み込みして状態を確認してください。自動再送は行いません。"); }
-    if (!result?.ok) { if (!["INVALID_INPUT", "STALE_CHAT"].includes(result?.code)) blocked = true; controls(); throw Object.assign(new Error(result?.error || "会話の処理結果を確認できません。"), { code: result?.code }); }
+    if (!result?.ok) { if (!["INVALID_INPUT", "STALE_CHAT", "CHAT_BUSY"].includes(result?.code)) blocked = true; controls(); throw Object.assign(new Error(result?.error || "会話の処理結果を確認できません。"), { code: result?.code }); }
     return result.settings;
   }
   function renderModels() {
@@ -101,12 +147,13 @@
   function render(next) {
     if (state && (state.actionId !== next.actionId || state.epoch !== next.epoch)) {
       navigatingHistory = false;
-      abort(); generatingId = undefined; tagUI.close();
+      abort(); generatingId = undefined; tagUI.close(); closeArticleDialog();
       if (state.actionId !== next.actionId) {
-        drafts.set(state.actionId, { epoch: state.epoch, text: byId("chat-input").value });
+        drafts.set(state.actionId, { epoch: state.epoch, text: byId("chat-input").value, articleRequest: pendingArticleRequest });
         const draft = drafts.get(next.actionId);
         byId("chat-input").value = draft?.epoch === next.epoch ? draft.text : "";
-      } else { drafts.delete(next.actionId); byId("chat-input").value = ""; }
+        pendingArticleRequest = draft?.epoch === next.epoch ? draft.articleRequest : undefined;
+      } else { drafts.delete(next.actionId); byId("chat-input").value = ""; pendingArticleRequest = undefined; }
     }
     if (generatingId && next.active?.id !== generatingId) { abort(); generatingId = undefined; }
     state = next; selectedAction = state.actionId;
@@ -115,6 +162,8 @@
       button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1;
     }
     byId("chat-messages").setAttribute("aria-labelledby", `chat-tab-${selectedAction}`);
+    byId("chat-article-help").hidden = selectedAction !== "article";
+    byId("chat-input-help").textContent = selectedAction === "article" ? "最大200,000文字。閲覧できる記事本文だけを使います。記事と今回の依頼文がモデルのコンテキストに収まらない場合はエラーにし、本文を自動で切り捨てません。" : "最大200,000文字。記事本文も貼り付けられます。長文や過去の会話は、Ollamaのコンテキスト長によって一部が参照されない場合があります。";
     const action = globalThis.OshaberiNoteChatActions.find(state.actionId);
     byId("chat-heading").textContent = action ? `おしゃべり（${action.title} v${action.version}）` : "おしゃべり";
     byId("chat-history-info").textContent = `履歴は各会話タブで直近10往復・最大2MiBを保存し、古い分から自動で整理します。${state.droppedTurns ? ` これまでに${state.droppedTurns}往復を保存から外しました。` : ""}${state.contextTrimmedTurns ? ` 直近の送信では、保存履歴のうち古い${state.contextTrimmedTurns}往復を送信対象から外しました。` : ""}`;
@@ -143,7 +192,8 @@
           } finally { copy.disabled = false; }
         };
         header.append(heading, copy, feedback);
-        if (label === "AI" && content) {
+        if (label === "あなた" && turn.articleId && articles.actions[turn.articleAction]) articleReferenceNode(text, turn);
+        else if (label === "AI" && content) {
           const epoch = state.epoch, user = turn.user;
           tagUI.render(text, content, () => state?.epoch === epoch && state.turns.some(item => item.status === "complete" && item.user === user && item.assistant === content));
         } else text.textContent = content || "（応答なし）";
@@ -198,7 +248,7 @@
     byId("chat-actions").append(button); actionButtons.push(button);
   }
   async function probe(manual, grant) {
-    if (busy || state?.active) return;
+    if (busy || (state?.active && !pendingArticleRequest)) return;
     busy = true; blocked = false; ready = false; abort(); controls();
     connectionHelp();
     const revision = probeRevision, endpoint = settings.ollamaUrl, epoch = state.epoch, actionId = selectedAction;
@@ -207,10 +257,11 @@
     try {
       if (manual) {
         if (!await grant) throw new Error("接続先への権限が許可されませんでした。");
+        if (firefox && actionId === "article") articleConsent = true;
         render(await call("approve", { epoch, endpoint, actionId }));
       } else {
         const url = new URL(endpoint);
-        if (!await api.permissions.contains({ origins: [url.protocol + "//" + url.hostname + "/*"], ...(firefox ? { data_collection: ["personalCommunications"] } : {}) })) throw new Error("接続権限がありません。「接続・再試行」を押してください。");
+        if (!await api.permissions.contains({ origins: [url.protocol + "//" + url.hostname + "/*"], ...(firefox ? { data_collection: ["personalCommunications", ...(selectedAction === "article" ? ["websiteContent"] : [])] } : {}) })) throw new Error("接続権限がありません。「接続・再試行」を押してください。");
       }
       if (revision !== probeRevision || (!visible && !llmVisible)) return;
       connectionStatus("Ollamaへの接続とモデル一覧を確認しています…");
@@ -226,13 +277,13 @@
       connectionStatus(controller.signal.aborted ? "接続確認を中止しました。Ollamaの起動と接続URLを確認してください。" : error.message);
       status("接続を確認できません。「LLMの設定」で確認してください。");
     }
-    finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; busy = false; controls(); }
+    finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; busy = false; controls(); maybeSendArticle(); }
   }
   byId("connect-ollama").onclick = () => {
     if (!settings || busy) return;
     const url = new URL(core.normalizeOllamaUrl(settings.ollamaUrl));
     // 権限要求はクリックから同期的に開始し、利用者の操作との関連を維持する。
-    const grant = api.permissions.request({ origins: [url.protocol + "//" + url.hostname + "/*"], ...(firefox ? { data_collection: ["personalCommunications"] } : {}) });
+    const grant = api.permissions.request({ origins: [url.protocol + "//" + url.hostname + "/*"], ...(firefox ? { data_collection: ["personalCommunications", ...(selectedAction === "article" ? ["websiteContent"] : [])] } : {}) });
     void probe(true, grant);
   };
   byId("ollama-settings").onsubmit = async event => {
@@ -283,7 +334,7 @@
     busy = true; abort(); controls();
     try { await platform.save({ ollamaModel: model }); await sync(); connectionStatus(model ? `使用モデル：${model}` : "モデルを選択してください。"); status(model ? "会話できます。" : "「LLMの設定」でモデルを選択してください。"); }
     catch (error) { blocked = true; connectionStatus(error.message); status("モデルを保存できません。「LLMの設定」で確認してください。"); }
-    finally { busy = false; controls(); }
+    finally { busy = false; controls(); maybeSendArticle(); }
   };
   byId("chat-input").addEventListener("keydown", event => {
     if (event.key !== "Enter" || !event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.isComposing || event.keyCode === 229 || event.repeat) return;
@@ -297,14 +348,17 @@
     connectionHelp();
     busy = true; controls();
     const text = byId("chat-input").value, endpoint = settings.ollamaUrl, model = settings.ollamaModel, actionId = selectedAction;
+    const articleRequest = pendingArticleRequest;
     const controller = new AbortController(); requestAbort = controller;
-    let id, epoch, lastSave = 0;
+    let id, epoch, lastSave = 0, waitForArticle = false;
     const timer = setTimeout(() => controller.abort(), 300000);
     try {
-      const started = await call("start", patch({ text, model, owner }));
+      const started = await call("start", patch({ text, model, owner, ...(articleRequest ? { articleId: articleRequest.articleId, articleAction: articleRequest.articleAction, requestToken: articleRequest.requestToken } : {}) }));
       id = started.active.id; epoch = started.epoch; generatingId = id;
       controller.signal.throwIfAborted();
       if (sequence !== sendSequence || !visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
+      if (pendingArticleRequest === articleRequest) pendingArticleRequest = undefined;
+      if (articleRequest?.requestToken) globalThis.history?.replaceState?.(null, "", api.runtime.getURL("home.html"));
       navigatingHistory = false; render(started); byId("chat-input").value = ""; busy = false; controls();
       const container = byId("chat-messages"); if (scrollRange() > 1) container.scrollTop = container.scrollHeight;
       updateMessageNavigation();
@@ -326,20 +380,22 @@
           lastSave = Date.now();
           await call("progress", { actionId, epoch, endpoint, id, owner, model, text: answer });
         }
-      });
+      }, { truncate: actionId !== "article" });
       controller.signal.throwIfAborted();
       const completed = await call("complete", { actionId, epoch, endpoint, id, owner, model, text: response });
       if (sequence === sendSequence) { render(completed); status("応答が完了しました。"); }
     } catch (error) {
       controller.abort();
+      if (error.code === "INVALID_INPUT" && articleRequest?.requestToken && pendingArticleRequest === articleRequest) discardPendingArticle();
       if (sequence === sendSequence) connectionHelp(error);
       if (sequence === sendSequence && error.status === 403) { ready = false; connectionStatus(error.message); }
       if (id) {
         try { const stopped = await call("stop", { actionId, id, owner }); if (sequence === sendSequence) render(stopped); }
         catch { blocked = true; }
       }
-      if (sequence === sendSequence) status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message}${error.status === 403 ? " 詳細は「LLMの設定」で確認してください。" : ""} 自動再送は行いません。`);
-    } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) generatingId = undefined; if (sequence === sendSequence) busy = false; controls(); }
+      if (error.code === "CHAT_BUSY") { waitForArticle = true; await sync(); status("別の応答が完了するまで記事の依頼を待機します。"); }
+      else if (sequence === sendSequence) status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message}${error.status === 403 ? " 詳細は「LLMの設定」で確認してください。" : ""} 自動再送は行いません。`);
+    } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) generatingId = undefined; if (sequence === sendSequence) busy = false; controls(); if (waitForArticle) Promise.resolve().then(maybeSendArticle); }
   };
   byId("chat-stop").onclick = async () => {
     abort();
@@ -357,21 +413,42 @@
   platform.subscribe(value => {
     const next = core.readSettings(value);
     if (!settings || next.ollamaUrl !== settings.ollamaUrl || next.ollamaModel !== settings.ollamaModel || (selectedAction === "chat" && next.ollamaSystemPrompt !== settings.ollamaSystemPrompt) || !next.enabled) abort();
-    if (settings && next.ollamaUrl !== settings.ollamaUrl) { ready = false; modelNames = []; drafts.clear(); byId("chat-input").value = ""; promptDirty = false; byId("system-prompt-status").textContent = ""; }
+    if (settings && next.ollamaUrl !== settings.ollamaUrl) { ready = false; modelNames = []; drafts.clear(); pendingArticleRequest = undefined; byId("chat-input").value = ""; promptDirty = false; byId("system-prompt-status").textContent = ""; }
     settings = next; renderModels(); controls();
     byId("chat-endpoint").textContent = `接続先：${settings.ollamaUrl}`;
     if (document.activeElement !== byId("ollama-url")) byId("ollama-url").value = settings.ollamaUrl;
     if (!promptDirty) { byId("system-prompt").value = settings.ollamaSystemPrompt; promptBaseline = settings.ollamaSystemPrompt; }
   });
   api.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !Object.hasOwn(changes, chatKey)) return;
+    const articleChanged = area === "session" && Object.hasOwn(changes, articles.key);
+    if (!articleChanged && (area !== "local" || !Object.hasOwn(changes, chatKey))) return;
     try {
-      const next = globalThis.OshaberiNoteChatState.read(changes[chatKey].newValue, settings.ollamaUrl, selectedAction);
-      if (next.approvedUrl !== settings.ollamaUrl) { ready = false; abort(); }
-      render(next);
+      let next;
+      if (articleChanged) {
+        articleSnapshot = changes[articles.key].newValue;
+        if (selectedAction === "article" && articleSnapshot?.endpoint === settings.ollamaUrl && articleSnapshot.conversation) {
+          next = globalThis.OshaberiNoteChatState.read(articleSnapshot.conversation, settings.ollamaUrl, "article");
+          if (state?.endpoint === next.endpoint) next.approvedUrl = state.approvedUrl;
+        }
+      } else {
+        const store = globalThis.OshaberiNoteChatState.readStore(changes[chatKey].newValue, settings.ollamaUrl);
+        localActive = Object.values(store.conversations).some(item => Boolean(item.active));
+        if (selectedAction === "article") {
+          if (articleSnapshot?.endpoint === settings.ollamaUrl && articleSnapshot.conversation) next = globalThis.OshaberiNoteChatState.read(articleSnapshot.conversation, settings.ollamaUrl, "article");
+          else if (state?.endpoint === settings.ollamaUrl) next = { ...state };
+          if (next) next.approvedUrl = store.approvedUrl;
+        } else next = globalThis.OshaberiNoteChatState.read(changes[chatKey].newValue, settings.ollamaUrl, selectedAction);
+      }
+      const anyActive = localActive || Boolean(articleSnapshot?.conversation?.active);
+      if (next) {
+        next.anyActive = anyActive;
+        if (next.approvedUrl !== settings.ollamaUrl) { ready = false; abort(); }
+        render(next);
+      } else if (state) { state.anyActive = anyActive; controls(); }
+      Promise.resolve().then(maybeSendArticle);
     } catch { abort(); ready = false; blocked = true; status("会話の更新を確認できません。再読み込みして確認してください。"); controls(); }
   });
-  api.permissions.onRemoved.addListener(() => { abort(); ready = false; connectionStatus("接続権限が変更されました。「接続・再試行」で確認してください。"); status("接続権限が変更されました。「LLMの設定」で確認してください。"); controls(); });
+  api.permissions.onRemoved.addListener(() => { if (firefox) articleConsent = false; abort(); ready = false; connectionStatus("接続権限が変更されました。「接続・再試行」で確認してください。"); status("接続権限が変更されました。「LLMの設定」で確認してください。"); controls(); });
   globalThis.OshaberiNoteChatUI = Object.freeze({ async settingsImported() {
     promptDirty = false;
     await sync();
@@ -382,7 +459,7 @@
     visible = value; llmVisible = llm;
     if (visible) setTimeout(refreshMessageNavigation, 0);
     if (leavingChat || leavingBoth) {
-      tagUI.close();
+      tagUI.close(); closeArticleDialog();
       abort();
       if (generatingId) void call("stop", { owner, id: generatingId }).then(render).catch(error => status(error.message));
     }
@@ -391,8 +468,19 @@
     try {
       connection = api.runtime.connect({ name: `oshaberi-chat:${owner}` });
       connection.onDisconnect.addListener(() => { abort(); ready = false; blocked = true; status("背景処理との接続が切れました。再読み込みして状態を確認してください。"); controls(); });
+      if (firefox) articleConsent = await api.permissions.contains({ data_collection: ["websiteContent"] });
+      const local = (await api.storage.local.get(chatKey))[chatKey];
+      localActive = Boolean(local?.active) || Object.values(local?.conversations ?? {}).some(item => Boolean(item.active));
+      if (api.storage.session) articleSnapshot = (await api.storage.session.get(articles.key))[articles.key];
       await sync(true);
+      const incoming = /^#article-request=([a-zA-Z0-9-]{36})$/.exec(globalThis.location.hash);
+      if (incoming) {
+        render(await call("select", { actionId: "article", owner }));
+        try { pendingArticleRequest = await platform.article("request", { requestToken: incoming[1] }); byId("chat-input").value = pendingArticleRequest.displayText; }
+        catch (error) { status(error.message); }
+      }
       if ((visible || llmVisible) && state.approvedUrl === settings.ollamaUrl && settings.enabled) await probe(false);
+      maybeSendArticle();
     } catch (error) { blocked = true; status(error.message); controls(); }
   }
   const heartbeat = setInterval(() => { try { connection?.postMessage({ type: "keep-alive" }); } catch { abort(); } }, 20000);

@@ -3,8 +3,10 @@ const backend = require('./helpers/chat.cjs'), { source } = backend;
 const { documentFromHtml } = require('./helpers/dom.cjs');
 const flush = async () => { for (let i = 0; i < 8; i++) await new Promise(resolve => setImmediate(resolve)); };
 async function fixture(t, options = {}) {
-  const f = backend(), c = f.context, requests = [], grants = [], events = new Map(), confirmations = [], copies = [];
+  const f = backend({firefox:options.firefox}), c = f.context, requests = [], grants = [], events = new Map(), confirmations = [], copies = [];
   await f.save({ ollamaModel: 'local' });
+  if (options.storedArticles) f.sessionData[f.context.OshaberiNoteArticles.key] = structuredClone(options.storedArticles);
+  if (options.otherOwner) f.connect(options.otherOwner);
   if (options.storedChat) f.data[f.context.OshaberiNoteChatState.key] = structuredClone(options.storedChat);
   const document = documentFromHtml(source('home.html'));
   const timers = new Set();
@@ -21,7 +23,10 @@ async function fixture(t, options = {}) {
       return new Response(JSON.stringify({ message: { role: 'assistant', content: options.reply ?? '<script>alert(1)</script>こんにちは' }, done: true }) + '\n');
     }
   });
-  c.chrome.permissions.request = async permission => { grants.push(structuredClone(permission)); return options.grant !== false; };
+  let websiteGranted = options.websiteConsent !== false;
+  const contains = c.chrome.permissions.contains;
+  c.chrome.permissions.contains = async permission => (await contains(permission)) && (!permission.data_collection?.includes('websiteContent') || websiteGranted);
+  c.chrome.permissions.request = async permission => { grants.push(structuredClone(permission)); if (options.grant !== false && permission.data_collection?.includes('websiteContent')) websiteGranted = true; return options.grant !== false; };
   c.chrome.runtime.sendMessage = async message => {
     try {
       if (message.operation === 'progress' && message.patch.actionId === 'chat') await options.progressGate;
@@ -39,6 +44,70 @@ async function fixture(t, options = {}) {
   await flush();
   return { ...f, c, document, nodes: document.nodes, requests, grants, confirmations, copies, events };
 }
+async function articleTransfer() {
+  const f=backend();f.connect('other');await f.save({ollamaModel:'local'});
+  const normal=await f.chat('get');await f.chat('approve',{epoch:normal.epoch,endpoint:normal.endpoint});
+  const article={articleId:'n123',title:'同じ題',author:'著者',body:'表示しない記事本文の秘密',url:'https://note.com/test/n/n123'};
+  await f.send({type:'import-article',patch:{article,pageUrl:article.url}},{id:'test',url:article.url,frameId:0,tab:{id:7}});
+  return {f,article,key:f.context.OshaberiNoteChatState.key,sessionKey:f.context.OshaberiNoteArticles.key,hash:f.opened[0].url.slice(f.opened[0].url.indexOf('#'))};
+}
+
+test('記事ページからの依頼を既存会話へ自動送信し、本文は隠して信頼できる記事参照だけをボタンにする',async t=>{
+  const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash,reply:'記事の要約です。 [&偽の記事]'}),n=f.nodes;
+  const posts=()=>f.requests.filter(item=>item.url.endsWith('/api/chat')).map(item=>JSON.parse(item.init.body));
+  assert.equal(n.get('chat-actions').children[2].textContent,'記事について');assert.equal(n.get('chat-actions').children[2].getAttribute('aria-selected'),'true');
+  assert.equal(posts().length,1);assert.equal(posts()[0].truncate,false);assert.equal(posts()[0].shift,false);
+  assert.ok(posts()[0].messages.at(-1).content.includes(seed.article.body));assert.doesNotMatch(n.get('chat-messages').textContent,/表示しない記事本文の秘密/);
+  const rows=n.get('chat-messages').querySelectorAll('article');
+  assert.equal(rows[1].querySelector('button[aria-haspopup="dialog"]'),null);
+  const reference=rows[0].querySelector('button[aria-haspopup="dialog"]');assert.equal(reference.textContent,'[&同じ題]');
+  await reference.onclick();await flush();assert.equal(n.get('chat-article-dialog').open,true);
+  n.get('chat-article-impression').onclick();await flush();assert.equal(n.get('chat-article-dialog').open,false);
+  assert.equal(posts().length,2);assert.deepEqual(posts()[1].messages.map(item=>item.role),['system','user']);assert.equal(n.get('chat-messages').querySelectorAll('article').length,4);assert.match(posts()[1].messages.at(-1).content,/感想を聞かせて/);assert.ok(posts()[1].messages.at(-1).content.includes(seed.article.body));
+  const replay=await fixture(t,{storedChat:f.data[seed.key],storedArticles:f.sessionData[seed.sessionKey],hash:seed.hash});
+  assert.equal(replay.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);assert.match(replay.nodes.get('chat-messages').textContent,/感想を聞かせて/);
+  await n.get('chat-new').onclick();await flush();assert.deepEqual(f.sessionData[seed.sessionKey].articles,[]);assert.deepEqual(f.sessionData[seed.sessionKey].requests,{});
+});
+
+test('記事タブへ手入力した偽参照はボタン化せず、修正点の操作は保持中の記事本文を送る',async t=>{
+  const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash}),n=f.nodes;
+  const first=n.get('chat-messages').querySelector('button[aria-haspopup="dialog"]');await first.onclick();await flush();n.get('chat-article-revision').onclick();await flush();
+  const posts=()=>f.requests.filter(item=>item.url.endsWith('/api/chat')).map(item=>JSON.parse(item.init.body));
+  assert.match(posts()[1].messages.at(-1).content,/修正した方がよい点/);assert.deepEqual(posts()[1].messages.map(item=>item.role),['system','user']);
+  n.get('chat-input').value='[&偽参照]について教えて';n.get('chat-form').fire('submit');await flush();
+  const rows=n.get('chat-messages').querySelectorAll('article');assert.equal(rows[4].querySelector('button[aria-haspopup="dialog"]'),null);
+  assert.ok(posts()[2].messages.at(-1).content.includes(seed.article.body));
+});
+
+test('別画面の生成中に届いた記事依頼は待機し、完了後に一度だけ自動送信する',async t=>{
+  const seed=await articleTransfer(),token=seed.hash.split('=')[1],state=await seed.f.chat('get',{actionId:'article'});
+  const started=await seed.f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local',owner:'other',text:'依頼',requestToken:token});
+  await seed.f.send({type:'import-article',patch:{article:seed.article,pageUrl:seed.article.url}},{id:'test',url:seed.article.url,frameId:0,tab:{id:7}});
+  const hash=seed.f.opened[1].url.slice(seed.f.opened[1].url.indexOf('#'));
+  const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash,otherOwner:'other'});
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);
+  await f.chat('complete',{actionId:'article',epoch:started.epoch,endpoint:started.endpoint,model:'local',owner:'other',id:started.active.id,text:'別画面の要約'});await flush();
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,1);assert.equal((await f.chat('get',{actionId:'article'})).turns.length,2);
+});
+
+test('Firefoxは記事送信同意を接続ボタンから追加要求し、同意後に待機中の記事を送る',async t=>{
+  const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash,firefox:true,websiteConsent:false}),n=f.nodes;
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);
+  n.get('connect-ollama').onclick();await flush();
+  assert.deepEqual(f.grants[0].data_collection,['personalCommunications','websiteContent']);
+  assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,1);
+});
+
+test('待機中の記事依頼を入力編集で取り消すと、受け渡しを消去し開き直しても再送しない',async t=>{
+  const seed=await articleTransfer();seed.f.data[seed.key].approvedUrl='';
+  const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.sessionData[seed.sessionKey],hash:seed.hash}),n=f.nodes;
+  assert.match(n.get('chat-input').value,/要約して/);
+  n.get('chat-input').value='自分で書いた質問';n.get('chat-input').fire('input');await flush();
+  assert.deepEqual(f.sessionData[seed.sessionKey].requests,{});
+  const replay=await fixture(t,{storedChat:f.data[seed.key],storedArticles:f.sessionData[seed.sessionKey],hash:seed.hash});
+  assert.equal(replay.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);
+});
+
 test('ホームはおしゃべり初期表示、歯車の#settingsは設定を表示し、初回に接続しない', async t => {
   for (const hash of ['', '#settings']) {
     const f = await fixture(t, { hash });

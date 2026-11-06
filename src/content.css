@@ -228,3 +228,9 @@ form[data-oshaberi-note-search-clear-layout] > [data-name="Field"] { flex: 1; mi
   }
 }
 [data-oshaberi-note-like-hidden] { display: none !important; }
+
+.oshaberi-note-article-summary { position: fixed; top: 232px; left: 12px; width: 200px; z-index: 100; max-height: 100px; overflow-y: auto; font: inherit; font-size: 14px; }
+.oshaberi-note-article-summary button { width: 100%; min-height: 36px; padding: 8px 12px; border: 1px solid rgba(128,128,128,.35); border-radius: 8px; color: var(--color-text-primary, inherit); background: var(--color-surface-normal, transparent); cursor: pointer; font: inherit; }
+.oshaberi-note-article-summary span { display: block; white-space: normal; overflow-wrap: anywhere; }
+[data-oshaberi-note-side-profile-offset="article-summary"] { top: 344px !important; max-height: calc(100vh - 360px); overflow-y: auto; }
+@media(max-width:1099px) { .oshaberi-note-article-summary { display: none; } }
