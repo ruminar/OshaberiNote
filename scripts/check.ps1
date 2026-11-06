@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
     foreach ($file in @('src/common.js', 'src/articles.js', 'src/article-store.js', 'src/chat-actions.js', 'src/platform/browser-api.js', 'src/content.js', 'src/note-ui.js', 'src/embed-likes.js', 'src/routing.js', 'src/background.js', 'src/home.js', 'src/chat-state.js', 'src/ollama.js', 'src/chat-tags.js', 'src/chat-ui.js')) {

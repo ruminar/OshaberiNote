@@ -1,11 +1,17 @@
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const source = name => fs.readFileSync(path.join(__dirname, '../..', name), 'utf8');
 const copy = value => value === undefined ? undefined : structuredClone(value);
+const nodeCrypto = require('node:crypto');
+// VMのUI試験ではOSの暗号ワーカースレッドの完了時刻に依存させない。
+const testCrypto = { randomUUID: () => nodeCrypto.randomUUID(), subtle: { digest: async (algorithm, bytes) => {
+  if (algorithm !== 'SHA-256') throw new Error('Unexpected digest algorithm');
+  return Uint8Array.from(nodeCrypto.createHash('sha256').update(bytes).digest()).buffer;
+} } };
 module.exports = function backend(options = {}) {
   const data = {}, handlers = {}, connections = [], permissionChecks = [], sessionData = {}, articleData = {}, opened = [];
   let fail = false, allowed = true;
   const event = name => ({ addListener(fn) { (handlers[name] ??= []).push(fn); } });
-  const context = vm.createContext({ URL, TextEncoder, structuredClone, crypto: require('node:crypto').webcrypto, console,
+  const context = vm.createContext({ URL, TextEncoder, structuredClone, crypto: testCrypto, console,
     chrome: {
       runtime: { getManifest:()=>options.firefox?{browser_specific_settings:{gecko:{id:'test'}}}:{}, id: 'test', getURL: file => 'chrome-extension://test/' + file, onMessage: event('message'), onInstalled: event('install'), onStartup: event('startup'), onConnect: event('connect') },
       permissions: { contains: async options => { permissionChecks.push(copy(options)); return allowed; }, onRemoved: event('removed') },

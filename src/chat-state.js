@@ -12,6 +12,7 @@
     if (!raw || raw.schemaVersion !== 1 || typeof raw.epoch !== "string" || raw.endpoint !== endpoint || !["", endpoint].includes(raw.approvedUrl) || !Array.isArray(raw.turns) || (raw.actionId !== "article" && raw.turns.length > 100) || bytes(raw) > limits.bytes) throw new Error("会話の保存データに異常があります。「新しい会話」で初期化してください。");
     if (raw.turns.some(turn => !turn || typeof turn.user !== "string" || !turn.user.trim() || turn.user.length > limits.input || typeof turn.assistant !== "string" || turn.assistant.length > limits.response || !["complete", "interrupted", "pending"].includes(turn.status))) throw new Error("会話履歴の形式が不正です。");
     for (const turn of raw.turns) {
+      if (turn.articleSourceHash !== undefined && (raw.actionId !== "article" || turn.articleAction !== "summary" || typeof turn.articleSourceHash !== "string" || !/^[a-f0-9]{64}$/.test(turn.articleSourceHash))) throw new Error("要約元の記事情報が不正です。");
       if (turn.llmText !== undefined && (raw.actionId !== "article" || typeof turn.llmText !== "string" || !turn.llmText.trim() || turn.llmText.length > limits.input)) throw new Error("記事の送信本文が不正です。");
       if (turn.articleId !== undefined && (raw.actionId !== "article" || !/^n[a-zA-Z0-9]+$/.test(turn.articleId) || typeof turn.articleTitle !== "string" || !turn.articleTitle.trim() || turn.articleTitle.length > 500 || !["summary", "impression", "revision", "citations", "question"].includes(turn.articleAction))) throw new Error("記事の参照情報が不正です。");
     }
@@ -178,7 +179,7 @@
       if (typeof patch.text !== "string" || patch.text.length > limits.response || !patch.text.startsWith(state.turns.at(-1).assistant)) throw new Error("応答の形式または長さが不正です。");
       state.turns.at(-1).assistant = patch.text;
       if (operation === "complete") { state.turns.at(-1).status = "complete"; state.active = null; }
-      return save(store, state);
+      return save(store, state, operation === "complete" && id === "article" ? { completedSummary: state.turns.at(-1) } : undefined);
     }) });
   }
   globalThis.OshaberiNoteChatState = Object.freeze({ key, limits, bytes, fresh, freshStore, preferredAction, read, readStore, interrupt, interruptStore, retainRecent, createController });

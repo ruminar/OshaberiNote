@@ -31,17 +31,17 @@ test('受け渡しは生成開始の保存と同時に一度だけ消費し、�
  assert.equal((await f.chat('get',{actionId:'article'})).turns.length,1);
 });
 
-test('同名の記事A/Bを保持しながら、各操作は対象記事1件だけの独立リクエストにする',async()=>{
+test('同名の記事A/Bでも本文は対象だけに限定し、感想だけ同じ著者の他記事要約を使う',async()=>{
  const f=await ready(),a=article('n123','同名','記事Aの本文'),b=article('n456','同名','記事Bの本文');
  await complete(f,await start(f,await importArticle(f,a)),'Aの要約');await complete(f,await start(f,await importArticle(f,b)),'Bの要約');
  let state=await f.chat('get',{actionId:'article'});
  state=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'感想',articleId:a.articleId,articleAction:'impression'});
  assert.ok(state.messages.at(-1).content.includes(a.body));assert.ok(!state.messages.at(-1).content.includes(b.body));assert.match(state.messages.at(-1).content,/感想/);
- assert.deepEqual(state.messages.map(m=>m.role),['system','user']);assert.ok(state.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('Aの要約')&&!m.content.includes('Bの要約')&&!m.content.includes('[&同名]')));
+ assert.ok(state.messages[1].content.includes('Bの要約'));assert.deepEqual(state.messages.map(m=>m.role),['system','user']);assert.ok(state.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('Aの要約')&&!m.content.includes('[&同名]')));
  await complete(f,state);state=await f.chat('get',{actionId:'article'});
  const follow=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'根拠を詳しく',articleSegmentId:state.turns.at(-1).articleSegmentId});
  assert.ok(follow.messages[1].content.includes(a.body));assert.equal(follow.turns.at(-1).user,'根拠を詳しく');
- assert.deepEqual(follow.messages.map(m=>m.role),['system','user','assistant','user']);assert.ok(follow.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('Aの要約')&&!m.content.includes('Bの要約')));
+ assert.deepEqual(follow.messages.map(m=>m.role),['system','user','assistant','user']);assert.ok(follow.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('Aの要約')));
  await complete(f,follow,'自由質問の回答');state=await f.chat('get',{actionId:'article'});
  const revised=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local-model',owner:'owner',text:'修正点',articleId:a.articleId,articleAction:'revision'});
  assert.deepEqual(revised.messages.map(m=>m.role),['system','user']);assert.match(revised.messages[1].content,/修正した方がよい点/);assert.ok(revised.messages[1].content.includes(a.body));assert.ok(revised.messages.every(m=>!m.content.includes(b.body)&&!m.content.includes('自由質問の回答')));
@@ -252,7 +252,7 @@ test('旧セッションから永続DBへ移行し、保存失敗では元デー
 test('記事は100往復を超えても読込・再起動・追加送信で件数整理しない',async()=>{
  const f=await ready(),first=await start(f,await importArticle(f));await complete(f,first,'最初の回答');
  const record=f.articleData.current,template=record.conversation.turns[0],id=template.articleSegmentId;
- for(let i=0;i<120;i++)record.conversation.turns.push({...template,user:'質問'+i,assistant:'回答'+i,articleAction:'question'});
+ for(let i=0;i<120;i++)record.conversation.turns.push({...template,user:'質問'+i,assistant:'回答'+i,articleAction:'question',articleSourceHash:undefined});
  const state=await f.chat('get',{actionId:'article'});assert.equal(state.turns.length,121);assert.equal(state.droppedTurns,0);
  const restarted=backend();Object.assign(restarted.data,structuredClone(f.data));restarted.articleData.current=structuredClone(f.articleData.current);restarted.connect('owner');
  assert.equal((await restarted.chat('get',{actionId:'article'})).turns.length,121);
@@ -312,4 +312,71 @@ test('本文中の文字列リンクと添付ファイルのURLを文字の位�
  assert.ok(follow.messages[1].content.includes(index));assert.ok(!JSON.stringify(f.articleData.current).includes('参照先URL一覧'));
  const prompt=f.context.OshaberiNoteArticles.actions.citations.instruction;
  for(const rule of ['参照元の一覧','[リンクカード]','添付ファイル','著者自身の別記事','省略しない','それだけを根拠に引用と判定しない','他者や外部資料からの引用','リンク先の本文は取得していません'])assert.ok(prompt.includes(rule));
+});
+
+
+const authored=(authorId,id,title,body)=>({...article(id,title,body),author:'同じ表示名',url:`https://note.com/${authorId}/n/${id}`});
+async function summarizeArticle(f,value,text){return complete(f,await start(f,await importArticle(f,value)),text);}
+async function startArticleAction(f,value,action){const state=await f.chat('get',{actionId:'article'});return f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'owner',model:'local-model',text:'依頼',articleId:value.articleId,articleAction:action});}
+
+test('著者IDごとの要約Mapを感想とその続きだけに付与し、対象自身・別著者・他記事本文を除外する',async()=>{
+ const f=await ready(),a10=authored('alpha','nA10','第10話','BODY-A10'),a2=authored('ALPHA','nA2','第2話','BODY-A2'),b=authored('beta','nB1','第1話','BODY-B1'),target=authored('alpha','nA3','第3話','BODY-TARGET');
+ await summarizeArticle(f,a10,'SUM-A10');await summarizeArticle(f,a2,'SUM-A2');await summarizeArticle(f,b,'SUM-BETA');await summarizeArticle(f,target,'SUM-SELF');
+ assert.equal(f.articleData.current.summaries.length,4);assert.equal(f.articleData.current.summaries[1].authorId,'alpha');
+ let state=await startArticleAction(f,target,'impression'),text=JSON.stringify(state.messages);
+ assert.equal(state.messages.length,2);assert.ok(text.includes('BODY-TARGET'));assert.ok(text.includes('SUM-A10'));assert.ok(text.includes('SUM-A2'));
+ for(const secret of ['BODY-A10','BODY-A2','BODY-B1','SUM-BETA','SUM-SELF'])assert.ok(!text.includes(secret));
+ assert.ok(text.includes('連作を形成しているかもしれません'));assert.ok(text.includes('同じ著者というだけで連作とは限りません'));
+ assert.deepEqual(JSON.parse(state.messages[1].content.split('\n').at(-1)).map(r=>r.articleId),['nA2','nA10']);
+ await complete(f,state,'感想の回答');state=await f.chat('get',{actionId:'article'});
+ const follow=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'owner',model:'local-model',text:'前の記事との関係を教えて',articleSegmentId:state.activeArticleSegmentId});
+ assert.equal(follow.messages.length,4);assert.equal(JSON.stringify(follow.messages).split('SUM-A2').length-1,1);assert.ok(follow.messages[2].content.includes('感想の回答'));await complete(f,follow);
+ for(const action of ['summary','revision','citations']){
+  state=await startArticleAction(f,target,action);assert.ok(!JSON.stringify(state.messages).includes('SUM-A2'));assert.ok(!JSON.stringify(state.messages).includes('SUM-BETA'));await complete(f,state,'対象だけの回答');
+ }
+ const normal=await f.chat('get');state=await f.chat('start',{epoch:normal.epoch,endpoint:normal.endpoint,owner:'owner',model:'local-model',text:'普通の質問'});
+ assert.ok(!JSON.stringify(state.messages).includes('SUM-A2'));assert.ok(!JSON.stringify(state.messages).includes('BODY-TARGET'));
+});
+
+test('要約は正常完了時だけ上書きし、本文変更と生成中の再取り込みでは古い要約を登録しない',async()=>{
+ const f=await ready(),a=article('n123','作品','初期本文');await summarizeArticle(f,a,'最初の要約');
+ const original=f.articleData.current.summaries[0];
+ assert.equal(original.sourceHash,require('node:crypto').createHash('sha256').update(JSON.stringify(a)).digest('hex'));
+ await importArticle(f,a);assert.equal(f.articleData.current.summaries[0].summary,'最初の要約');
+ let state=await startArticleAction(f,a,'summary');await f.chat('progress',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'owner',model:'local-model',id:state.active.id,text:'途中の要約'});
+ assert.equal(f.articleData.current.summaries[0].summary,'最初の要約');await f.chat('stop',{actionId:'article',owner:'owner',id:state.active.id});
+ state=await startArticleAction(f,a,'summary');await complete(f,state,'');assert.equal(f.articleData.current.summaries[0].summary,'最初の要約');
+ await complete(f,await startArticleAction(f,a,'summary'),'改訂した要約');assert.equal(f.articleData.current.summaries.length,1);assert.equal(f.articleData.current.summaries[0].summary,'改訂した要約');
+ const changed={...a,body:'変更後本文'};const token=await importArticle(f,changed);assert.equal(f.articleData.current.summaries.length,0);
+ state=await start(f,token);const newest={...changed,body:'さらに変更した本文'};const next=await importArticle(f,newest);await complete(f,state,'変更前本文の要約');assert.equal(f.articleData.current.summaries.length,0);
+ await complete(f,await start(f,next),'最新本文の要約');assert.equal(f.articleData.current.summaries[0].summary,'最新本文の要約');
+ for(const action of ['impression','revision','citations'])await complete(f,await startArticleAction(f,newest,action),'要約以外の回答');
+ assert.equal(f.articleData.current.summaries[0].summary,'最新本文の要約');assert.equal(f.articleData.current.articles[0].body,newest.body);
+});
+
+test('要約Mapと会話の保存失敗は同時に巻き戻し、再起動後も保持して記事初期化だけでまとめて削除する',async()=>{
+ const f=await ready(),a=article(),b=article('n456','別の作品','別本文');await summarizeArticle(f,a,'Aの保存要約');
+ const pending=await start(f,await importArticle(f,b)),before=structuredClone(f.articleData);f.fail=true;
+ await assert.rejects(complete(f,pending,'Bの要約'),/storage failed/);assert.deepEqual(f.articleData,before);f.fail=false;await complete(f,pending,'Bの保存要約');
+ delete f.sessionData[f.context.OshaberiNoteArticles.requestSessionKey];await f.chat('restore');assert.equal(f.articleData.current.summaries.length,2);
+ await f.chat('reset',{actionId:'chat'});await f.chat('reset',{actionId:'tag-suggestion-v1'});assert.equal(f.articleData.current.summaries.length,2);
+ assert.ok(!f.context.OshaberiNote.exportSettings(await f.settings()).includes('保存要約'));
+ await f.chat('reset',{actionId:'article'});assert.deepEqual(f.articleData.current.summaries,[]);assert.deepEqual(f.articleData.current.articles,[]);assert.equal(f.articleData.current.conversation.turns.length,0);
+ await summarizeArticle(f,a,'接続先変更前の要約');await f.save({ollamaUrl:'http://localhost:11434'});assert.deepEqual(f.articleData.current.summaries,[]);
+});
+
+test('0.1.0の本文と履歴を保持して要約Mapなしから移行し、表示名や特殊な著者IDを取り違えない',async()=>{
+ const f=await ready(),a=article();await summarizeArticle(f,a,'旧回答');delete f.articleData.current.summaries;for(const turn of f.articleData.current.conversation.turns)delete turn.articleSourceHash;
+ await f.chat('get',{actionId:'article'});assert.deepEqual(f.articleData.current.summaries,[]);assert.equal(f.articleData.current.articles.length,1);assert.equal(f.articleData.current.conversation.turns[0].assistant,'旧回答');
+ const special=authored('__proto__','nP1','作品1','特殊ID本文'),other=authored('constructor','nP2','作品2','別の特殊ID本文'),target=authored('__proto__','nP3','作品3','対象本文');
+ await summarizeArticle(f,special,'同じ特殊IDの要約');await summarizeArticle(f,other,'別IDの秘密の要約');await importArticle(f,target);
+ const state=await startArticleAction(f,target,'impression'),text=JSON.stringify(state.messages);assert.ok(text.includes('同じ特殊IDの要約'));assert.ok(!text.includes('別IDの秘密の要約'));assert.ok(!text.includes('旧回答'));
+});
+
+test('同著者要約を件数で間引かず、送信文字数と8MiB保存容量の上限では無言で削除しない',async()=>{
+ const f=await ready();for(let i=1;i<=7;i++)await summarizeArticle(f,article('n'+i,'作品'+i,'本文'+i),'要'.repeat(32000));
+ const target=article('nTarget','対象','対象本文');await importArticle(f,target);const before=structuredClone(f.articleData);
+ await assert.rejects(startArticleAction(f,target,'impression'),/参考情報.*送信上限/);assert.deepEqual(f.articleData,before);assert.equal(f.articleData.current.summaries.length,7);
+ const api=f.context.OshaberiNoteArticles,raw=structuredClone(f.articleData.current);raw.summaries[0].summary='a'.repeat(8*1024*1024);assert.throws(()=>api.bounded(raw),/容量上限/);
+ const malformed=structuredClone(before.current);malformed.summaries[0].authorId='someone_else';assert.throws(()=>api.read(malformed,malformed.endpoint),/要約と記事の対応/);
 });

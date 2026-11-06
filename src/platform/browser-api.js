@@ -75,6 +75,7 @@
       }
       if (options.requestToken) delete session.requests[options.requestToken];
       if (options.articleId) session.activeArticleId = options.articleId;
+      if (options.completedSummary) await articles.captureSummary(session, options.completedSummary);
       articles.bounded(session);
     }
     if (session !== undefined) session.requestSessionId = await requestSession();
@@ -86,7 +87,9 @@
 
   async function prepareArticleMessage(patch, state, settings) {
     const session = articles.read(await articleRaw(), state.endpoint);
-    return articles.request(session, patch, state.epoch, state, settings);
+    const message = articles.request(session, patch, state.epoch, state, settings);
+    if (message.articleAction === "summary") message.articleSourceHash = await articles.fingerprint(session.articles.find(item => item.articleId === message.articleId));
+    return message;
   }
   async function articleOperation(operation, patch = {}, sender) {
     return run(async () => {
@@ -108,6 +111,8 @@
         const session = articles.read(await articleRaw(), settings.ollamaUrl);
         session.conversation ??= globalThis.OshaberiNoteChatState.fresh(settings.ollamaUrl, articles.id);
         const map = new Map(session.articles.map(item => [item.articleId, item])); map.set(article.articleId, article); session.articles = [...map.values()];
+        const sourceHash = await articles.fingerprint(article);
+        session.summaries = session.summaries.filter(item => item.articleId !== article.articleId || item.sourceHash === sourceHash);
         session.activeArticleId = article.articleId;
         const token = crypto.randomUUID(); session.requests[token] = { articleId: article.articleId, action: "summary", epoch: session.conversation.epoch };
         articles.request(session, { requestToken: token }, session.conversation.epoch, session.conversation, settings);

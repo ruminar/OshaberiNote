@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet('all', 'chromium', 'firefox')]
     [string]$Browser = 'all'
 )

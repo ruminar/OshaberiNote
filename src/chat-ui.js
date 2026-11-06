@@ -193,10 +193,10 @@
       button.setAttribute("aria-selected", String(selected)); button.tabIndex = selected ? 0 : -1;
     }
     byId("chat-messages").setAttribute("aria-labelledby", `chat-tab-${selectedAction}`);
-    byId("chat-input-help").textContent = selectedAction === "article" ? "最大200,000文字。閲覧できる記事本文だけを使います。記事と今回の依頼文がモデルのコンテキストに収まらない場合はエラーにし、本文を自動で切り捨てません。" : "最大200,000文字。記事本文も貼り付けられます。長文や過去の会話は、Ollamaのコンテキスト長によって一部が参照されない場合があります。";
+    byId("chat-input-help").textContent = selectedAction === "article" ? "最大200,000文字。対象記事の本文を使い、感想とその続きには同じ著者の他記事要約も参考情報として付けます。記事と今回の依頼文がモデルのコンテキストに収まらない場合はエラーにし、本文を自動で切り捨てません。" : "最大200,000文字。記事本文も貼り付けられます。長文や過去の会話は、Ollamaのコンテキスト長によって一部が参照されない場合があります。";
     const action = globalThis.OshaberiNoteChatActions.find(state.actionId);
     byId("chat-heading").textContent = action ? `おしゃべり（${action.title} v${action.version}）` : "おしゃべり";
-    const historyPolicy = state.actionId === "article" ? "記事の履歴に往復数の上限はありません。履歴は最大2MiBまで保存し、容量を超えると古い分から自動で整理します。記事本文を含む保存データ全体は最大8MiBです。" : "履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。";
+    const historyPolicy = state.actionId === "article" ? "記事の履歴に往復数の上限はありません。履歴は最大2MiBまで保存し、容量を超えると古い分から自動で整理します。記事本文・保存済み要約を含む保存データ全体は最大8MiBです。" : "履歴は直近10往復・最大2MiBを保存し、古い分から自動で整理します。";
     byId("chat-history-info").textContent = `${historyPolicy}${state.droppedTurns ? ` これまでに${state.droppedTurns}往復を保存から外しました。` : ""}${state.contextTrimmedTurns ? ` 直近の送信では、保存履歴のうち古い${state.contextTrimmedTurns}往復を送信対象から外しました。` : ""}`;
     const container = byId("chat-messages"), previousTop = container.scrollTop || 0;
     container.replaceChildren();
@@ -443,7 +443,7 @@
   };
   byId("chat-new").onclick = async () => {
     if (busy) return;
-    if (!confirm(selectedAction === "article" ? "「記事について」の保存済みの会話・取り込んだ記事本文・未送信入力を削除し、新しい会話を始めますか？" : "選択中のタブの会話と未送信入力を削除し、新しい会話を始めますか？")) return;
+    if (!confirm(selectedAction === "article" ? "「記事について」の保存済みの会話・取り込んだ記事本文・保存した記事要約・未送信入力を削除し、新しい会話を始めますか？" : "選択中のタブの会話と未送信入力を削除し、新しい会話を始めますか？")) return;
     busy = true; sendSequence++; abort(); controls();
     try { render(await call("reset")); byId("chat-input").value = ""; blocked = false; status("新しい会話を始めました。"); }
     catch (error) { status(error.message); }
