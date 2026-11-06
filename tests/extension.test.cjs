@@ -184,12 +184,12 @@ function contentFixture(stored, options = {}) {
     }
   });
   vm.runInContext(source("src/content.js"), c);
-  function click(url = "https://note.com/", changes = {}) {
+  function click(url = "https://note.com/", changes = {}, type = "click") {
     const event = {
       button: 0, defaultPrevented: false, composedPath: () => [{ tagName: "svg" }, { tagName: "A", href: url, hasAttribute: () => false }],
       preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() { this.stopped = true; }, ...changes
     };
-    documentEvents.get("click")?.(event);
+    documentEvents.get(type)?.(event);
     return event;
   }
   return { c, home, moves, location, events, navigationEvents, documentEvents, click,
@@ -237,7 +237,7 @@ test("後から出る記事タブの通常クリックを新着へ。並び順�
   for (const settings of [{ enabled: false }]) { f.changed(settings); assert.equal(click().defaultPrevented, false); }
   assert.equal(f.moves.length, 1);
 });
-test("OFF・記事リンク・修飾クリック・別タブ・ダウンロードには介入しない", async () => {
+test("OFF・記事リンク・修飾クリック・別タブ・ダウンロードの標準動作を妨げない", async () => {
   const f = contentFixture(); await flush();
   assert.equal(f.click("https://note.com/ruminar/n/abc").defaultPrevented, false);
   for (const key of ["ctrlKey", "metaKey", "shiftKey", "altKey"]) assert.equal(f.click(undefined, { [key]: true }).defaultPrevented, false);
@@ -247,6 +247,18 @@ test("OFF・記事リンク・修飾クリック・別タブ・ダウンロー�
   }
   f.changed({ enabled: false }); assert.equal(f.click().defaultPrevented, false);
   assert.equal(f.moves.length, 0);
+});
+
+test('ホームのCtrl・Meta・Shift・中クリックはSPA処理だけを止め、元ページを移動しない',async()=>{
+ const f=contentFixture();await flush();
+ for(const [changes,type] of [[{ctrlKey:true},'click'],[{metaKey:true},'click'],[{shiftKey:true},'click'],[{button:1},'auxclick'],[{composedPath:()=>[{tagName:'A',href:'https://note.com/',target:'_blank',hasAttribute:()=>false}]},'click']]){
+  const event=f.click(undefined,changes,type);assert.equal(event.defaultPrevented,false);assert.equal(event.stopped,true);
+  // note側のハンドラーが元ページをSPA遷移させる状況を再現する。
+  if(!event.stopped)f.navigationEvents.get('navigate')({cancelable:true,destination:{url:'https://note.com/'},preventDefault(){}});
+ }
+ assert.deepEqual(f.moves,[]);
+ for(const [url,changes] of [['https://note.com/test/n/n123',{ctrlKey:true}],['https://example.com/',{ctrlKey:true}],['https://note.com/',{altKey:true}],['https://note.com/',{button:2}],['https://note.com/',{ctrlKey:true,composedPath:()=>[{tagName:'A',href:'https://note.com/',hasAttribute:()=>true}]}]])assert.equal(f.click(url,changes).stopped,undefined);
+ f.changed({enabled:false});assert.equal(f.click(undefined,{ctrlKey:true}).stopped,undefined);assert.equal(f.click(undefined,{button:1},'auxclick').stopped,undefined);
 });
 
 

@@ -87,6 +87,7 @@
     noteUi?.stop();
     try { unsubscribe?.(); } catch { /* 拡張の再読み込み */ }
     document.removeEventListener("click", onClick, true);
+    document.removeEventListener("auxclick", onClick, true);
     window.removeEventListener("popstate", checkHome);
     window.removeEventListener("pageshow", checkHome);
     window.removeEventListener("resize", checkHome);
@@ -118,10 +119,15 @@
     queueMicrotask(() => { scheduled = false; if (!stopped) { syncDashboardLinks(); checkHome(); } });
   }
   function onClick(event) {
-    if (!enabled() || event.defaultPrevented || event.button !== 0 ||
-        event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (!enabled() || event.defaultPrevented || event.altKey || ![0, 1].includes(event.button)) return;
     const anchor = event.composedPath().find(node => node?.tagName === "A");
-    if (!anchor || anchor.hasAttribute("download") || (anchor.target && anchor.target !== "_self")) return;
+    if (!anchor || anchor.hasAttribute("download")) return;
+    if (event.button === 1 || event.ctrlKey || event.metaKey || event.shiftKey || (anchor.target && anchor.target !== "_self")) {
+      // ブラウザ標準の別タブ・別ウィンドウ操作は残し、noteのSPA処理だけ止める。
+      // 新しく開いた公式ホームは既存の転送ルールで専用ホームへ移る。
+      if (core.shouldRedirect(anchor.href, settings)) event.stopImmediatePropagation();
+      return;
+    }
     // クリック時の委譲処理なので、SPAで後から追加された公式タブにも対応する。
     const articleTabUrl = core.usesFollowing(settings) && anchor.getAttribute?.("data-id") === "NavigationItem" &&
       anchor.textContent?.trim() === "記事" ? core.articleSearchTabUrl(location.href, anchor.href) : null;
@@ -141,6 +147,7 @@
   async function start() {
     try {
       document.addEventListener("click", onClick, true);
+      document.addEventListener("auxclick", onClick, true);
       window.addEventListener("popstate", checkHome);
       window.addEventListener("pageshow", checkHome);
       window.addEventListener("resize", checkHome);
