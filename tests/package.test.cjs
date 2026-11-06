@@ -36,7 +36,7 @@ test("FirefoxのManifestだけ背景処理・ID・Android対応・データ収�
   assert.equal(chromium.background.service_worker, "src/background.js");
   assert.equal(chromium.background.scripts, undefined);
   assert.equal(firefox.background.service_worker, undefined);
-  assert.deepEqual(firefox.background.scripts, ["src/common.js", "src/articles.js", "src/chat-actions.js", "src/chat-state.js", "src/platform/browser-api.js", "src/routing.js", "src/background.js"]);
+  assert.deepEqual(firefox.background.scripts, ["src/common.js", "src/articles.js", "src/article-store.js", "src/chat-actions.js", "src/chat-state.js", "src/platform/browser-api.js", "src/routing.js", "src/background.js"]);
   assert.equal(chromium.browser_specific_settings, undefined);
   assert.equal(firefox.browser_specific_settings.gecko_android, undefined);
   assert.equal(firefox.browser_specific_settings.gecko.id, "oshaberi-note@ruminar");
@@ -68,7 +68,12 @@ test("Firefox Event Page：importScriptsなし・browser名前空間だけで起
     // Firefoxでchromeも公開されていてもbrowserを優先する。
     chrome: { runtime: { id: "wrong-namespace" } }
   });
-  for (const file of manifest.background.scripts) vm.runInContext(await fs.readFile(path.join(root, file), "utf8"), c, { filename: file });
+  c.browser.storage.session = { get:async()=>({}),set:async()=>{} };
+  // Event Pageの起動差分が対象。実IndexedDBはブラウザ試験で検証する。
+  for (const file of manifest.background.scripts) {
+    if (file === "src/article-store.js") c.OshaberiNoteArticleStore = { get:async()=>undefined,set:async()=>{},remove:async()=>{} };
+    else vm.runInContext(await fs.readFile(path.join(root, file), "utf8"), c, { filename: file });
+  }
   await flush();
   assert.equal(activeRules.addRules.length, 2);
   assert.deepEqual(activeRules.removeRuleIds, [1, 2, 3, 4]);

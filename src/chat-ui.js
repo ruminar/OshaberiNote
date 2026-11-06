@@ -438,7 +438,7 @@
   };
   byId("chat-new").onclick = async () => {
     if (busy) return;
-    if (!confirm("選択中のタブの会話と未送信入力を削除し、新しい会話を始めますか？")) return;
+    if (!confirm(selectedAction === "article" ? "「記事について」の保存済みの会話・取り込んだ記事本文・未送信入力を削除し、新しい会話を始めますか？" : "選択中のタブの会話と未送信入力を削除し、新しい会話を始めますか？")) return;
     busy = true; sendSequence++; abort(); controls();
     try { render(await call("reset")); byId("chat-input").value = ""; blocked = false; status("新しい会話を始めました。"); }
     catch (error) { status(error.message); }
@@ -453,26 +453,24 @@
     if (document.activeElement !== byId("ollama-url")) byId("ollama-url").value = settings.ollamaUrl;
     if (!promptDirty) { byId("system-prompt").value = settings.ollamaSystemPrompt; promptBaseline = settings.ollamaSystemPrompt; }
   });
-  api.storage.onChanged.addListener((changes, area) => {
-    const articleChanged = area === "session" && Object.hasOwn(changes, articles.key);
-    if (!articleChanged && (area !== "local" || !Object.hasOwn(changes, chatKey))) return;
+  let articleRefreshRevision = 0;
+  api.storage.onChanged.addListener(async (changes, area) => {
+    if (area !== "local" || (!Object.hasOwn(changes, articles.signalKey) && !Object.hasOwn(changes, chatKey)) || !settings) return;
+    const revision = ++articleRefreshRevision;
     try {
+      const snapshot = Object.hasOwn(changes, articles.signalKey) ? await platform.article("snapshot") : articleSnapshot;
+      if (revision !== articleRefreshRevision) return;
+      articleSnapshot = snapshot;
+      const raw = Object.hasOwn(changes, chatKey) ? changes[chatKey].newValue : (await api.storage.local.get(chatKey))[chatKey];
+      if (revision !== articleRefreshRevision) return;
+      const store = globalThis.OshaberiNoteChatState.readStore(raw, settings.ollamaUrl);
+      localActive = Object.values(store.conversations).some(item => Boolean(item.active));
       let next;
-      if (articleChanged) {
-        articleSnapshot = changes[articles.key].newValue;
-        if (selectedAction === "article" && articleSnapshot?.endpoint === settings.ollamaUrl && articleSnapshot.conversation) {
-          next = globalThis.OshaberiNoteChatState.read(articleSnapshot.conversation, settings.ollamaUrl, "article");
-          if (state?.endpoint === next.endpoint) next.approvedUrl = state.approvedUrl;
-        }
-      } else {
-        const store = globalThis.OshaberiNoteChatState.readStore(changes[chatKey].newValue, settings.ollamaUrl);
-        localActive = Object.values(store.conversations).some(item => Boolean(item.active));
-        if (selectedAction === "article") {
-          if (articleSnapshot?.endpoint === settings.ollamaUrl && articleSnapshot.conversation) next = globalThis.OshaberiNoteChatState.read(articleSnapshot.conversation, settings.ollamaUrl, "article");
-          else if (state?.endpoint === settings.ollamaUrl) next = { ...state };
-          if (next) next.approvedUrl = store.approvedUrl;
-        } else next = globalThis.OshaberiNoteChatState.read(changes[chatKey].newValue, settings.ollamaUrl, selectedAction);
-      }
+      if (selectedAction === "article") {
+        if (articleSnapshot?.endpoint === settings.ollamaUrl && articleSnapshot.conversation) next = globalThis.OshaberiNoteChatState.read(articleSnapshot.conversation, settings.ollamaUrl, "article");
+        else if (state?.endpoint === settings.ollamaUrl) next = { ...state };
+        if (next) next.approvedUrl = store.approvedUrl;
+      } else next = globalThis.OshaberiNoteChatState.read(raw, settings.ollamaUrl, selectedAction);
       const anyActive = localActive || Boolean(articleSnapshot?.conversation?.active);
       if (next) {
         next.anyActive = anyActive;
@@ -480,7 +478,10 @@
         render(next);
       } else if (state) { state.anyActive = anyActive; controls(); }
       Promise.resolve().then(maybeSendArticle);
-    } catch { abort(); ready = false; blocked = true; status("会話の更新を確認できません。再読み込みして確認してください。"); controls(); }
+    } catch {
+      if (revision !== articleRefreshRevision) return;
+      abort(); ready = false; blocked = true; status("会話の更新を確認できません。再読み込みして確認してください。"); controls();
+    }
   });
   api.permissions.onRemoved.addListener(() => { if (firefox) articleConsent = false; abort(); ready = false; connectionStatus("接続権限が変更されました。「接続・再試行」で確認してください。"); status("接続権限が変更されました。「LLMの設定」で確認してください。"); controls(); });
   globalThis.OshaberiNoteChatUI = Object.freeze({ async settingsImported() {
@@ -508,7 +509,7 @@
       if (firefox) articleConsent = await api.permissions.contains({ data_collection: ["websiteContent"] });
       const local = (await api.storage.local.get(chatKey))[chatKey];
       localActive = Boolean(local?.active) || Object.values(local?.conversations ?? {}).some(item => Boolean(item.active));
-      if (api.storage.session) articleSnapshot = (await api.storage.session.get(articles.key))[articles.key];
+      articleSnapshot = await platform.article("snapshot");
       await sync(true);
       const incoming = /^#article-request=([a-zA-Z0-9-]{36})$/.exec(globalThis.location.hash);
       if (incoming) {

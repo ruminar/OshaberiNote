@@ -1,7 +1,7 @@
 "use strict";
 // ChromiumはService Workerから読込。Firefoxはmanifestのbackground.scriptsで順に読込。
 if (typeof importScripts === "function") {
-  importScripts("common.js", "articles.js", "chat-actions.js", "chat-state.js", "platform/browser-api.js", "routing.js");
+  importScripts("common.js", "articles.js", "article-store.js", "chat-actions.js", "chat-state.js", "platform/browser-api.js", "routing.js");
 }
 const port = globalThis.OshaberiNoteBackgroundPlatform;
 const controller = globalThis.OshaberiNoteRouting.createController(port);

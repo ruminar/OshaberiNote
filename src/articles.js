@@ -1,7 +1,7 @@
-/* 記事の資料・会話・受け渡しはブラウザセッション内だけに置く。 */
+/* 記事の資料と会話は永続保存し、受け渡し依頼はブラウザセッションへ束縛する。 */
 (() => {
   "use strict";
-  const id = "article", key = "oshaberiNote.articles.session.v1", maxBytes = 8 * 1024 * 1024;
+  const id = "article", key = "oshaberiNote.articles.session.v1", signalKey = "oshaberiNote.articles.revision.v1", requestSessionKey = "oshaberiNote.articles.requestSession.v1", maxBytes = 8 * 1024 * 1024;
   const actions = Object.freeze({
     summary: { suffix: "について要約して", instruction: "下記の文章を、極力意味を失わないように要約してください\n文章の改善提案等は要りません" },
     impression: { suffix: "について感想を聞かせて", instruction: "下記の記事を読んで、感想を聞かせてください。" },
@@ -26,7 +26,7 @@
   function fresh(endpoint) { return { schemaVersion: 1, endpoint, conversation: null, activeArticleId: null, articles: [], requests: {} }; }
   function read(raw, endpoint) {
     if (raw === undefined) return fresh(endpoint);
-    if (!raw || raw.schemaVersion !== 1 || raw.endpoint !== endpoint || !Array.isArray(raw.articles) || !raw.requests || typeof raw.requests !== "object" || Array.isArray(raw.requests)) throw new Error("記事セッションの保存状態を確認できません。");
+    if (!raw || raw.schemaVersion !== 1 || raw.endpoint !== endpoint || !Array.isArray(raw.articles) || !raw.requests || typeof raw.requests !== "object" || Array.isArray(raw.requests)) throw new Error("記事の保存状態を確認できません。");
     const result = structuredClone(raw), map = new Map();
     for (const item of result.articles) { const article = validate(item); if (map.has(article.articleId)) throw new Error("記事IDが重複しています。"); map.set(article.articleId, article); }
     if (result.conversation) result.conversation = globalThis.OshaberiNoteChatState.read(result.conversation, endpoint, id);
@@ -62,7 +62,7 @@
     bounded(result); return result;
   }
   function bounded(session) {
-    if (new TextEncoder().encode(JSON.stringify(session)).length > maxBytes || Object.keys(session.requests).length > 64) throw invalid("記事セッションの容量上限です。「記事について」で新しい会話を始めてから取り込んでください。記事を自動で削除・切り捨てることはしません。");
+    if (new TextEncoder().encode(JSON.stringify(session)).length > maxBytes || Object.keys(session.requests).length > 64) throw invalid("記事データの容量上限です。「記事について」で新しい会話を始めてから取り込んでください。記事を自動で削除・切り捨てることはしません。");
   }
   function display(article, action) { if (!actions[action]) throw invalid("記事の操作を確認してください。"); return `[&${article.title}]${actions[action].suffix}`; }
   function request(session, patch, epoch, conversation = session.conversation) {
@@ -142,5 +142,5 @@
     walk(bodies[0]);
     return validate({ ...address, title: visibleText(headings[0]), author, body: chunks.join("").replace(/\n{3,}/g, "\n\n").trim() });
   }
-  globalThis.OshaberiNoteArticles = Object.freeze({ id, key, actions, page, validate, fresh, read, bounded, display, request, extract });
+  globalThis.OshaberiNoteArticles = Object.freeze({ id, key, signalKey, requestSessionKey, actions, page, validate, fresh, read, bounded, display, request, extract });
 })();

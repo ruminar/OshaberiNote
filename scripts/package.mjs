@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const root = fileURLToPath(new URL("../", import.meta.url));
 export const runtimeFiles = [
   "home.html", "LICENSE", "THIRD_PARTY_LICENSE", "PRIVACY.md", "_locales/ja/messages.json",
-  "src/common.js", "src/articles.js", "src/chat-actions.js", "src/platform/browser-api.js", "src/routing.js",
+  "src/common.js", "src/articles.js", "src/article-store.js", "src/chat-actions.js", "src/platform/browser-api.js", "src/routing.js",
   "src/background.js", "src/content.js", "src/note-ui.js", "src/content.css", "src/embed-likes.js", "src/embed-likes.css", "src/home.js", "src/home.css", "src/chat-state.js", "src/ollama.js", "src/chat-tags.js", "src/chat-ui.js",
   "icons/icon16.png", "icons/icon32.png", "icons/icon48.png", "icons/icon128.png"
 ];

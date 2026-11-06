@@ -2,7 +2,7 @@ const fs = require('node:fs'), path = require('node:path'), vm = require('node:v
 const source = name => fs.readFileSync(path.join(__dirname, '../..', name), 'utf8');
 const copy = value => value === undefined ? undefined : structuredClone(value);
 module.exports = function backend(options = {}) {
-  const data = {}, handlers = {}, connections = [], permissionChecks = [], sessionData = {}, opened = [];
+  const data = {}, handlers = {}, connections = [], permissionChecks = [], sessionData = {}, articleData = {}, opened = [];
   let fail = false, allowed = true;
   const event = name => ({ addListener(fn) { (handlers[name] ??= []).push(fn); } });
   const context = vm.createContext({ URL, TextEncoder, structuredClone, crypto: require('node:crypto').webcrypto, console,
@@ -22,6 +22,11 @@ module.exports = function backend(options = {}) {
       action: { onClicked: event('action') }, tabs: { create: async value => { opened.push(copy(value)); return {id:opened.length}; }, get: async () => ({url:'https://note.com/test/n/n123'}) }, declarativeNetRequest: { updateDynamicRules: async () => {} }
     }
   });
+  context.OshaberiNoteArticleStore = {
+    get:async()=>copy(articleData.current),
+    set:async value=>{if(fail)throw new Error('storage failed');articleData.current=copy(value);},
+    remove:async()=>{if(fail)throw new Error('storage failed');delete articleData.current;}
+  };
   for (const file of ['src/common.js', 'src/articles.js', 'src/chat-actions.js', 'src/chat-state.js', 'src/platform/browser-api.js', 'src/routing.js', 'src/background.js']) vm.runInContext(source(file), context, { filename: file });
   const sender = { id: 'test', url: 'chrome-extension://test/home.html', frameId: 0, tab: { id: 1 } };
   const send = (message, from = sender) => new Promise((resolve, reject) => {
@@ -34,7 +39,7 @@ module.exports = function backend(options = {}) {
     handlers.connect[0](connection); connections.push(connection);
     return () => disconnect();
   }
-  return { context, data, sessionData, opened, handlers, permissionChecks, connect, send,
+  return { context, data, sessionData, articleData, opened, handlers, permissionChecks, connect, send,
     chat: (operation, patch) => send({ type: 'chat-operation', operation, patch }),
     save: patch => send({ type: 'save-settings', patch }),
     settings: () => send({ type: 'get-state' }),

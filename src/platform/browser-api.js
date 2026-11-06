@@ -9,23 +9,62 @@
   const chatOwners = new Set();
   function run(task) { const result = queue.then(task); queue = result.catch(() => {}); return result; }
   const articles = globalThis.OshaberiNoteArticles;
-  async function sessionRaw() { return api.storage.session ? (await api.storage.session.get(articles.key))[articles.key] : undefined; }
+  const articleStore = globalThis.OshaberiNoteArticleStore;
+  async function requestSession() {
+    const key = articles.requestSessionKey;
+    const current = (await api.storage.session.get(key))[key];
+    if (typeof current === "string" && /^[a-zA-Z0-9-]{36}$/.test(current)) return current;
+    const id = crypto.randomUUID(); await api.storage.session.set({ [key]: id }); return id;
+  }
+  async function writeArticle(value, localPatch = {}) {
+    if (value !== undefined) articles.bounded(value);
+    const previous = await articleStore.get();
+    const changed = JSON.stringify(previous) !== JSON.stringify(value);
+    if (changed) await articleStore.set(value);
+    try {
+      if (changed || Object.keys(localPatch).length) await api.storage.local.set({ ...localPatch, ...(changed ? { [articles.signalKey]: crypto.randomUUID() } : {}) });
+    } catch (error) {
+      if (changed) {
+        try { if (previous === undefined) await articleStore.remove(); else await articleStore.set(previous); }
+        catch { throw new Error("設定と記事DBの保存結果を確認できません。再読み込みして確認してください。自動再送は行いません。"); }
+      }
+      throw error;
+    }
+  }
+  async function articleRaw() {
+    let value = await articleStore.get();
+    const session = await requestSession();
+    if (value === undefined) {
+      const legacy = (await api.storage.session.get(articles.key))[articles.key];
+      if (legacy !== undefined) {
+        value = articles.read(legacy, legacy.endpoint); value.requestSessionId = session;
+        await writeArticle(value);
+        await api.storage.session.remove(articles.key);
+      }
+    }
+    if (value !== undefined && value.requestSessionId !== session) {
+      value = structuredClone(value); value.requests = {}; value.requestSessionId = session;
+      if (value.conversation) globalThis.OshaberiNoteChatState.interrupt(value.conversation);
+      await writeArticle(value);
+    }
+    return value;
+  }
   async function loadChat() {
-    const raw = (await api.storage.local.get(chatKey))[chatKey], temporary = await sessionRaw();
+    const raw = (await api.storage.local.get(chatKey))[chatKey], temporary = await articleRaw();
     if (temporary === undefined) return raw;
     const settings = globalThis.OshaberiNote.readSettings((await api.storage.local.get(key))[key]);
     const session = articles.read(temporary, settings.ollamaUrl), store = globalThis.OshaberiNoteChatState.readStore(raw, settings.ollamaUrl);
     // 旧版が履歴へ複製した送信本文も、読込時にMapを残して取り除く。
-    if (JSON.stringify(temporary) !== JSON.stringify(session)) await api.storage.session.set({ [articles.key]: session });
+    if (JSON.stringify(temporary) !== JSON.stringify(session)) await writeArticle(session);
     if (session.conversation) store.conversations.article = session.conversation;
     return store;
   }
   async function persistChat(store, options = {}, settingsPatch = {}) {
-    const previous = await sessionRaw(), local = structuredClone(store), conversation = local.conversations.article;
+    const previous = await articleRaw(), local = structuredClone(store), conversation = local.conversations.article;
     delete local.conversations.article;
     let session;
     if (conversation || previous !== undefined || options.articleSession) {
-      if (!api.storage.session) throw new Error("記事機能にはブラウザのセッションストレージが必要です。");
+      if (!articleStore || !api.storage.session) throw new Error("記事の保存機能を利用できません。");
       session = options.articleSession ?? (previous?.endpoint === store.endpoint ? articles.read(previous, store.endpoint) : articles.fresh(store.endpoint));
       if (conversation) {
         if (session.conversation && session.conversation.epoch !== conversation.epoch) session = articles.fresh(store.endpoint);
@@ -38,26 +77,20 @@
       if (options.articleId) session.activeArticleId = options.articleId;
       articles.bounded(session);
     }
+    if (session !== undefined) session.requestSessionId = await requestSession();
     const oldLocal = (await api.storage.local.get(chatKey))[chatKey];
-    const changedSession = session !== undefined && JSON.stringify(previous) !== JSON.stringify(session);
-    if (changedSession) await api.storage.session.set({ [articles.key]: session });
-    try {
-      if (Object.keys(settingsPatch).length || JSON.stringify(oldLocal) !== JSON.stringify(local)) await api.storage.local.set({ ...settingsPatch, [chatKey]: local });
-    } catch (error) {
-      if (changedSession) {
-        try { if (previous === undefined) await api.storage.session.remove(articles.key); else await api.storage.session.set({ [articles.key]: previous }); }
-        catch { throw new Error("設定と記事セッションの保存結果を確認できません。再読み込みして状態を確認してください。自動再送は行いません。"); }
-      }
-      throw error;
-    }
+    const localPatch = { ...settingsPatch, ...(JSON.stringify(oldLocal) !== JSON.stringify(local) ? { [chatKey]: local } : {}) };
+    if (session !== undefined) await writeArticle(session, localPatch);
+    else if (Object.keys(localPatch).length) await api.storage.local.set(localPatch);
   }
+
   async function prepareArticleMessage(patch, state) {
-    const session = articles.read(await sessionRaw(), state.endpoint);
+    const session = articles.read(await articleRaw(), state.endpoint);
     return articles.request(session, patch, state.epoch, state);
   }
   async function articleOperation(operation, patch = {}, sender) {
     return run(async () => {
-      if (!articles || !api.storage.session) throw new Error("記事機能のセッションストレージを利用できません。");
+      if (!articles || !articleStore || !api.storage.session) throw new Error("記事の保存機能を利用できません。");
       const settings = globalThis.OshaberiNote.readSettings((await api.storage.local.get(key))[key]);
       if (operation === "import") {
         if (!settings.enabled || !isNoteSender(sender)) throw new Error("記事の取り込みが許可されていません。");
@@ -72,7 +105,7 @@
         const article = articles.validate(patch.article);
         if (article.url !== address.url || article.articleId !== address.articleId) throw new Error("表示中の記事と取得した記事が一致しません。");
         const store = globalThis.OshaberiNoteChatState.readStore(await loadChat(), settings.ollamaUrl);
-        const session = articles.read(await sessionRaw(), settings.ollamaUrl);
+        const session = articles.read(await articleRaw(), settings.ollamaUrl);
         session.conversation ??= globalThis.OshaberiNoteChatState.fresh(settings.ollamaUrl, articles.id);
         const map = new Map(session.articles.map(item => [item.articleId, item])); map.set(article.articleId, article); session.articles = [...map.values()];
         session.activeArticleId = article.articleId;
@@ -81,14 +114,15 @@
         store.conversations.article = session.conversation; store.selectedActionId = articles.id;
         await persistChat(store, { articleSession: session });
         try { await api.tabs.create({ url: api.runtime.getURL("home.html") + "#article-request=" + token }); }
-        catch (error) { delete session.requests[token]; await api.storage.session.set({ [articles.key]: session }); throw error; }
+        catch (error) { delete session.requests[token]; await writeArticle(session); throw error; }
         return { opened: true };
       }
-      const session = articles.read(await sessionRaw(), settings.ollamaUrl);
+      const session = articles.read(await articleRaw(), settings.ollamaUrl);
+      if (operation === "snapshot") return { endpoint: session.endpoint, conversation: session.conversation, articles: session.articles.map(({ articleId, title, author, url }) => ({ articleId, title, author, url })) };
       if (operation === "cancel") {
         if (typeof patch.requestToken === "string" && Object.hasOwn(session.requests, patch.requestToken)) {
           delete session.requests[patch.requestToken];
-          await api.storage.session.set({ [articles.key]: session });
+          await writeArticle(session);
         }
         return { cancelled: true };
       }
