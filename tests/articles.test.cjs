@@ -272,7 +272,67 @@ test('GitHub埋め込みは外側の元URLを一度だけ保存・送信し、if
  assert.ok(value.body.indexOf('前の本文')<value.body.indexOf('https://github.com'));assert.ok(value.body.indexOf('https://github.com')<value.body.indexOf('キャプション'));assert.ok(value.body.indexOf('キャプション')<value.body.indexOf('後の本文'));
  const state=await start(f,await importArticle(f,value));assert.ok(state.messages.at(-1).content.includes(value.body));
  const card=doc.getElementById('card');card.hidden=true;assert.ok(!extract().body.includes('https://github.com'));card.hidden=false;
- for(const url of ['javascript:alert(1)','https://user:password@github.com/ruminar/OpenGepa']){card.setAttribute('data-src',url);assert.ok(!extract().body.includes('[リンクカード]'));}
+ for(const url of ['javascript:alert(1)','https://user:password@github.com/ruminar/OpenGepa']){card.setAttribute('data-src',url);const body=extract().body;assert.ok(!body.includes('javascript:'));assert.ok(!body.includes('user:password'));assert.ok(body.includes('https://github.com/ruminar/OpenGepa'));}
+});
+
+function embedFixture(html) {
+ const f=backend(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="before"></p>'+html+'<p id="after"></p></div></div></article>');
+ for(const [id,text]of [['title','埋め込みの題'],['author','著者'],['before','前の本文'],['after','後の本文']])doc.getElementById(id).textContent=text;
+ const win={getComputedStyle:n=>({display:n.hidden?'none':'block',visibility:n.getAttribute('style')?.includes('visibility:hidden')?'hidden':'visible'}),scrollTo:()=>assert.fail('スクロールしない')};
+ for(const frame of doc.querySelectorAll('iframe'))Object.defineProperty(frame,'contentDocument',{get(){assert.fail('URL補完はiframe内部を読まない');}});
+ return {doc,extract:()=>f.context.OshaberiNoteArticles.extract(doc,win,article().url)};
+}
+
+test('未知の埋め込みも外側の元URLを優先し、iframe属性の変更・内部取得をしない',async()=>{
+ const f=embedFixture('<figure embedded-service="oembed" data-src="https://example.com/item/123"><iframe id="frame" src="https://embed.example.com/player" data-src="https://embed.example.com/lazy"></iframe></figure>');
+ const frame=f.doc.getElementById('frame');frame.setAttribute=()=>assert.fail('iframe属性を書き換えない');
+ const value=f.extract();assert.ok(value.body.includes('[リンクカード]\nURL：https://example.com/item/123'));assert.ok(!value.body.includes('embed.example.com'));
+ const backendState=await ready(),state=await start(backendState,await importArticle(backendState,value));assert.ok(state.messages.at(-1).content.includes(value.body));
+});
+
+test('古いnoteカードは未読込iframeの属性から埋め込みURLを残し、作者を推測しない',()=>{
+ const f=embedFixture('<figure embedded-service="note" data-identifier="nOld"><iframe src="about:blank" data-src="https://note.com/embed/notes/nOld" style="visibility:hidden"></iframe></figure>');
+ const body=f.extract().body;assert.ok(body.includes('[リンクカード]\n埋め込みURL：https://note.com/embed/notes/nOld'));assert.ok(!body.includes('著者：'));assert.ok(!body.includes('/test/n/nOld'));
+ const linked=embedFixture('<figure embedded-service="note"><a href="https://note.com/other/n/nOld"></a><iframe src="https://note.com/embed/notes/nOld"></iframe></figure>');assert.ok(linked.extract().body.includes('URL：https://note.com/other/n/nOld'));
+});
+
+test('確認済みYouTube・Spotify・CodePenの表示用URLだけを通常URLへ変換する',()=>{
+ const cases=[
+  ['https://www.youtube-nocookie.com/embed/M7lc1UVf-VE?start=12&list=PL123','https://www.youtube.com/watch?v=M7lc1UVf-VE&list=PL123&t=12s'],
+  ['https://open.spotify.com/embed/playlist/37i9dQZF1DXayDMsJG9ZBv?theme=0','https://open.spotify.com/playlist/37i9dQZF1DXayDMsJG9ZBv'],
+  ['https://codepen.io/mp3/embed/preview/bBByaE?height=300','https://codepen.io/mp3/pen/bBByaE'],
+  ['https://codepen.io/user/embed/Abc#part','https://codepen.io/user/pen/Abc#part']
+ ];
+ for(const [src,url]of cases){const f=embedFixture('<figure embedded-service="player"><iframe id="frame"></iframe></figure>');f.doc.getElementById('frame').setAttribute('src',src);const body=f.extract().body;assert.ok(body.includes(`\nURL：${url}\n`),body);assert.ok(!body.includes('埋め込みURL：'));}
+});
+
+test('変換できない表示用URLは区別して保持し、見た目が似たドメインは変換しない',()=>{
+ for(const src of ['https://w.soundcloud.com/player/?url=https%3A%2F%2Fapi.soundcloud.com%2Ftracks%2F123','https://bandcamp.com/EmbeddedPlayer/track=123/','https://note.com/embed/sounds/abc','https://iframely.net/opaque','https://open.spotify.com.evil.test/embed/playlist/37i9dQZF1DXayDMsJG9ZBv','https://www.youtube.com/embed/videoseries?list=PL123','https://www.youtube.com/embed/live_stream?channel=UC123']){
+  const f=embedFixture('<figure embedded-service="player"><iframe id="frame"></iframe></figure>');f.doc.getElementById('frame').setAttribute('src',src);const body=f.extract().body;assert.ok(body.includes(`埋め込みURL：${src}`),`${src}: ${body}`);
+ }
+ const f=embedFixture('<figure embedded-service="note-sound" data-src="https://note.com/embed/sounds/abc"><iframe src="https://note.com/embed/sounds/abc"></iframe></figure>');assert.equal(f.extract().body.split('https://note.com/embed/sounds/abc').length-1,1);assert.ok(f.extract().body.includes('埋め込みURL：'));
+});
+
+test('空アンカーの元URLを補完し、サービスのトップリンクやキャプションを元URLと混同しない',()=>{
+ const gist=embedFixture('<figure embedded-service="gist"><a href="https://gist.github.com/user/abc#file" data-iframely-url="//iframely.net/widget"></a><iframe src="https://iframely.net/widget"></iframe></figure>');
+ assert.ok(gist.extract().body.includes('URL：https://gist.github.com/user/abc#file'));assert.ok(!gist.extract().body.includes('iframely.net'));
+ const f=embedFixture('<figure embedded-service="oembed"><a href="https://example.com/" id="domain"></a><iframe src="https://example.com/item/123/embed"></iframe><figcaption><a href="https://credits.example.com/source" id="caption"></a></figcaption></figure>');
+ f.doc.getElementById('domain').textContent='example.com';f.doc.getElementById('caption').textContent='出典の説明';const body=f.extract().body;assert.ok(body.includes('埋め込みURL：https://example.com/item/123/embed'));assert.equal(body.split('出典の説明').length-1,1);
+});
+
+test('外側URLのない旧外部カードもタイトルリンクから従来形式へ復元する',()=>{
+ const f=embedFixture('<figure embedded-service="external-article"><a href="https://example.com/"><strong class="external-article-widget-title" id="card-title"></strong></a></figure>');f.doc.getElementById('card-title').textContent='元サイトの題';assert.ok(f.extract().body.includes('タイトル：元サイトの題\nURL：https://example.com/'));
+});
+
+test('埋め込みの危険URL・不可視・srcdoc本文は取得せず、複数URLとURL不明の存在を残す',()=>{
+ const f=embedFixture('<figure embedded-service="unknown"><iframe src="javascript:alert(1)" data-src="https://user:password@example.com/"></iframe><iframe hidden src="https://hidden.example.com/"></iframe><iframe srcdoc="秘密の本文"></iframe></figure>');
+ const body=f.extract().body;assert.ok(body.includes('[リンクカード]\nURL：（未取得）'));for(const text of ['javascript:','password','hidden.example','秘密の本文'])assert.ok(!body.includes(text));
+ const multiple=embedFixture('<figure embedded-service="unknown"><iframe src="https://example.com/a"></iframe><iframe src="https://example.com/b"></iframe><iframe src="https://example.com/a"></iframe></figure>').extract().body;
+ assert.equal(multiple.split('https://example.com/a').length-1,1);assert.equal(multiple.split('https://example.com/b').length-1,1);
+});
+
+test('URL補完をしても既存の投稿文・キャプションを消さず、通常の空アンカーは拾わない',()=>{
+ const f=embedFixture('<figure embedded-service="twitter" data-src="https://x.com/user/status/123"><blockquote><p id="post"></p></blockquote><figcaption id="caption"></figcaption></figure><a href="https://tracking.example.com/empty"></a>');f.doc.getElementById('post').textContent='表示中の投稿文';f.doc.getElementById('caption').textContent='キャプション';const body=f.extract().body;assert.ok(body.includes('URL：https://x.com/user/status/123'));assert.ok(body.includes('表示中の投稿文'));assert.equal(body.split('キャプション').length-1,1);assert.ok(!body.includes('tracking.example.com'));
 });
 
 test('カードの不可視情報・別URLのフレーム・危険なURLを取り込まない',()=>{

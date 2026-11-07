@@ -236,12 +236,65 @@
       const size = link.querySelector('[class~="file-widget__filesize"]');
       return { url, filename, size: size && visible(size) ? visibleText(size).replace(/\s+/g, " ") : "" };
     }
+    function embedAddress(value, embedded = false) {
+      const url = linkUrl(value);
+      if (!url || !String(value).trim() || String(value).trim().startsWith("#")) return null;
+      const source = new URL(url), host = source.hostname;
+      let target, match;
+      if (host === "open.spotify.com" && (match = /^\/embed\/(track|album|playlist|artist|show|episode)\/([a-zA-Z0-9]{22})\/?$/.exec(source.pathname))) {
+        target = new URL(`https://open.spotify.com/${match[1]}/${match[2]}`);
+      } else if (host === "codepen.io" && (match = /^\/([a-zA-Z0-9_-]+)\/embed\/(?:preview\/)?([a-zA-Z0-9]+)\/?$/.exec(source.pathname))) {
+        target = new URL(`https://codepen.io/${match[1]}/pen/${match[2]}`);
+      } else if (["youtube.com", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com"].includes(host) &&
+          (match = /^\/embed\/([a-zA-Z0-9_-]{11})\/?$/.exec(source.pathname)) && !["videoseries", "live_stream"].includes(match[1])) {
+        target = new URL(`https://www.youtube.com/watch?v=${match[1]}`);
+        const list = source.searchParams.get("list"), start = source.searchParams.get("start");
+        if (list && /^[a-zA-Z0-9_-]+$/.test(list)) target.searchParams.set("list", list);
+        if (start && /^\d+$/.test(start)) target.searchParams.set("t", `${start}s`);
+      }
+      if (target) { target.hash = source.hash; return { url: target.href, embedded: false }; }
+      if (source.origin === "https://note.com" && /^\/embed\//.test(source.pathname)) embedded = true;
+      return { url, embedded };
+    }
+    function embedMetadataVisible(element, root) {
+      // 未読込iframeのvisibility:hiddenは許容する。内部文書やsrcプロパティには触れない。
+      for (let current = element; current && current !== root; current = current.parentElement) {
+        const style = win.getComputedStyle(current);
+        if (current.hidden || current.getAttribute("aria-hidden") === "true" || current.hasAttribute("data-oshaberi-note-owned") ||
+            style.display === "none" || style.opacity === "0" || style.contentVisibility === "hidden") return false;
+      }
+      return true;
+    }
+    function embedAddresses(node) {
+      for (const attribute of ["data-src", "data-emb-url"]) {
+        const source = embedAddress(node.getAttribute(attribute));
+        if (source) return [source];
+      }
+      const links = [...node.querySelectorAll("a[href]")].filter(link => link.closest("[embedded-service]") === node &&
+        !link.closest("figcaption") && !link.hasAttribute("data-lightbox") && embedMetadataVisible(link, node));
+      const preferred = links.filter(link => link.hasAttribute("data-iframely-url") || link.querySelector('[class~="external-article-widget-title"]'));
+      const original = (preferred.length ? preferred : links).map(link => embedAddress(link.getAttribute("href"))).filter(source =>
+        source && (preferred.length || !node.querySelector("iframe") || new URL(source.url).pathname !== "/"));
+      if (original.length) return [...new Map(original.map(source => [source.url, source])).values()];
+      const frames = [];
+      for (const frame of node.querySelectorAll("iframe")) {
+        if (frame.closest("[embedded-service]") !== node || !embedMetadataVisible(frame, node)) continue;
+        for (const attribute of ["data-src", "src"]) {
+          const source = embedAddress(frame.getAttribute(attribute), true);
+          if (source) { frames.push(source); break; }
+        }
+      }
+      return [...new Map(frames.map(source => [source.url, source])).values()];
+    }
     function linkCard(node) {
       if (node.tagName !== "FIGURE") return null;
       const service = node.getAttribute("embedded-service");
-      if (!["note", "external-article", "githubRepository"].includes(service)) return null;
-      const url = linkUrl(node.getAttribute("data-src"));
-      if (!url) return null;
+      if (!service || service === "attachment") return null;
+      const addresses = embedAddresses(node);
+      const preserveText = true; // URLの補完で、既に取得できていた投稿文・説明・キャプションを消さない。
+      if (addresses.length !== 1 || addresses[0].embedded || !["note", "external-article", "githubRepository"].includes(service)) return { addresses, preserveText };
+      const url = addresses[0].url;
+      if (service === "note" && linkUrl(node.getAttribute("data-src")) !== url) return { addresses, preserveText };
       // GitHub埋め込みは外側の元URLだけ残し、Iframelyのiframe内部には触れない。
       if (service === "githubRepository") return { url, urlOnly: true };
       let title = "", author = "", description = "", creator = false;
@@ -288,10 +341,15 @@
       }
       const card = linkCard(node);
       if (card) {
-        if (card.urlOnly) chunks.push(`\n[リンクカード]\nURL：${card.url}\n`);
+        if (card.addresses) {
+          chunks.push("\n[リンクカード]\n");
+          if (!card.addresses.length) chunks.push("URL：（未取得）\n");
+          for (const source of card.addresses) chunks.push(`${source.embedded ? "埋め込みURL" : "URL"}：${source.url}\n`);
+          if (card.preserveText) for (const child of node.childNodes) walk(child);
+        } else if (card.urlOnly) chunks.push(`\n[リンクカード]\nURL：${card.url}\n`);
         else if (card.creator) chunks.push(`\n[リンクカード]\n種類：クリエーターページ\nタイトル：${card.title}\n${card.description ? `紹介文：${card.description}\n` : ""}URL：${card.url}\n`);
         else chunks.push(`\n[リンクカード]\nタイトル：${card.title}\n${card.author ? `著者：${card.author}\n` : ""}URL：${card.url}\n`);
-        for (const caption of node.querySelectorAll("figcaption")) walk(caption);
+        if (!card.preserveText) for (const caption of node.querySelectorAll("figcaption")) walk(caption);
         return;
       }
       if (node.tagName === "BR") { chunks.push("\n"); return; }
