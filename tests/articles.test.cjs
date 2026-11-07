@@ -7,11 +7,80 @@ function articleCopyUi(options={}) {
  doc.getElementById('note-article').getBoundingClientRect=()=>({left:240,width:700});
  const win={matchMedia:()=>({matches:true}),getComputedStyle:node=>({display:node.hidden?'none':'block',visibility:'visible'})};
  const copies=[],dates=[],imports=[];require('node:vm').runInContext(require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/note-ui.js'),'utf8'),f.context);
- const ui=f.context.OshaberiNoteUi.create(doc,win,{summarizeArticle:async value=>imports.push(value),copyArticle:async (value,date)=>{if(options.fail)throw Error('clipboard denied');copies.push(value.body);dates.push(date);}});
+ const ui=f.context.OshaberiNoteUi.create(doc,win,{summarizeArticle:async value=>imports.push(value),copyArticle:async (value,date)=>{if(options.fail)throw Error('clipboard denied');copies.push(value.body);dates.push(date);},...(options.loadAdjacent?{loadArticleAdjacent:options.loadAdjacent}:{})});
  const update=url=>ui.update(f.context.OshaberiNote.defaultSettings(),url||article().url);update();
  const wrapper=doc.querySelectorAll('div').find(n=>n.className==='oshaberi-note-article-summary');
  return {f,doc,win,copies,dates,imports,update,wrapper,buttons:wrapper.querySelectorAll('button'),status:wrapper.querySelector('span')};
 }
+
+function appendAdjacent(f, label, href, title='前後の記事', host=f.doc.body) {
+ const fragment=documentFromHtml('<div class="flex"><div class="relative flex min-w-0 basis-1/2 items-center gap-2 py-4"><a class="absolute inset-0" target="_self"></a><div class="min-w-0"><p></p><p></p></div></div></div>');
+ const root=fragment.root.children[0],card=root.children[0],link=card.querySelector('a'),ps=card.querySelectorAll('p');
+ ps[0].textContent=label;ps[1].textContent=title;link.setAttribute('href',href);link.setAttribute('title',title);link.setAttribute('aria-label',title);host.append(root);
+ return {root,card,link};
+}
+
+test('記事末尾の前後リンクを要約ボタンの上へ配置し、遅延出現・片側なしを反映する',()=>{
+ const f=articleCopyUi(),links=f.wrapper.querySelectorAll('a[data-oshaberi-note-adjacent]');
+ assert.deepEqual(f.wrapper.children.slice(0,4).map(n=>n.textContent),['◀ 前の記事','次の記事 ▶','この記事を要約','記事全文を取得']);
+ assert.ok(links.every(n=>!n.hasAttribute('href')&&n.getAttribute('aria-disabled')==='true'));
+ const prev=appendAdjacent(f,'前の記事','/test/n/n111','以前の記事'),next=appendAdjacent(f,'次の記事','https://note.com/test/n/n222','以降の記事');f.update();
+ assert.equal(links[0].href,'https://note.com/test/n/n111');assert.equal(links[1].href,'https://note.com/test/n/n222');assert.equal(links[0].getAttribute('target'),'_self');assert.equal(links[0].getAttribute('title'),'以前の記事');assert.ok(!links[0].hasAttribute('aria-disabled'));
+ const event=links[0].fire('click',{ctrlKey:true});assert.ok(!event.defaultPrevented);
+ prev.root.remove();f.update();assert.ok(!links[0].hasAttribute('href'));assert.equal(links[1].href,'https://note.com/test/n/n222');
+ next.link.setAttribute('href','https://evil.test/test/n/n222');const stale=links[1].fire('click');assert.equal(stale.defaultPrevented,true);assert.ok(!links[1].hasAttribute('href'));
+ assert.deepEqual(f.imports,[]);assert.deepEqual(f.copies,[]);
+});
+
+test('前後記事は本文内・外部・別記事の古い枠・重複・未知構造を採用せずSPA遷移でも消去する',()=>{
+ const f=articleCopyUi(),previous=f.wrapper.querySelectorAll('a[data-oshaberi-note-adjacent]')[0];
+ appendAdjacent(f,'前の記事','/test/n/n111','本文中の偽リンク',f.doc.getElementById('note-body'));f.update();assert.ok(!previous.hasAttribute('href'));
+ const source=appendAdjacent(f,'前の記事','https://evil.test/test/n/n111');f.update();assert.ok(!previous.hasAttribute('href'));
+ source.link.setAttribute('href','/test/n/n111');source.card.hidden=true;f.update();assert.ok(!previous.hasAttribute('href'));source.card.hidden=false;
+ source.link.setAttribute('aria-label','不一致');f.update();assert.ok(!previous.hasAttribute('href'));source.link.setAttribute('aria-label','前後の記事');
+ source.root.setAttribute('data-note-key','nOld');f.update();assert.ok(!previous.hasAttribute('href'));source.root.removeAttribute('data-note-key');
+ f.update();assert.equal(previous.href,'https://note.com/test/n/n111');
+ const duplicate=appendAdjacent(f,'前の記事','/test/n/n333');f.update();assert.ok(!previous.hasAttribute('href'));duplicate.root.remove();f.update();
+ f.update(article('n456').url);assert.ok(!previous.hasAttribute('href'));
+ f.update();assert.equal(previous.href,'https://note.com/test/n/n111');
+ source.card.classList.remove('basis-1/2');f.update();assert.ok(!previous.hasAttribute('href'));
+});
+
+test('前後記事はスクロールせず一度だけ取得し、DOMの公式リンクを優先して再描画で再送しない',async()=>{
+ const calls=[],f=articleCopyUi({loadAdjacent:async url=>{calls.push(url);return {previous:{url:'https://note.com/test/n/n111',title:'APIの前記事'},next:{url:'https://note.com/test/n/n222',title:'APIの次記事'}};}});
+ await new Promise(r=>setImmediate(r));const links=f.wrapper.querySelectorAll('a[data-oshaberi-note-adjacent]');
+ assert.equal(calls.length,1);assert.equal(links[0].href,'https://note.com/test/n/n111');assert.equal(links[1].href,'https://note.com/test/n/n222');assert.ok(!links[0].fire('click').defaultPrevented);
+ for(let i=0;i<3;i++)f.update();await new Promise(r=>setImmediate(r));assert.equal(calls.length,1);
+ appendAdjacent(f,'前の記事','/test/n/n333','公式DOMの前記事');f.update();assert.equal(links[0].href,'https://note.com/test/n/n333');assert.deepEqual(f.imports,[]);assert.equal(f.f.articleData.current,undefined);
+});
+
+test('前後記事の取得失敗は再送せず、遷移前の遅い応答を別記事へ適用しない',async()=>{
+ const pending=[],f=articleCopyUi({loadAdjacent:url=>new Promise((resolve,reject)=>pending.push({url,resolve,reject}))});await new Promise(r=>setImmediate(r));
+ const links=f.wrapper.querySelectorAll('a[data-oshaberi-note-adjacent]');
+ f.doc.querySelector('[data-note-key]').setAttribute('data-note-key','n456');f.update(article('n456').url);await new Promise(r=>setImmediate(r));assert.equal(pending.length,2);
+ pending[0].resolve({previous:{url:'https://note.com/test/n/nOld',title:'古い記事の結果'}});await new Promise(r=>setImmediate(r));assert.ok(!links[0].hasAttribute('href'));
+ pending[1].reject(Error('HTTP 500'));await new Promise(r=>setImmediate(r));assert.match(links[0].getAttribute('title'),/取得できませんでした/);f.update(article('n456').url);await new Promise(r=>setImmediate(r));assert.equal(pending.length,2);
+});
+
+test('前後記事APIは固定したnoteのGETだけを使い、前後の公開記事名とURLだけを返す',async()=>{
+ const f=backend(),api=f.context.OshaberiNoteArticles,calls=[];
+ const note=(key,name)=>({key,name,status:'published',user:{urlname:'test'},custom_domain:null,body:'送らない本文'});
+ const value=await api.adjacent(article().url+'?magazine_key=mSeries#anchor',async(url,options)=>{calls.push({url,options});return{ok:true,json:async()=>({data:{prev_note:note('n111','前記事'),next_note:note('n222','次記事'),comments:['保存しないコメント']}})};});
+ assert.equal(calls[0].url,'https://note.com/api/v3/notes/n123/extra_items?magazine_key=mSeries');assert.equal(calls[0].options.method,'GET');assert.equal(calls[0].options.credentials,'omit');assert.equal(calls[0].options.redirect,'error');
+ assert.deepEqual(JSON.parse(JSON.stringify(value)),{previous:{url:'https://note.com/test/n/n111?magazine_key=mSeries',title:'前記事'},next:{url:'https://note.com/test/n/n222?magazine_key=mSeries',title:'次記事'}});
+ await assert.rejects(api.adjacent('https://evil.test/test/n/n123',()=>assert.fail('外部URLには送信しない')));
+ await assert.rejects(api.adjacent(article().url+'?magazine_key=invalid',()=>assert.fail('不正なマガジンでは送信しない')));
+});
+
+test('前後記事APIは失敗や不正応答を拒否し、下書き・外部ドメイン・不正ID・自記事を候補にしない',async()=>{
+ const api=backend().context.OshaberiNoteArticles;
+ await assert.rejects(api.adjacent(article().url,async()=>({ok:false})),/取得できません/);
+ await assert.rejects(api.adjacent(article().url,async()=>({ok:true,json:async()=>({data:[]})})),/確認できません/);
+ const base={key:'n111',name:'前記事',status:'published',user:{urlname:'test'},custom_domain:null};
+ for(const bad of [{...base,status:'draft'},{...base,custom_domain:'outside.test'},{...base,key:'../bad'},{...base,user:{urlname:'settings'}},{...base,key:'n123'}]){
+  const result=await api.adjacent(article().url,async()=>({ok:true,json:async()=>({data:{prev_note:bad,next_note:null}})}));assert.deepEqual(JSON.parse(JSON.stringify(result)),{});
+ }
+});
 
 test('記事全文取得は要約と同じリンク付き本文だけをコピーし、送信や保存をしない',async()=>{
  const f=articleCopyUi();assert.deepEqual(f.buttons.map(n=>n.textContent),['この記事を要約','記事全文を取得']);

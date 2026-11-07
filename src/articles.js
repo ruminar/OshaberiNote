@@ -161,6 +161,31 @@
     }
     return { user: action === "question" ? patch.text : display(article, action), llmText, llmMessages, articleSegment: segment, articleSegmentId: segmentId, articleId, articleTitle: article.title, articleAction: action };
   }
+  function adjacentPage(url) {
+    const article = page(url), source = new URL(url), magazine = source.searchParams.get("magazine_key");
+    if (magazine !== null && !/^m[a-zA-Z0-9]+$/.test(magazine)) throw invalid("マガジンの指定を確認できません。");
+    const query = magazine ? `?magazine_key=${encodeURIComponent(magazine)}` : "";
+    return { ...article, url: article.url + query, requestUrl: `https://note.com/api/v3/notes/${article.articleId}/extra_items${query}` };
+  }
+  async function adjacent(url, fetcher, signal) {
+    const source = adjacentPage(url);
+    const response = await fetcher(source.requestUrl, { method: "GET", headers: { Accept: "application/json" }, credentials: "omit", redirect: "error", signal });
+    if (!response.ok) throw invalid("前後の記事を取得できませんでした。");
+    const data = (await response.json())?.data;
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw invalid("前後の記事の情報を確認できません。");
+    const result = {};
+    for (const [direction, field] of [["previous", "prev_note"], ["next", "next_note"]]) {
+      const note = data[field];
+      if (!note || note.status !== "published" || note.custom_domain != null || typeof note.name !== "string" || !note.name.trim() || note.name.length > 500) continue;
+      try {
+        const author = globalThis.OshaberiNote.authorId(note.user?.urlname);
+        if (!/^n[a-zA-Z0-9]+$/.test(note.key)) continue;
+        const target = page(`https://note.com/${author}/n/${note.key}`);
+        if (target.url !== page(url).url) result[direction] = { url: target.url + new URL(source.url).search, title: note.name.trim() };
+      } catch { /* 公開note記事と確認できない候補は使わない。 */ }
+    }
+    return result;
+  }
   function extract(doc, win, url) {
     const address = page(url), article = doc.querySelector('article[id="note-article"]');
     const bodies = article?.querySelectorAll('[id="note-body"]');
@@ -284,5 +309,5 @@
     walk(bodies[0]);
     return validate({ ...address, title: visibleText(headings[0]), author, body: chunks.join("").replace(/\n{3,}/g, "\n\n").trim() });
   }
-  globalThis.OshaberiNoteArticles = Object.freeze({ id, key, signalKey, requestSessionKey, actions, page, validate, fresh, read, bounded, display, request, extract, fingerprint, captureSummary });
+  globalThis.OshaberiNoteArticles = Object.freeze({ id, key, signalKey, requestSessionKey, actions, page, validate, fresh, read, bounded, display, request, extract, fingerprint, captureSummary, adjacentPage, adjacent });
 })();

@@ -949,6 +949,76 @@
       }
     }
     function clearArticleSummary() { articleSummary?.remove(); articleSummary = undefined; }
+    let articleAdjacentState;
+    function articleAdjacentSource(url) {
+      try {
+        const source = globalThis.OshaberiNoteArticles.adjacentPage(url);
+        const body = doc.querySelector('article[id="note-article"]')?.querySelector('[id="note-body"]');
+        return body?.closest('[data-note-key]')?.getAttribute('data-note-key') === source.articleId ? source : null;
+      } catch { return null; }
+    }
+    function articleAdjacent(url) {
+      const found = { previous: [], next: [] }, result = {};
+      let current;
+      try { current = globalThis.OshaberiNoteArticles.page(url); } catch { return result; }
+      const article = doc.querySelector('article[id="note-article"]'), body = article?.querySelector('[id="note-body"]');
+      if (body?.closest('[data-note-key]')?.getAttribute('data-note-key') !== current.articleId) return result;
+      for (const card of doc.querySelectorAll('div[class~="basis-1/2"]')) {
+        if (!hasClasses(card, ["relative", "flex", "min-w-0", "items-center", "gap-2", "py-4"]) ||
+            !hasClasses(card.parentElement, ["flex"]) || !visible(card) || card.closest('[id="note-body"]') || card.closest(`[${owned}]`) ||
+            (article.closest("main") && card.closest("main") !== article.closest("main"))) continue;
+        const scope = card.closest('[data-note-key]');
+        if (scope && scope.getAttribute('data-note-key') !== current.articleId) continue;
+        const text = [...card.children].find(n => n.tagName === "DIV" && n.classList.contains("min-w-0"));
+        const paragraphs = text && [...text.children].filter(n => n.tagName === "P");
+        if (paragraphs?.length !== 2) continue;
+        const label = paragraphs[0].textContent.trim(), direction = label === "前の記事" ? "previous" : label === "次の記事" ? "next" : null;
+        const links = [...card.children].filter(n => n.tagName === "A" && hasClasses(n, ["absolute", "inset-0"]));
+        if (!direction || links.length !== 1) continue;
+        const link = links[0], title = paragraphs[1].textContent.trim();
+        if (!title || link.getAttribute("title") !== title || link.getAttribute("aria-label") !== title || link.getAttribute("target") !== "_self") continue;
+        try {
+          const target = globalThis.OshaberiNoteArticles.adjacentPage(new URL(link.getAttribute("href"), url).href);
+          if (target.url.split("?")[0] !== current.url) found[direction].push({ url: target.url, title });
+        } catch { /* 記事以外や外部サイトへのリンクは使わない。 */ }
+      }
+      for (const direction of ["previous", "next"]) if (found[direction].length === 1) result[direction] = found[direction][0];
+      return result;
+    }
+    function resolvedArticleAdjacent(url) {
+      const source = articleAdjacentSource(url);
+      if (!source) return {};
+      const cached = articleAdjacentState?.url === source.url ? articleAdjacentState.value : null;
+      return { ...cached, ...articleAdjacent(url) };
+    }
+    function syncArticleAdjacent(wrapper, url) {
+      const source = articleAdjacentSource(url);
+      if (source && typeof actions.loadArticleAdjacent === "function" && articleAdjacentState?.url !== source.url) {
+        const state = { url: source.url, value: {}, loading: true }; articleAdjacentState = state;
+        Promise.resolve().then(() => actions.loadArticleAdjacent(source.url)).then(value => {
+          if (articleAdjacentState === state) { state.value = value; state.loading = false; }
+        }, () => {
+          if (articleAdjacentState === state) { state.loading = false; state.failed = true; }
+        }).then(() => {
+          if (!disposed && articleAdjacentState === state && articleSummary?.isConnected) syncArticleAdjacent(articleSummary, currentUrl);
+        });
+      }
+      const adjacent = resolvedArticleAdjacent(url);
+      for (const link of wrapper.querySelectorAll('a[data-oshaberi-note-adjacent]')) {
+        const target = adjacent[link.getAttribute('data-oshaberi-note-adjacent')];
+        if (target) {
+          if (link.getAttribute("href") !== target.url) link.setAttribute("href", target.url);
+          if (link.getAttribute("title") !== target.title) link.setAttribute("title", target.title);
+          if (link.hasAttribute("aria-disabled")) link.removeAttribute("aria-disabled");
+        } else {
+          if (link.hasAttribute("href")) link.removeAttribute("href");
+          if (link.getAttribute("aria-disabled") !== "true") link.setAttribute("aria-disabled", "true");
+          const title = articleAdjacentState?.url === source?.url && articleAdjacentState?.loading ? "前後の記事を取得しています…" :
+            articleAdjacentState?.url === source?.url && articleAdjacentState?.failed ? "前後の記事を取得できませんでした。ページを再読み込みしてください" : "前後の記事のリンクがありません";
+          if (link.getAttribute("title") !== title) link.setAttribute("title", title);
+        }
+      }
+    }
     function articlePublicationDate() {
       const region = doc.querySelector('article[id="note-article"]')?.querySelector('[id="note-body"]')?.closest('[data-note-key]');
       const dates = new Set();
@@ -962,7 +1032,7 @@
     }
     function syncArticleSummary(show, url) {
       if (!show || !core.isArticle(url) || typeof actions.summarizeArticle !== "function" || !globalThis.OshaberiNoteArticles) { clearArticleSummary(); return; }
-      if (articleSummary?.isConnected) return;
+      if (articleSummary?.isConnected) { syncArticleAdjacent(articleSummary, url); return; }
       const wrapper = doc.createElement("div"), button = doc.createElement("button"), copy = doc.createElement("button"), status = doc.createElement("span");
       wrapper.setAttribute(owned, ""); wrapper.className = "oshaberi-note-article-summary";
       button.type = "button"; button.textContent = "この記事を要約";
@@ -991,7 +1061,17 @@
         } catch (error) { if (wrapper.isConnected) status.textContent = error.message || "記事を取得できませんでした。コピーは行いません。"; }
         finally { articleSummaryBusy = false; button.disabled = false; copy.disabled = false; }
       };
+      for (const [direction, text] of [["previous", "◀ 前の記事"], ["next", "次の記事 ▶"]]) {
+        const link = doc.createElement("a"); link.textContent = text; link.setAttribute("data-oshaberi-note-adjacent", direction);
+        link.setAttribute("target", "_self"); link.setAttribute("role", "link");
+        link.onclick = event => {
+          const target = resolvedArticleAdjacent(win.location?.href || currentUrl)[direction];
+          if (!target || target.url !== link.getAttribute("href")) { event.preventDefault(); syncArticleAdjacent(wrapper, win.location?.href || currentUrl); }
+        };
+        wrapper.append(link);
+      }
       wrapper.append(button, copy, status); doc.body.append(wrapper); articleSummary = wrapper;
+      syncArticleAdjacent(wrapper, url);
     }
     function syncArticleFollowing(settings, url) {
       const article = doc.querySelector('article[id="note-article"]');
