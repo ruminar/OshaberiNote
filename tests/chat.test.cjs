@@ -258,16 +258,10 @@ test('旧単一のタグ会話を移行し、通常タブを初期表示して�
   assert.equal(f.data[api.key].schemaVersion,2);assert.equal(f.data[api.key].conversations.chat.epoch,normal.epoch);
 });
 
-test('タブ切替で自身の生成だけを中断し、遅延保存・他タブへの生成混入を拒否する',async()=>{
-  const {f,patch}=await ready();const old=await f.chat('start',{...patch,text:'途中の通常会話'});
-  const tag=await beginTags(f);assert.equal((await f.chat('get')).turns[0].status,'interrupted');
-  const tp={...patch,actionId:tag.actionId,epoch:tag.epoch},started=await f.chat('start',{...tp,text:'タグ会話'});
-  await assert.rejects(f.chat('complete',{...patch,id:old.active.id,text:'遅延した回答'}));
-  assert.equal((await f.chat('get',{actionId:tag.actionId})).active.id,started.active.id);
-  f.connect('other');await f.chat('select',{actionId:'chat',owner:'other'});
-  assert.equal((await f.chat('get',{actionId:tag.actionId})).active.id,started.active.id);
-  await assert.rejects(f.chat('start',{...patch,owner:'other',text:'二重生成'}),/生成中/);
-  await f.chat('stop',{owner:'owner'});assert.equal((await f.chat('get',{actionId:tag.actionId})).active,null);
+test('タブ切替でも元の生成を継続し、別会話への進捗混入と二重生成を拒否する',async()=>{
+ const {f,patch}=await ready();const old=await f.chat('start',{...patch,text:'通常の生成'}),tag=await beginTags(f),tp={...patch,actionId:tag.actionId,epoch:tag.epoch};
+ assert.equal((await f.chat('get')).active.id,old.active.id);await assert.rejects(f.chat('start',{...tp,text:'二重生成'}),/生成中/);
+ await assert.rejects(f.chat('progress',{...tp,id:old.active.id,text:'混入'}));await f.chat('complete',{...patch,id:old.active.id,text:'通常の完成回答'});assert.equal((await f.chat('get')).turns[0].status,'complete');assert.equal((await f.chat('get',{actionId:tag.actionId})).turns.length,0);
 });
 
 test('接続先変更は全タブを消し、JSON移行による許可解除は全タブへ適用する',async()=>{

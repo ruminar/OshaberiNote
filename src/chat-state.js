@@ -136,9 +136,8 @@
         if (typeof patch.owner !== "string" || !port.isOwnerConnected?.(patch.owner)) throw new Error("会話画面との接続を確認できません。");
         const first = !Object.hasOwn(store.conversations, id);
         for (const item of Object.values(store.conversations)) {
-          if (item.active && (item.active.owner === patch.owner || (port.isOwnerConnected && !port.isOwnerConnected(item.active.owner)))) interrupt(item);
+          if (item.active && port.isOwnerConnected && !port.isOwnerConnected(item.active.owner)) interrupt(item);
         }
-        if (state.active?.owner === patch.owner) interrupt(state);
         store.selectedActionId = id;
         const selected = await save(store, state);
         const action = globalThis.OshaberiNoteChatActions.find(id);

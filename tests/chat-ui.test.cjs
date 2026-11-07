@@ -32,7 +32,8 @@ async function fixture(t, options = {}) {
     try {
       if (message.operation === 'progress' && message.patch.actionId === 'chat') await options.progressGate;
       if (message.type === 'tag-operation') { await options.tagGate; if (options.tagError) throw Object.assign(new Error('登録結果を確認できません'), { code: 'UNCONFIRMED' }); }
-      return { ok: true, settings: await f.send(message) };
+      const result=await f.send(message);if(options.manualArticleQueue&&requests.some(r=>r.url.endsWith('/api/chat'))&&message.type==='article-operation'&&message.patch.operation==='snapshot')result.queue=[];
+      return { ok: true, settings: result };
     }
     catch (error) { return { ok: false, error: error.message, code: error.code }; }
   };
@@ -71,7 +72,7 @@ test('要約キューは最後の依頼画面からでもFIFOで実行し、失�
  }}),n=f.nodes;
  assert.equal(count,1);assert.match(n.get('chat-article-queue').textContent,/2件/);n.get('chat-input').value='書きかけの質問';n.get('chat-input').fire('input');release();
  for(let i=0;i<12;i++){await flush();if(count===3&&!f.articleData.current.conversation.active)break;}
- const posts=f.requests.filter(r=>r.url.endsWith('/api/chat')).map(r=>JSON.parse(r.init.body));assert.equal(posts.length,3);
+ const posts=f.requests.filter(r=>r.url.endsWith('/api/chat')).map(r=>JSON.parse(r.init.body));assert.equal(posts.length,3,JSON.stringify({status:n.get('chat-status').textContent,conversation:f.articleData.current.conversation,queue:f.articleData.current.requests}));
  for(let i=0;i<3;i++)assert.ok(posts[i].messages.at(-1).content.includes(seed.articles[i].body));
  assert.deepEqual(f.articleData.current.conversation.turns.map(turn=>turn.status),['complete','interrupted','complete']);assert.equal(f.articleData.current.summaries.length,2);assert.deepEqual(f.articleData.current.requests,{});assert.equal(n.get('chat-article-queue').hidden,true);assert.equal(n.get('chat-input').value,'書きかけの質問');
  n.get('chat-form').fire('submit');await flush();assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,3);assert.match(f.confirmations.at(-1),/対象の会話区間/);
@@ -110,7 +111,7 @@ test('記事ページからの依頼を既存会話へ自動送信し、本文�
   assert.equal(open.fire('click').defaultPrevented,undefined);assert.equal(n.get('chat-article-dialog').open,true);assert.equal(posts().length,1);
   n.get('chat-article-impression').onclick();await flush();assert.equal(n.get('chat-article-dialog').open,false);
   assert.equal(open.hasAttribute('href'),false);
-  assert.equal(posts().length,2);assert.deepEqual(posts()[1].messages.map(item=>item.role),['system','user']);assert.equal(n.get('chat-messages').querySelectorAll('article').length,4);assert.match(posts()[1].messages.at(-1).content,/感想を聞かせて/);assert.ok(posts()[1].messages.at(-1).content.includes(seed.article.body));
+  assert.equal(posts().length,2);assert.deepEqual(posts()[1].messages.map(item=>item.role),['system','user']);assert.equal(n.get('chat-messages').querySelectorAll('article').length,4);assert.match(posts()[1].messages.at(-1).content,/あなた自身の感想を詳しく聞かせて/);assert.ok(posts()[1].messages.at(-1).content.includes(seed.article.body));
   const replay=await fixture(t,{storedChat:f.data[seed.key],storedArticles:f.articleData.current,hash:seed.hash});
   assert.equal(replay.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);assert.match(replay.nodes.get('chat-messages').textContent,/感想を聞かせて/);
   await n.get('chat-new').onclick();await flush();assert.deepEqual(f.articleData.current.articles,[]);assert.deepEqual(f.articleData.current.requests,{});
@@ -141,7 +142,7 @@ test('記事の121往復を画面に復元し、先頭の記事タイトルか�
 });
 
 test('共有対象の変更を同期し、入力中や別タブに退避した下書きは確認するまで送らない',async t=>{
- const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,reply:'Aの最初の回答'}),n=f.nodes;
+ const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,reply:'Aの最初の回答',manualArticleQueue:true}),n=f.nodes;
  n.get('chat-input').value='Aについての下書き';n.get('chat-input').fire('input');
  await n.get('chat-actions').children[1].onclick();await flush();
  f.connect('other');const b={...seed.article,articleId:'n456',title:'別の記事B',body:'Bの本文の秘密',url:'https://note.com/test/n/n456'};
@@ -177,7 +178,7 @@ test('送信直前の共有対象変更は背景で拒否し、下書きを保�
 });
 
 test('一覧を置かず、過去の同名記事のタイトルから再操作して自由入力を続けられる',async t=>{
- const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash}),n=f.nodes;
+ const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,manualArticleQueue:true}),n=f.nodes;
  for(const id of ['chat-article-help','chat-article-target','chat-article-library'])assert.equal(n.has(id),false);
  f.c.OshaberiNoteChatUI.setVisible(false);
  f.connect('other-article');const b={...seed.article,articleId:'n456',body:'別記事Bの本文',url:'https://note.com/test/n/n456'};f.c.chrome.tabs.get=async()=>({url:b.url});
@@ -357,23 +358,14 @@ test('「他は何がありますか？」にも専用systemと直前の完了�
   assert.equal((await f.chat('get', { actionId: 'tag-suggestion-v1' })).actionId, 'tag-suggestion-v1');
 });
 
-test('生成中の専用会話への切替は古い生成を中断し、連打でも最初の質問を一度だけ送る', async t => {
-  let count = 0, aborted = false;
-  const f = await fixture(t, { stream: init => {
-    if (++count > 1) return new Response(JSON.stringify({ message: { role: 'assistant', content: '[#新候補]' }, done: true }) + '\n');
-    return new Response(new ReadableStream({ start(controller) {
-      init.signal.addEventListener('abort', () => { aborted = true; controller.error(new DOMException('aborted', 'AbortError')); });
-    } }));
-  } }), n = f.nodes;
-  n.get('connect-ollama').onclick(); await flush();
-  n.get('chat-input').value = '古い生成'; n.get('chat-form').fire('submit'); await flush();
-  const action = n.get('chat-actions').children[1]; assert.equal(action.disabled, false);
-  const first = action.onclick(), second = action.onclick(); await Promise.all([first, second]); await flush();
-  assert.equal(aborted, true); assert.equal(count, 2);
-  const state = await f.chat('get', { actionId: 'tag-suggestion-v1' }); assert.equal(state.actionId, 'tag-suggestion-v1'); assert.equal(state.turns.length, 1);
-  assert.equal(state.turns[0].status, 'complete'); assert.equal(state.turns[0].assistant, '[#新候補]');
-  assert.match(n.get('chat-status').textContent, /完了/); assert.equal(n.get('chat-send').disabled, false);
+test('生成中にタグへ切り替えても元の回答を完成させ、タグの下書きや表示へ混入しない',async t=>{
+ let finish,aborted=false;const f=await fixture(t,{stream:init=>new Response(new ReadableStream({start(c){finish=()=>{c.enqueue(new TextEncoder().encode(JSON.stringify({message:{role:'assistant',content:'元の完成回答'},done:true})+'\n'));c.close();};init.signal.addEventListener('abort',()=>{aborted=true;c.error(new DOMException('aborted','AbortError'));});}}))}),n=f.nodes;
+ await n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='通常の質問';n.get('chat-form').fire('submit');await flush();
+ await n.get('chat-tab-tag-suggestion-v1').onclick();await flush();n.get('chat-input').value='タグ用の下書き';assert.equal(aborted,false);assert.equal(n.get('chat-send').disabled,true);
+ finish();await flush();assert.equal((await f.chat('get')).turns[0].status,'complete');assert.equal((await f.chat('get',{actionId:'tag-suggestion-v1'})).turns.length,0);assert.equal(n.get('chat-input').value,'タグ用の下書き');assert.doesNotMatch(n.get('chat-messages').textContent,/元の完成回答/);
+ await n.get('chat-tab-chat').onclick();await flush();assert.match(n.get('chat-messages').textContent,/元の完成回答/);
 });
+
 test('タブはキーボードで切り替えられ、新しい会話では選択中だけ消す', async t => {
   const f = await fixture(t), n=f.nodes, tabs=n.get('chat-actions').children;
   n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='通常の履歴';n.get('chat-form').fire('submit');await flush();
@@ -389,14 +381,10 @@ test('タブはキーボードで切り替えられ、新しい会話では選�
   assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,2);
 });
 
-test('切替前の遅延した進捗保存を拒否しても、切替先の会話を停止しない', async t => {
-  let release,count=0;const progressGate=new Promise(resolve=>{release=resolve;});
-  const f=await fixture(t,{progressGate,stream:()=>new Response(JSON.stringify({message:{role:'assistant',content:++count===1?'古い進捗':'新しい回答'},done:true})+'\n')}),n=f.nodes;
-  n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='通常の途中';n.get('chat-form').fire('submit');await flush();
-  await n.get('chat-actions').children[1].onclick();await flush();release();await flush();
-  assert.equal(n.get('chat-send').disabled,false);assert.match(n.get('chat-status').textContent,/完了/);
-  assert.equal((await f.chat('get',{actionId:'tag-suggestion-v1'})).turns[0].assistant,'新しい回答');
-  assert.equal((await f.chat('get')).turns[0].status,'interrupted');
+test('切り替え前の遅延した進捗も元の会話にだけ保存する',async t=>{
+ let release;const progressGate=new Promise(r=>{release=r;});const f=await fixture(t,{progressGate,reply:'遅れて完成した通常回答'}),n=f.nodes;
+ await n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='通常の途中';n.get('chat-form').fire('submit');await flush();await n.get('chat-tab-tag-suggestion-v1').onclick();await flush();release();await flush();
+ assert.equal((await f.chat('get')).turns[0].status,'complete');assert.equal((await f.chat('get',{actionId:'tag-suggestion-v1'})).turns.length,0);assert.doesNotMatch(n.get('chat-messages').textContent,/遅れて完成/);
 });
 
 test('Ctrl+Enterは送信ボタンと同じ処理で送信し、連続操作で二重送信しない', async t => {
@@ -467,17 +455,12 @@ test('接続先変更と取消を区別し、変更時は会話・入力・モ�
   cancel.nodes.get('ollama-settings').fire('submit'); await flush();
   assert.equal((await cancel.settings()).ollamaUrl, 'http://127.0.0.1:11434');
 });
-test('生成中に設定へ移動すると通信を中断し、戻っても自動再送しない', async t => {
-  let wasAborted = false;
-  const f = await fixture(t, { stream: init => new Response(new ReadableStream({
-    start(controller) { init.signal.addEventListener('abort', () => { wasAborted = true; controller.error(new DOMException('aborted', 'AbortError')); }); }
-  })) }), n = f.nodes;
-  n.get('connect-ollama').onclick(); await flush();
-  n.get('chat-input').value = 'hello'; n.get('chat-form').fire('submit'); await flush();
-  n.get('nav-settings').onclick(); await flush(); assert.equal(wasAborted, true);
-  assert.equal((await f.chat('get')).turns[0].status, 'interrupted');
-  n.get('nav-chat').onclick(); await flush(); assert.equal(f.requests.filter(item => item.url.endsWith('/api/chat')).length, 1);
+test('生成中にお気に入りや設定へ移動しても受信し続け、戻ると完成回答を表示する',async t=>{
+ let finish;const f=await fixture(t,{stream:()=>new Response(new ReadableStream({start(c){finish=()=>{c.enqueue(new TextEncoder().encode(JSON.stringify({message:{role:'assistant',content:'メニュー移動後の完成回答'},done:true})+'\n'));c.close();};}}))}),n=f.nodes;
+ await n.get('connect-ollama').onclick();await flush();n.get('chat-input').value='質問';n.get('chat-form').fire('submit');await flush();const request=f.requests.find(r=>r.url.endsWith('/api/chat'));
+ n.get('nav-tags').onclick();n.get('nav-settings').onclick();await flush();assert.equal(request.init.signal.aborted,false);finish();await flush();assert.equal((await f.chat('get')).turns[0].status,'complete');assert.equal(n.get('panel-settings').hidden,false);n.get('nav-chat').onclick();await flush();assert.match(n.get('chat-messages').textContent,/メニュー移動後の完成回答/);
 });
+
 test('LLMの設定を通常の設定と分離し、接続URLとシステムプロンプトを配置する', async t => {
   const f = await fixture(t, { hash: '#llm' }), n = f.nodes;
   assert.equal(n.get('panel-llm').hidden, false); assert.equal(n.get('panel-settings').hidden, true);
@@ -879,4 +862,40 @@ test('危険なスキームや認証付きURLをリンク化せず、壊れたMa
  assert.equal(body.querySelector('img'),null);assert.equal(body.querySelector('script'),null);
  assert.deepEqual(body.querySelectorAll('a').map(a=>a.href),['https://note.com/test/n/n123','https://note.com/test/n/n123','https://example.com/test']);
  assert.ok(body.textContent.includes('[危険](javascript:alert(1))'));assert.ok(body.textContent.includes('https://user:pass@example.com/'));
+});
+
+
+test('再利用通知は宛先のホームをおしゃべり・記事についてへ切り替え、下書きを保持して要約を進める',async t=>{
+ const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:'#settings'});
+ assert.equal(f.nodes.get('panel-chat').hidden,true);f.nodes.get('chat-input').value='通常会話の下書き';
+ const listener=f.handlers.message[1],responses=[];listener({type:'show-imported-article',targetTabId:99,requestToken:seed.hash.split('=')[1]},{id:'test'},r=>responses.push(r));await flush();assert.equal(responses.length,0);assert.equal(f.nodes.get('panel-chat').hidden,true);
+ listener({type:'show-imported-article',targetTabId:1,requestToken:seed.hash.split('=')[1]},{id:'test'},r=>responses.push(r));await new Promise(r=>setTimeout(r,5));await flush();
+ assert.equal(responses[0].received,true);assert.equal(f.nodes.get('panel-chat').hidden,false);assert.equal(f.nodes.get('chat-tab-article').getAttribute('aria-selected'),'true');assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,1);
+});
+
+
+test('再利用通知で通常会話の生成を中断せず、完了後に記事画面へ切り替える',async t=>{
+ const seed=await articleTransfer();let release;const f=await fixture(t,{stream:init=>new Response(new ReadableStream({start(c){release=()=>{c.enqueue(new TextEncoder().encode(JSON.stringify({message:{role:'assistant',content:'完了'},done:true})+'\n'));c.close();};init.signal.addEventListener('abort',()=>c.error(Error('unexpected abort')));}}))});
+ await f.nodes.get('chat-tab-chat').onclick();await f.nodes.get('connect-ollama').onclick();await flush();f.nodes.get('chat-input').value='通常の質問';const done=f.nodes.get('chat-form').onsubmit({preventDefault(){}});await flush();const request=f.requests.find(r=>r.url.endsWith('/api/chat'));
+ f.articleData.current={...structuredClone(seed.f.articleData.current),requestSessionId:f.sessionData[f.context.OshaberiNoteArticles.requestSessionKey]};
+ f.handlers.message[1]({type:'show-imported-article',targetTabId:1,requestToken:seed.hash.split('=')[1]},{id:'test'},()=>{});await new Promise(r=>setTimeout(r,5));await flush();assert.equal(request.init.signal.aborted,false);assert.equal(f.nodes.get('chat-tab-chat').getAttribute('aria-selected'),'true');
+ release();await done;await flush();assert.equal(f.nodes.get('chat-tab-article').getAttribute('aria-selected'),'true');await f.nodes.get('chat-stop').onclick();
+});
+
+
+test('記事要約は別の上部タブと設定画面へ移動してもキュー全件を保存し、表示と下書きを変えない',async t=>{
+ const seed=await queuedArticles();let release,count=0;const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,stream:init=>{
+  count++;if(count>1)return new Response(JSON.stringify({message:{role:'assistant',content:'要約'+count},done:true})+'\n');
+  return new Response(new ReadableStream({start(c){release=()=>{c.enqueue(new TextEncoder().encode(JSON.stringify({message:{role:'assistant',content:'要約1'},done:true})+'\n'));c.close();};init.signal.addEventListener('abort',()=>c.error(new DOMException('aborted','AbortError')));}}));
+ }}),n=f.nodes;
+ await n.get('chat-tab-chat').onclick();await flush();n.get('chat-input').value='別会話の下書き';n.get('nav-settings').onclick();await flush();release();
+ for(let i=0;i<20;i++){await flush();if(count===3&&!f.articleData.current.conversation.active)break;}
+ assert.equal(count,3);assert.deepEqual(f.articleData.current.conversation.turns.map(t=>t.status),['complete','complete','complete']);assert.equal(f.articleData.current.summaries.length,3);assert.equal(n.get('panel-settings').hidden,false);assert.equal(n.get('chat-tab-chat').getAttribute('aria-selected'),'true');assert.equal(n.get('chat-input').value,'別会話の下書き');assert.doesNotMatch(n.get('chat-messages').textContent,/要約/);
+ n.get('nav-chat').onclick();await n.get('chat-tab-article').onclick();await flush();assert.match(n.get('chat-messages').textContent,/要約3/);
+});
+
+test('別の会話を初期化しても生成は継続し、別会話からの中止なら実行中と待機をすべて取り消す',async t=>{
+ const seed=await queuedArticles(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,stream:init=>new Response(new ReadableStream({start(c){init.signal.addEventListener('abort',()=>c.error(new DOMException('aborted','AbortError')));}}))}),n=f.nodes;
+ const request=f.requests.find(r=>r.url.endsWith('/api/chat'));await n.get('chat-tab-chat').onclick();await flush();await n.get('chat-new').onclick();await flush();assert.equal(request.init.signal.aborted,false);assert.ok(f.articleData.current.conversation.active);assert.equal(n.get('chat-stop').disabled,false);
+ await n.get('chat-stop').onclick();await flush();assert.equal(request.init.signal.aborted,true);assert.equal(f.articleData.current.conversation.active,null);assert.deepEqual(f.articleData.current.requests,{});assert.equal(n.get('chat-tab-chat').getAttribute('aria-selected'),'true');
 });

@@ -16,9 +16,32 @@
   const drafts = new Map(), articles = globalThis.OshaberiNoteArticles;
   let pendingArticleRequest, articleReference, articleSnapshot, localActive = false;
   let articleDraftContext;
-  let sending;
+  let sending, generation;
+  let importedArticleToken, openingArticle = false;
+  let homeTabId;
+  void api.tabs.getCurrent().then(tab => { homeTabId = tab?.id; }).catch(() => {});
+  api.runtime.onMessage.addListener((message, sender, respond) => {
+    if (sender.id !== api.runtime.id || message?.type !== "show-imported-article" || homeTabId === undefined || homeTabId !== message.targetTabId || !/^[a-zA-Z0-9-]{36}$/.test(message.requestToken)) return false;
+    importedArticleToken = message.requestToken;
+    respond({ received: true });
+    setTimeout(maybeSendArticle, 0);
+    return false;
+  });
+  async function openImportedArticle() {
+    if (!importedArticleToken || openingArticle || !settings || !state || busy || actionStarting || sending === sendSequence || generatingId || blocked) return;
+    openingArticle = true;
+    const token = importedArticleToken;
+    try {
+      await platform.article("request", { requestToken: token });
+      importedArticleToken = undefined;
+      byId("nav-chat").onclick();
+      if (selectedAction !== "article") await byId("chat-tab-article").onclick();
+      if (!ready && settings.enabled && state.approvedUrl === settings.ollamaUrl) await probe(false);
+    } catch (error) { if (importedArticleToken === token) importedArticleToken = undefined; status(error.message); }
+    finally { openingArticle = false; maybeSendArticle(); }
+  }
   function articleQueue() {
-    return selectedAction === "article" && articleSnapshot?.endpoint === state?.endpoint && articleSnapshot?.conversation?.epoch === state?.epoch ? articleSnapshot.queue ?? [] : [];
+    return articleSnapshot?.endpoint === settings?.ollamaUrl ? articleSnapshot.queue ?? [] : [];
   }
   const currentArticleContext = () => ({ epoch: state?.epoch, segmentId: state?.activeArticleSegmentId ?? null });
   function articleTargetLabel() {
@@ -37,6 +60,7 @@
   }
   function closeArticleDialog() { if (articleDialog.open) articleDialog.close(); articleReference = undefined; }
   function maybeSendArticle() {
+    if (importedArticleToken) { void openImportedArticle(); return; }
     if (sending === sendSequence) return;
     const queue = articleQueue();
     if (pendingArticleRequest?.requestToken && articleSnapshot && !queue.some(item => item.requestToken === pendingArticleRequest.requestToken) && selectedAction === "article") {
@@ -44,13 +68,17 @@
       pendingArticleRequest = undefined;
       globalThis.history?.replaceState?.(null, "", api.runtime.getURL("home.html"));
     }
-    if (!visible || selectedAction !== "article" || !ready || !articleConsent || !settings?.enabled || !settings.ollamaModel || state?.anyActive || state?.active || busy || actionStarting || blocked) return;
-    if (queue.length && (!pendingArticleRequest || pendingArticleRequest.requestToken)) {
-      if (pendingArticleRequest && byId("chat-input").value === pendingArticleRequest.displayText) byId("chat-input").value = "";
-      pendingArticleRequest = queue[0];
+    if (!ready || !articleConsent || !settings?.enabled || !settings.ollamaModel || state?.anyActive || generatingId || busy || actionStarting || blocked) return;
+    if (queue.length) {
+      if (pendingArticleRequest?.requestToken) {
+        if (selectedAction === "article" && byId("chat-input").value === pendingArticleRequest.displayText) byId("chat-input").value = "";
+        pendingArticleRequest = undefined;
+      }
+      void sendMessage(undefined, queue[0]); return;
     }
-    if (pendingArticleRequest) byId("chat-form").requestSubmit();
+    if (visible && selectedAction === "article" && pendingArticleRequest) byId("chat-form").requestSubmit();
   }
+
   function articleReferenceNode(node, turn) {
     const epoch = state.epoch, valid = () => selectedAction === "article" && state?.epoch === epoch && state.turns.some(item => item.user === turn.user && item.articleId === turn.articleId && item.articleAction === turn.articleAction);
     const button = document.createElement("button"), suffix = document.createElement("span");
@@ -161,11 +189,11 @@
   function controls() {
     const active = Boolean(state?.active);
     const working = busy || actionStarting;
-    byId("connect-ollama").disabled = working || !settings?.enabled || active || blocked;
+    byId("connect-ollama").disabled = working || !settings?.enabled || active || state?.anyActive || Boolean(generation) || blocked;
     byId("chat-model").disabled = working || !ready || blocked;
     byId("chat-input").disabled = working || !settings?.enabled || blocked;
     byId("chat-send").disabled = working || sending === sendSequence || active || state?.anyActive || (selectedAction === "article" && !articleConsent) || !ready || !settings?.ollamaModel || !settings?.enabled || blocked;
-    byId("chat-stop").disabled = !active && !articleQueue().length;
+    byId("chat-stop").disabled = !active && !state?.anyActive && !generation && !articleQueue().length;
     byId("chat-article-queue").hidden = !articleQueue().length;
     byId("chat-article-queue").textContent = articleQueue().length ? `要約の待ち件数：${articleQueue().length}件（中止で待機分もすべてキャンセル）` : "";
     byId("chat-new").disabled = working || !settings;
@@ -196,7 +224,8 @@
     const accepted = sameConversation && next.active && next.active.id !== state.active?.id;
     const completed = sameConversation && state.active && !next.active && next.turns.at(-1)?.status === "complete";
     if (state && (state.actionId !== next.actionId || state.epoch !== next.epoch)) {
-      abort(); generatingId = undefined; tagUI.close(); closeArticleDialog();
+      if (state.actionId === next.actionId && generation?.actionId === next.actionId) abort();
+      tagUI.close(); closeArticleDialog();
       if (state.actionId !== next.actionId) {
         drafts.set(state.actionId, { epoch: state.epoch, text: byId("chat-input").value, articleRequest: pendingArticleRequest, articleDraftContext });
         const draft = drafts.get(next.actionId);
@@ -205,7 +234,7 @@
         articleDraftContext = draft?.epoch === next.epoch ? draft.articleDraftContext : undefined;
       } else { drafts.delete(next.actionId); byId("chat-input").value = ""; pendingArticleRequest = undefined; articleDraftContext = undefined; }
     }
-    if (generatingId && next.active?.id !== generatingId) { abort(); generatingId = undefined; }
+    if (generation?.actionId === next.actionId && (generation.epoch !== next.epoch || next.active?.id !== generation.id)) abort();
     state = next; selectedAction = state.actionId;
     for (const button of actionButtons) {
       const selected = button.getAttribute("data-chat-action") === selectedAction;
@@ -280,7 +309,7 @@
     button.tabIndex = action.id === selectedAction ? 0 : -1;
     button.onclick = async () => {
       if (button.disabled || actionStarting || !visible || !settings || !state || selectedAction === action.id) return;
-      actionStarting = true; busy = true; sendSequence++; abort(); controls();
+      actionStarting = true; busy = true; if (!generation) abort(); controls();
       let send = false;
       try {
         const next = await call("select", { actionId: action.id, owner });
@@ -301,7 +330,7 @@
     byId("chat-actions").append(button); actionButtons.push(button);
   }
   async function probe(manual, grant) {
-    if (busy || (state?.active && !pendingArticleRequest && !articleQueue().length)) return;
+    if (busy || generation || (state?.active && !pendingArticleRequest && !articleQueue().length)) return;
     busy = true; blocked = false; ready = false; abort(); controls();
     connectionHelp();
     const revision = probeRevision, endpoint = settings.ollamaUrl, epoch = state.epoch, actionId = selectedAction;
@@ -395,9 +424,9 @@
     event.preventDefault();
     byId("chat-form").requestSubmit();
   });
-  byId("chat-form").onsubmit = async event => {
-    event.preventDefault(); if (byId("chat-send").disabled) return;
-    if (selectedAction === "article" && !pendingArticleRequest) {
+  async function sendMessage(event, queuedArticle) {
+    event?.preventDefault(); if (!queuedArticle && byId("chat-send").disabled) return;
+    if (!queuedArticle && selectedAction === "article" && !pendingArticleRequest) {
       const current = currentArticleContext();
       if (articleDraftContext && (articleDraftContext.epoch !== current.epoch || articleDraftContext.segmentId !== current.segmentId)) {
         if (!confirm(`${articleTargetLabel()}\n入力中に対象の会話区間が変更されました。この文章を現在の対象へ送信しますか？`)) return;
@@ -407,35 +436,37 @@
     const sequence = ++sendSequence;
     connectionHelp();
     busy = true; controls();
-    const text = pendingArticleRequest?.displayText ?? byId("chat-input").value, endpoint = settings.ollamaUrl, model = settings.ollamaModel, actionId = selectedAction;
-    const articleRequest = pendingArticleRequest;
+    const articleRequest = queuedArticle ?? pendingArticleRequest;
+    const text = articleRequest?.displayText ?? byId("chat-input").value, endpoint = settings.ollamaUrl, model = settings.ollamaModel, actionId = queuedArticle ? "article" : selectedAction;
     sending = sequence;
     const controller = new AbortController(); requestAbort = controller;
     let id, epoch, lastSave = 0;
     const timer = setTimeout(() => controller.abort(), 300000);
     try {
-      const started = await call("start", patch({ text, model, owner, ...(articleRequest ? { articleId: articleRequest.articleId, articleAction: articleRequest.articleAction, requestToken: articleRequest.requestToken } : {}) }));
-      id = started.active.id; epoch = started.epoch; generatingId = id;
+      const started = await call("start", patch({ actionId, epoch: queuedArticle ? articleSnapshot.conversation.epoch : state.epoch, text, model, owner, ...(articleRequest ? { articleId: articleRequest.articleId, articleAction: articleRequest.articleAction, requestToken: articleRequest.requestToken } : {}) }));
+      id = started.active.id; epoch = started.epoch; generatingId = id; generation = { actionId, epoch, id };
       controller.signal.throwIfAborted();
-      if (sequence !== sendSequence || !visible || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || state.epoch !== epoch || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
+      if (sequence !== sendSequence || settings.ollamaUrl !== endpoint || settings.ollamaModel !== model || !settings.enabled) throw new Error("会話または接続設定が変更されました。");
       if (pendingArticleRequest === articleRequest) pendingArticleRequest = undefined;
       if (articleRequest?.requestToken) globalThis.history?.replaceState?.(null, "", api.runtime.getURL("home.html"));
-      if (!articleRequest?.requestToken || byId("chat-input").value === articleRequest.displayText) byId("chat-input").value = "";
+      if (selectedAction === actionId && (!articleRequest?.requestToken || byId("chat-input").value === articleRequest.displayText)) byId("chat-input").value = "";
       if (!byId("chat-input").value) articleDraftContext = undefined;
-      render(started); busy = false; controls();
-      if (visible && !byId("chat-input").disabled) byId("chat-input").focus({ preventScroll: true });
+      if (selectedAction === actionId) render(started); busy = false; controls();
+      if (visible && selectedAction === actionId && !byId("chat-input").disabled) byId("chat-input").focus({ preventScroll: true });
       status("応答を生成しています…");
       const response = await globalThis.OshaberiNoteOllama.chat(endpoint, model, started.messages, controller.signal, async answer => {
         controller.signal.throwIfAborted();
-        if (state.epoch !== epoch || state.active?.id !== id) throw new Error("生成は中止されました。");
-        state.turns.at(-1).assistant = answer;
-        const container = byId("chat-messages");
-        const rows = container.querySelectorAll("article"), paragraph = rows[rows.length - 1]?.querySelector("[data-chat-body]");
-        // 長い記事本文を受信チャンクごとに作り直さず、末尾のAI発言だけ更新する。
-        if (paragraph) paragraph.textContent = answer || "（応答なし）";
-        else render(state);
-        refreshMessageNavigation();
-        updateMessageNavigation();
+        if (selectedAction === actionId) {
+          if (state.epoch !== epoch || state.active?.id !== id) throw new Error("生成は中止されました。");
+          state.turns.at(-1).assistant = answer;
+          const container = byId("chat-messages");
+          const rows = container.querySelectorAll("article"), paragraph = rows[rows.length - 1]?.querySelector("[data-chat-body]");
+          // 長い記事本文を受信チャンクごとに作り直さず、末尾のAI発言だけ更新する。
+          if (paragraph) paragraph.textContent = answer || "（応答なし）";
+          else render(state);
+          refreshMessageNavigation();
+          updateMessageNavigation();
+        }
         if (Date.now() - lastSave > 250) {
           lastSave = Date.now();
           await call("progress", { actionId, epoch, endpoint, id, owner, model, text: answer });
@@ -443,37 +474,42 @@
       }, { truncate: actionId !== "article" });
       controller.signal.throwIfAborted();
       const completed = await call("complete", { actionId, epoch, endpoint, id, owner, model, text: response });
-      if (sequence === sendSequence) { render(completed); status("応答が完了しました。"); }
+      if (sequence === sendSequence && selectedAction === actionId) { render(completed); status("応答が完了しました。"); }
     } catch (error) {
       controller.abort();
-      if (error.code === "INVALID_INPUT" && articleRequest?.requestToken && pendingArticleRequest === articleRequest) { await discardPendingArticle(); await sync(); }
+      if (error.code === "INVALID_INPUT" && articleRequest?.requestToken) {
+        if (pendingArticleRequest === articleRequest) await discardPendingArticle();
+        else await platform.article("cancel", { requestToken: articleRequest.requestToken });
+        await sync();
+      }
       if (sequence === sendSequence) connectionHelp(error);
       if (sequence === sendSequence && error.status === 403) { if (!articleRequest?.requestToken) ready = false; connectionStatus(error.message); }
       if (id) {
-        try { const stopped = await call("stop", { actionId, id, owner }); if (sequence === sendSequence) render(stopped); }
+        try { const stopped = await call("stop", { actionId, id, owner }); if (sequence === sendSequence && selectedAction === actionId) render(stopped); }
         catch { blocked = true; }
       }
       if (error.code === "STALE_ARTICLE_CONTEXT") { await sync(); status(`${error.message} 入力は保持しています。自動再送は行いません。`); }
       else if (["CHAT_BUSY", "ARTICLE_QUEUE_WAIT"].includes(error.code)) { await sync(); status("先に登録された依頼または別の応答が完了するまで待機します。"); }
       else if (sequence === sendSequence) status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message}${error.status === 403 ? " 詳細は「LLMの設定」で確認してください。" : ""} 自動再送は行いません。`);
-    } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) generatingId = undefined; if (sending === sequence) sending = undefined; if (sequence === sendSequence) busy = false; controls(); Promise.resolve().then(maybeSendArticle); }
+    } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) { generatingId = undefined; generation = undefined; } if (sending === sequence) sending = undefined; if (sequence === sendSequence) busy = false; controls(); Promise.resolve().then(maybeSendArticle); }
   };
+  byId("chat-form").onsubmit = sendMessage;
   byId("chat-stop").onclick = async () => {
     abort();
-    try { render(await call("stop", { cancelArticleQueue: true })); articleSnapshot = await platform.article("snapshot"); maybeSendArticle(); controls(); status("生成を中止し、待機中の要約もすべてキャンセルしました。"); }
+    try { await call("stop", { actionId: undefined, cancelArticleQueue: true }); await sync(); articleSnapshot = await platform.article("snapshot"); maybeSendArticle(); controls(); status("生成を中止し、待機中の要約もすべてキャンセルしました。"); }
     catch (error) { status(error.message); }
   };
   byId("chat-new").onclick = async () => {
     if (busy) return;
     if (!confirm(selectedAction === "article" ? "「記事について」の保存済みの会話・取り込んだ記事本文・保存した記事要約・未送信入力を削除し、新しい会話を始めますか？" : "選択中のタブの会話と未送信入力を削除し、新しい会話を始めますか？")) return;
-    busy = true; sendSequence++; abort(); controls();
+    busy = true; if (!generation || generation.actionId === selectedAction) { sendSequence++; abort(); } controls();
     try { render(await call("reset")); byId("chat-input").value = ""; blocked = false; status("新しい会話を始めました。"); }
     catch (error) { status(error.message); }
     finally { busy = false; controls(); }
   };
   platform.subscribe(value => {
     const next = core.readSettings(value);
-    if (!settings || next.ollamaUrl !== settings.ollamaUrl || next.ollamaModel !== settings.ollamaModel || (selectedAction === "chat" && next.ollamaSystemPrompt !== settings.ollamaSystemPrompt) || !next.enabled) abort();
+    if (!settings || next.ollamaUrl !== settings.ollamaUrl || next.ollamaModel !== settings.ollamaModel || ((generation?.actionId ?? selectedAction) === "chat" && next.ollamaSystemPrompt !== settings.ollamaSystemPrompt) || !next.enabled) abort();
     if (settings && next.ollamaUrl !== settings.ollamaUrl) { ready = false; modelNames = []; drafts.clear(); pendingArticleRequest = undefined; byId("chat-input").value = ""; promptDirty = false; byId("system-prompt-status").textContent = ""; }
     settings = next; renderModels(); controls();
     byId("chat-endpoint").textContent = `接続先：${settings.ollamaUrl}`;
@@ -492,6 +528,10 @@
       if (revision !== articleRefreshRevision) return;
       const store = globalThis.OshaberiNoteChatState.readStore(raw, settings.ollamaUrl);
       localActive = Object.values(store.conversations).some(item => Boolean(item.active));
+      if (generation) {
+        const activeConversation = generation.actionId === "article" ? articleSnapshot?.conversation : store.conversations[generation.actionId];
+        if (activeConversation?.epoch !== generation.epoch || activeConversation?.active?.id !== generation.id) abort();
+      }
       let next;
       if (selectedAction === "article") {
         if (articleSnapshot?.endpoint === settings.ollamaUrl && articleSnapshot.conversation) next = globalThis.OshaberiNoteChatState.read(articleSnapshot.conversation, settings.ollamaUrl, "article");
@@ -522,8 +562,7 @@
     if (visible) setTimeout(refreshMessageNavigation, 0);
     if (leavingChat || leavingBoth) {
       tagUI.close(); closeArticleDialog();
-      abort();
-      if (generatingId) void call("stop", { owner, id: generatingId }).then(render).catch(error => status(error.message));
+      if (!generation) abort();
     }
   } });
   async function init() {

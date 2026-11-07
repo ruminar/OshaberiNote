@@ -134,9 +134,16 @@
         articles.request(session, { requestToken: token }, session.conversation.epoch, session.conversation, settings);
         store.conversations.article = session.conversation; store.selectedActionId = articles.id;
         await persistChat(store, { articleSession: session });
-        try { if (!reuse) await api.tabs.create({ url: homeUrl + "#article-request=" + token, windowId: tab.windowId, index: tab.index + 1, active: false }); }
+        let reused = false;
+        try {
+          if (reuse) {
+            try { reused = (await api.runtime.sendMessage({ type: "show-imported-article", targetTabId: neighbor.id, requestToken: token }))?.received === true; }
+            catch { /* 読込前・破棄済みのホームは新しい画面で受け付ける。 */ }
+          }
+          if (!reused) await api.tabs.create({ url: homeUrl + "#article-request=" + token, windowId: tab.windowId, index: tab.index + 1, active: false });
+        }
         catch (error) { delete session.requests[token]; await writeArticle(session); throw error; }
-        return { opened: !reuse, queued: true };
+        return { opened: !reused, queued: true };
       }
       const session = articles.read(await articleRaw(), settings.ollamaUrl);
       if (operation === "snapshot") return {

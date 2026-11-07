@@ -249,9 +249,11 @@ test('同じ記事の並行受付・待機中・実行中の追加は無視し�
 
 test('右隣の自分のホームだけを再利用し、再読込・タブ切替を行わず依頼だけ追加する',async()=>{
  const f=await ready(),value=article(),queries=[];f.context.chrome.tabs.get=async()=>({url:value.url,windowId:9,index:2});
+ const notices=[];f.context.chrome.runtime.sendMessage=async message=>{notices.push(structuredClone(message));return {received:true};};
  f.context.chrome.tabs.query=async query=>{queries.push(structuredClone(query));return [{id:8,url:'chrome-extension://test/home.html#article-request=old'}];};
  const result=await f.send({type:'import-article',patch:{article:value,pageUrl:value.url}},{id:'test',url:value.url,frameId:0,tab:{id:7}});
  assert.equal(result.opened,false);assert.equal(result.queued,true);assert.deepEqual(queries,[{windowId:9,index:3}]);assert.equal(f.opened.length,0);assert.equal(Object.keys(f.articleData.current.requests).length,1);
+ assert.equal(notices[0].targetTabId,8);assert.equal(notices[0].type,'show-imported-article');assert.equal(notices[0].requestToken,Object.keys(f.articleData.current.requests)[0]);
 });
 
 test('右隣が別ページ・遷移中・存在しない場合は同じウィンドウの右隣へ非アクティブで作る',async()=>{
@@ -637,4 +639,10 @@ test('同著者要約を件数で間引かず、送信文字数と8MiB保存容�
  await assert.rejects(startArticleAction(f,target,'impression'),/参考情報.*送信上限/);assert.deepEqual(f.articleData,before);assert.equal(f.articleData.current.summaries.length,7);
  const api=f.context.OshaberiNoteArticles,raw=structuredClone(f.articleData.current);raw.summaries[0].summary='a'.repeat(8*1024*1024);assert.throws(()=>api.bounded(raw),/容量上限/);
  const malformed=structuredClone(before.current);malformed.summaries[0].authorId='someone_else';assert.throws(()=>api.read(malformed,malformed.endpoint),/要約と記事の対応/);
+});
+
+
+test('隣のホームから受領応答がない場合は背景タブを作り、受付済み依頼を失わない',async()=>{
+ const f=await ready();f.context.chrome.tabs.query=async()=>[{id:8,url:'chrome-extension://test/home.html'}];f.context.chrome.runtime.sendMessage=async()=>{throw Error('No receiver');};
+ await importArticle(f);assert.equal(f.opened.length,1);assert.equal(f.opened[0].active,false);assert.equal(Object.keys(f.articleData.current.requests).length,1);
 });
