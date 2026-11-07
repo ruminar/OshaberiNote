@@ -13,7 +13,7 @@
   const noteUi = globalThis.OshaberiNoteUi?.create(document, window, {
     settingsUrl: () => platform.homeUrl() + "#settings",
     summarizeArticle: article => platform.importArticle(article),
-    copyArticle: article => navigator.clipboard.writeText(article.body),
+    copyArticle: (article, publishedAt) => navigator.clipboard.writeText(`タイトル：${article.title}\n著者名：${article.author}\n投稿日：${publishedAt || "不明"}\nURL：${article.url}\n\n本文：\n${article.body}`),
     async addCurrentMembership(groupId, userId, displayName) {
       const before = revision;
       const value = await platform.addCurrentMembership(groupId, userId, displayName);

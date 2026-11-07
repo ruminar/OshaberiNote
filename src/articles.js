@@ -204,10 +204,18 @@
       if (!["note", "external-article"].includes(service)) return null;
       const url = linkUrl(node.getAttribute("data-src"));
       if (!url) return null;
-      let title = "", author = "";
+      let title = "", author = "", description = "", creator = false;
+      try {
+        const target = new URL(url), match = /^\/([a-zA-Z0-9_]+)\/?$/.exec(target.pathname);
+        if (target.origin === "https://note.com" && match) creator = Boolean(globalThis.OshaberiNote.authorId(match[1]));
+      } catch { /* 公開プロフィールと確認できないURLは通常のカードとして扱う。 */ }
       if (service === "external-article") {
         const heading = node.querySelector('[class~="external-article-widget-title"]'), anchor = heading?.closest("a[href]");
         if (heading && anchor && visible(heading) && linkUrl(anchor.getAttribute("href")) === url) title = visibleText(heading);
+        if (creator) {
+          const text = node.querySelector('[class~="external-article-widget-description"]'), link = text?.closest("a[href]");
+          if (text && link && visible(text) && linkUrl(link.getAttribute("href")) === url) description = visibleText(text);
+        }
       } else {
         // 読み込み済みの同一オリジンnoteカードだけ参照する。srcの設定や追加通信は行わない。
         for (const frame of node.querySelectorAll("iframe")) {
@@ -227,14 +235,15 @@
           } catch { /* 未読込・別オリジンのフレームはURLだけを残す。 */ }
         }
       }
-      return { url, title: title.replace(/\s+/g, " ") || "（タイトル未取得）", author: author.replace(/\s+/g, " ") || "（著者未取得）" };
+      return { url, title: title.replace(/\s+/g, " ") || "（タイトル未取得）", author: author.replace(/\s+/g, " ") || "（著者未取得）", creator, description: description.replace(/\s+/g, " ") };
     }
     function walk(node) {
       if (node.nodeType === 3) { chunks.push(node.nodeValue); return; }
       if (node.nodeType !== 1 || excluded.has(node.tagName) || node.hasAttribute("data-oshaberi-note-owned") || !visible(node)) return;
       const card = linkCard(node);
       if (card) {
-        chunks.push(`\n[リンクカード]\nタイトル：${card.title}\n著者：${card.author}\nURL：${card.url}\n`);
+        if (card.creator) chunks.push(`\n[リンクカード]\n種類：クリエーターページ\nタイトル：${card.title}\n${card.description ? `紹介文：${card.description}\n` : ""}URL：${card.url}\n`);
+        else chunks.push(`\n[リンクカード]\nタイトル：${card.title}\n著者：${card.author}\nURL：${card.url}\n`);
         for (const caption of node.querySelectorAll("figcaption")) walk(caption);
         return;
       }

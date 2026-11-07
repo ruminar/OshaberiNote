@@ -949,6 +949,17 @@
       }
     }
     function clearArticleSummary() { articleSummary?.remove(); articleSummary = undefined; }
+    function articlePublicationDate() {
+      const region = doc.querySelector('article[id="note-article"]')?.querySelector('[id="note-body"]')?.closest('[data-note-key]');
+      const dates = new Set();
+      for (const time of region?.querySelectorAll("time") || []) {
+        if (time.closest('[id="note-body"]') || !visible(time)) continue;
+        const value = time.getAttribute("datetime") || "", day = value.slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(value) || !Number.isFinite(Date.parse(value))) continue;
+        if (new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) === day) dates.add(day);
+      }
+      return dates.size === 1 ? [...dates][0] : "";
+    }
     function syncArticleSummary(show, url) {
       if (!show || !core.isArticle(url) || typeof actions.summarizeArticle !== "function" || !globalThis.OshaberiNoteArticles) { clearArticleSummary(); return; }
       if (articleSummary?.isConnected) return;
@@ -957,7 +968,7 @@
       button.type = "button"; button.textContent = "この記事を要約";
       button.setAttribute("title", "閲覧できる記事本文を、設定したOllamaへ送って要約します");
       copy.type = "button"; copy.textContent = "記事全文を取得";
-      copy.setAttribute("title", "要約に使う記事本文をクリップボードへコピーします。Ollamaには送信しません");
+      copy.setAttribute("title", "記事のタイトル・著者名・投稿日・URL・本文をクリップボードへコピーします。Ollamaには送信しません");
       status.setAttribute("role", "status");
       button.onclick = async () => {
         if (articleSummaryBusy || button.disabled) return;
@@ -974,7 +985,7 @@
         articleSummaryBusy = true; button.disabled = true; copy.disabled = true; status.textContent = "記事を取得しています…";
         try {
           const article = globalThis.OshaberiNoteArticles.extract(doc, win, currentUrl);
-          try { await actions.copyArticle(article); }
+          try { await actions.copyArticle(article, articlePublicationDate()); }
           catch { throw new Error("クリップボードへのコピーに失敗しました。ページを選択してから、もう一度お試しください。"); }
           if (wrapper.isConnected) status.textContent = "記事全文をクリップボードにコピーしました。";
         } catch (error) { if (wrapper.isConnected) status.textContent = error.message || "記事を取得できませんでした。コピーは行いません。"; }

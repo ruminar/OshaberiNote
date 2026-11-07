@@ -2,15 +2,15 @@ const {test}=require('node:test'),assert=require('node:assert/strict');
 const backend=require('./helpers/chat.cjs'),{documentFromHtml}=require('./helpers/dom.cjs');
 const article=(articleId='n123',title='同じタイトル',body='これは表示できる記事の本文です。')=>({articleId,title,author:'著者',body,url:`https://note.com/test/n/${articleId}`});
 function articleCopyUi(options={}) {
- const f=backend(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="text"></p><p><a href="https://example.com/source" id="link"></a></p><p hidden id="hidden"></p></div></div></article>');
+ const f=backend(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time id="published" datetime="2026-10-07T23:30:00-05:00"></time></div><div id="note-body" data-name="body"><p id="text"></p><p><a href="https://example.com/source" id="link"></a></p><p hidden id="hidden"></p><time datetime="2000-01-01"></time></div></div></article>');
  doc.body=doc.root;for(const [id,text] of [['title','記事の題'],['author','著者'],['text','コピーする本文'],['link','参照先'],['hidden','非表示の秘密']])doc.getElementById(id).textContent=text;
  doc.getElementById('note-article').getBoundingClientRect=()=>({left:240,width:700});
  const win={matchMedia:()=>({matches:true}),getComputedStyle:node=>({display:node.hidden?'none':'block',visibility:'visible'})};
- const copies=[],imports=[];require('node:vm').runInContext(require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/note-ui.js'),'utf8'),f.context);
- const ui=f.context.OshaberiNoteUi.create(doc,win,{summarizeArticle:async value=>imports.push(value),copyArticle:async value=>{if(options.fail)throw Error('clipboard denied');copies.push(value.body);}});
+ const copies=[],dates=[],imports=[];require('node:vm').runInContext(require('node:fs').readFileSync(require('node:path').join(__dirname,'../src/note-ui.js'),'utf8'),f.context);
+ const ui=f.context.OshaberiNoteUi.create(doc,win,{summarizeArticle:async value=>imports.push(value),copyArticle:async (value,date)=>{if(options.fail)throw Error('clipboard denied');copies.push(value.body);dates.push(date);}});
  const update=url=>ui.update(f.context.OshaberiNote.defaultSettings(),url||article().url);update();
  const wrapper=doc.querySelectorAll('div').find(n=>n.className==='oshaberi-note-article-summary');
- return {f,doc,win,copies,imports,update,wrapper,buttons:wrapper.querySelectorAll('button'),status:wrapper.querySelector('span')};
+ return {f,doc,win,copies,dates,imports,update,wrapper,buttons:wrapper.querySelectorAll('button'),status:wrapper.querySelector('span')};
 }
 
 test('記事全文取得は要約と同じリンク付き本文だけをコピーし、送信や保存をしない',async()=>{
@@ -19,6 +19,14 @@ test('記事全文取得は要約と同じリンク付き本文だけをコピ�
  await f.buttons[1].onclick();assert.deepEqual(f.copies,[expected]);assert.match(expected,/https:\/\/example.com\/source/);assert.ok(!expected.includes('非表示の秘密'));assert.ok(!expected.includes('記事の題'));
  assert.deepEqual(f.imports,[]);assert.equal(f.f.articleData.current,undefined);assert.match(f.status.textContent,/コピーしました/);
  await f.buttons[0].onclick();assert.equal(f.imports[0].body,expected);
+});
+
+test('投稿日は本文外の表示中timeから取得し、元の暦日を維持、不明・曖昧・不正日は推測しない',async()=>{
+ const f=articleCopyUi(),time=f.doc.getElementById('published');
+ await f.buttons[1].onclick();assert.equal(f.dates.at(-1),'2026-10-07');
+ for(const value of ['', '2026-10-XX','2026-02-30T00:00:00+09:00']){time.setAttribute('datetime',value);await f.buttons[1].onclick();assert.equal(f.dates.at(-1),'');}
+ time.setAttribute('datetime','2026-10-07');time.hidden=true;await f.buttons[1].onclick();assert.equal(f.dates.at(-1),'');
+ time.hidden=false;const updated=f.doc.createElement('time');updated.setAttribute('datetime','2026-10-08');time.parentElement.append(updated);await f.buttons[1].onclick();assert.equal(f.dates.at(-1),'');
 });
 
 test('記事全文取得はURLとDOMの不一致を拒否し、コピー失敗後にも再試行できる',async()=>{
@@ -169,6 +177,20 @@ test('リンクカードを本文順にタイトル・著者・URLで保存し�
  const cardAuthor=child.getElementById('card-author');cardAuthor.setAttribute('href','https://note.com/wrong');assert.ok(!f.context.OshaberiNoteArticles.extract(doc,win,article().url).body.includes('参照先の作者'));cardAuthor.setAttribute('href','https://note.com/other');cardAuthor.hidden=true;assert.ok(!f.context.OshaberiNoteArticles.extract(doc,win,article().url).body.includes('参照先の作者'));
  assert.ok(!value.body.includes('説明文は送らない'));assert.ok(!value.body.includes('スキ数は送らない'));
  const state=await start(f,await importArticle(f,value));assert.ok(state.messages.at(-1).content.includes(value.body));
+});
+
+test('クリエーターページのカードは記事と区別し、表示中の紹介文とURLを保存・送信する',async()=>{
+ const f=await ready(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><figure embedded-service="external-article" data-src="https://note.com/legal_knot1730" id="card"><div><a id="card-link" href="https://note.com/legal_knot1730"><strong class="external-article-widget-title" id="card-title"></strong><em class="external-article-widget-description" id="description"></em></a></div></figure><p id="after"></p></div></div></article>');
+ for(const [id,text]of [['title','紹介記事'],['author','記事の著者'],['card-title','言ノ葉しをり Shioiri Kotonoha｜note'],['description','将来小説家になる、まだ誰も知らない中学生。'],['after','このユーザを見てほしい']])doc.getElementById(id).textContent=text;
+ const win={getComputedStyle:n=>({display:n.hidden?'none':'block',visibility:'visible'})},extract=()=>f.context.OshaberiNoteArticles.extract(doc,win,article().url);
+ const value=extract();assert.match(value.body,/\[リンクカード\]\n種類：クリエーターページ\nタイトル：言ノ葉しをり Shioiri Kotonoha｜note\n紹介文：将来小説家になる、まだ誰も知らない中学生。\nURL：https:\/\/note.com\/legal_knot1730/);
+ assert.ok(!value.body.includes('著者：'));assert.ok(value.body.indexOf('クリエーターページ')<value.body.indexOf('このユーザ'));
+ const state=await start(f,await importArticle(f,value));assert.ok(state.messages.at(-1).content.includes(value.body));
+ const description=doc.getElementById('description');description.hidden=true;assert.ok(!extract().body.includes('紹介文：'));description.hidden=false;
+ const link=doc.getElementById('card-link');link.setAttribute('href','https://note.com/other');const mismatched=extract().body;assert.ok(!mismatched.includes('言ノ葉しをり'));assert.ok(!mismatched.includes('将来小説家'));
+ for(const url of ['https://note.com/search','https://note.com/preview','https://example.com/legal_knot1730','https://note.com/legal_knot1730/n/n456']){
+  doc.getElementById('card').setAttribute('data-src',url);link.setAttribute('href',url);const body=extract().body;assert.ok(!body.includes('種類：クリエーターページ'));assert.ok(!body.includes('紹介文：'));assert.ok(body.includes('著者：（著者未取得）'));
+ }
 });
 
 test('カードの不可視情報・別URLのフレーム・危険なURLを取り込まない',()=>{

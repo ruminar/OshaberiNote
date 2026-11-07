@@ -196,6 +196,16 @@ function contentFixture(stored, options = {}) {
     addAnchor, mutate: () => { if (!disconnected) mutation?.(); },
     tick: () => tick?.(), changed: value => subscriber?.(value) };
 }
+test("記事全文のコピーにはタイトル・著者名・投稿日・URL・本文を含め、不明な日付は推測しない",async()=>{
+ let actions;const copies=[];
+ const f=contentFixture({}, {ui:{create:(doc,win,value)=>{actions=value;}}});
+ f.c.navigator={clipboard:{writeText:async text=>{copies.push(text);}}};
+ const article={title:'記事のタイトル',author:'著者の名前',body:'本文\n参照先（https://example.com/）',url:'https://note.com/test/n/n123'};
+ await actions.copyArticle(article,'2026-10-07');
+ assert.deepEqual(copies,['タイトル：記事のタイトル\n著者名：著者の名前\n投稿日：2026-10-07\nURL：https://note.com/test/n/n123\n\n本文：\n本文\n参照先（https://example.com/）']);
+ await actions.copyArticle(article,'');assert.match(copies[1],/投稿日：不明\nURL：/);
+});
+
 test("設定読込待ちでも親の先行準備とDOM監視を開始し、設定確認後の更新へ引き継ぐ",async()=>{
  let resolve;const calls=[];const f=contentFixture({}, {url:'https://note.com/following',loadGate:new Promise(done=>{resolve=done;}),ui:{create:()=>({prepareSidebar:url=>calls.push(['prepare',url]),update:()=>calls.push(['update'])})}});
  assert.deepEqual(calls,[['prepare','https://note.com/following']]);f.mutate();await flush();assert.equal(calls.filter(call=>call[0]==='prepare').length,2);
