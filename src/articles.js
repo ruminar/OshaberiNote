@@ -198,12 +198,27 @@
         return parsed.href;
       } catch { return null; }
     }
+    function attachment(node) {
+      if (node.tagName !== "FIGURE" || node.getAttribute("embedded-service") !== "attachment") return null;
+      const links = [...node.querySelectorAll('a[class~="file-widget__link"]')].filter(visible);
+      if (links.length !== 1) return null;
+      const link = links[0], url = linkUrl(link.getAttribute("href")), name = link.querySelector('[class~="file-widget__filename"]');
+      if (!url || !name || !visible(name)) return null;
+      const parsed = new URL(url);
+      if (parsed.origin !== "https://note.com" || !/^\/api\/v2\/attachments\/download\/[^/]+$/.test(parsed.pathname)) return null;
+      const filename = visibleText(name).replace(/\s+/g, " ");
+      if (!filename) return null;
+      const size = link.querySelector('[class~="file-widget__filesize"]');
+      return { url, filename, size: size && visible(size) ? visibleText(size).replace(/\s+/g, " ") : "" };
+    }
     function linkCard(node) {
       if (node.tagName !== "FIGURE") return null;
       const service = node.getAttribute("embedded-service");
-      if (!["note", "external-article"].includes(service)) return null;
+      if (!["note", "external-article", "githubRepository"].includes(service)) return null;
       const url = linkUrl(node.getAttribute("data-src"));
       if (!url) return null;
+      // GitHub埋め込みは外側の元URLだけ残し、Iframelyのiframe内部には触れない。
+      if (service === "githubRepository") return { url, urlOnly: true };
       let title = "", author = "", description = "", creator = false;
       try {
         const target = new URL(url), match = /^\/([a-zA-Z0-9_]+)\/?$/.exec(target.pathname);
@@ -235,15 +250,22 @@
           } catch { /* 未読込・別オリジンのフレームはURLだけを残す。 */ }
         }
       }
-      return { url, title: title.replace(/\s+/g, " ") || "（タイトル未取得）", author: author.replace(/\s+/g, " ") || "（著者未取得）", creator, description: description.replace(/\s+/g, " ") };
+      return { url, title: title.replace(/\s+/g, " ") || "（タイトル未取得）", author: author.replace(/\s+/g, " ") || (new URL(url).origin === "https://note.com" ? "（著者未取得）" : ""), creator, description: description.replace(/\s+/g, " ") };
     }
     function walk(node) {
       if (node.nodeType === 3) { chunks.push(node.nodeValue); return; }
       if (node.nodeType !== 1 || excluded.has(node.tagName) || node.hasAttribute("data-oshaberi-note-owned") || !visible(node)) return;
+      const file = attachment(node);
+      if (file) {
+        chunks.push(`\n[ファイルダウンロード]\nファイル名：${file.filename}${file.size ? ` （${file.size}）` : ""}\nリンク先URL：${file.url}\n`);
+        for (const caption of node.querySelectorAll("figcaption")) walk(caption);
+        return;
+      }
       const card = linkCard(node);
       if (card) {
-        if (card.creator) chunks.push(`\n[リンクカード]\n種類：クリエーターページ\nタイトル：${card.title}\n${card.description ? `紹介文：${card.description}\n` : ""}URL：${card.url}\n`);
-        else chunks.push(`\n[リンクカード]\nタイトル：${card.title}\n著者：${card.author}\nURL：${card.url}\n`);
+        if (card.urlOnly) chunks.push(`\n[リンクカード]\nURL：${card.url}\n`);
+        else if (card.creator) chunks.push(`\n[リンクカード]\n種類：クリエーターページ\nタイトル：${card.title}\n${card.description ? `紹介文：${card.description}\n` : ""}URL：${card.url}\n`);
+        else chunks.push(`\n[リンクカード]\nタイトル：${card.title}\n${card.author ? `著者：${card.author}\n` : ""}URL：${card.url}\n`);
         for (const caption of node.querySelectorAll("figcaption")) walk(caption);
         return;
       }

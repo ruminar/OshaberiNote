@@ -173,7 +173,8 @@ test('リンクカードを本文順にタイトル・著者・URLで保存し�
  assert.ok(value.body.indexOf('note作品の題名')<value.body.indexOf('後の本文'));
  for(const url of ['https://example.com/works','https://note.com/other/n/n456','https://note.com/other/n/n789'])assert.equal(value.body.split(url).length-1,1);
  assert.match(value.body,/タイトル：（タイトル未取得）/);
- assert.ok(value.body.includes('タイトル：note作品の題名\n著者：参照先の作者\nURL：https://note.com/other/n/n456'));assert.equal(value.body.split('著者：（著者未取得）').length-1,2);
+ assert.ok(value.body.includes('タイトル：外部作品の題名\nURL：https://example.com/works'));
+ assert.ok(value.body.includes('タイトル：note作品の題名\n著者：参照先の作者\nURL：https://note.com/other/n/n456'));assert.equal(value.body.split('著者：（著者未取得）').length-1,1);
  const cardAuthor=child.getElementById('card-author');cardAuthor.setAttribute('href','https://note.com/wrong');assert.ok(!f.context.OshaberiNoteArticles.extract(doc,win,article().url).body.includes('参照先の作者'));cardAuthor.setAttribute('href','https://note.com/other');cardAuthor.hidden=true;assert.ok(!f.context.OshaberiNoteArticles.extract(doc,win,article().url).body.includes('参照先の作者'));
  assert.ok(!value.body.includes('説明文は送らない'));assert.ok(!value.body.includes('スキ数は送らない'));
  const state=await start(f,await importArticle(f,value));assert.ok(state.messages.at(-1).content.includes(value.body));
@@ -188,9 +189,21 @@ test('クリエーターページのカードは記事と区別し、表示中�
  const state=await start(f,await importArticle(f,value));assert.ok(state.messages.at(-1).content.includes(value.body));
  const description=doc.getElementById('description');description.hidden=true;assert.ok(!extract().body.includes('紹介文：'));description.hidden=false;
  const link=doc.getElementById('card-link');link.setAttribute('href','https://note.com/other');const mismatched=extract().body;assert.ok(!mismatched.includes('言ノ葉しをり'));assert.ok(!mismatched.includes('将来小説家'));
- for(const url of ['https://note.com/search','https://note.com/preview','https://example.com/legal_knot1730','https://note.com/legal_knot1730/n/n456']){
-  doc.getElementById('card').setAttribute('data-src',url);link.setAttribute('href',url);const body=extract().body;assert.ok(!body.includes('種類：クリエーターページ'));assert.ok(!body.includes('紹介文：'));assert.ok(body.includes('著者：（著者未取得）'));
+ for(const url of ['https://note.com/search','https://note.com/preview','https://example.com/legal_knot1730','https://note.com.evil.test/legal_knot1730','https://note.com/legal_knot1730/n/n456']){
+  doc.getElementById('card').setAttribute('data-src',url);link.setAttribute('href',url);const body=extract().body;assert.ok(!body.includes('種類：クリエーターページ'));assert.ok(!body.includes('紹介文：'));assert.equal(body.includes('著者：（著者未取得）'),new URL(url).origin==='https://note.com');
  }
+});
+
+test('GitHub埋め込みは外側の元URLを一度だけ保存・送信し、iframe内部を読まない',async()=>{
+ const f=await ready(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="before"></p><figure embedded-service="githubRepository" data-src="https://github.com/ruminar/OpenGepa" id="card"><div><a href="https://github.com/ruminar/OpenGepa" data-iframely-url="//iframely.net/HYDXw0b3"></a><iframe id="frame" src="https://iframely.net/HYDXw0b3?v=1"></iframe></div><figcaption id="caption"></figcaption></figure><p id="after"></p></div></div></article>');
+ for(const [id,text]of [['title','埋め込みの記事'],['author','著者'],['before','前の本文'],['caption','キャプション'],['after','後の本文']])doc.getElementById(id).textContent=text;
+ Object.defineProperty(doc.getElementById('frame'),'contentDocument',{get(){assert.fail('iframe内部へアクセスしてはいけない');}});
+ const win={getComputedStyle:n=>({display:n.hidden?'none':'block',visibility:'visible'})},extract=()=>f.context.OshaberiNoteArticles.extract(doc,win,article().url);
+ const value=extract();assert.ok(value.body.includes('[リンクカード]\nURL：https://github.com/ruminar/OpenGepa'));assert.equal(value.body.split('https://github.com/ruminar/OpenGepa').length-1,1);assert.ok(!value.body.includes('iframely.net'));assert.ok(!value.body.includes('未取得'));
+ assert.ok(value.body.indexOf('前の本文')<value.body.indexOf('https://github.com'));assert.ok(value.body.indexOf('https://github.com')<value.body.indexOf('キャプション'));assert.ok(value.body.indexOf('キャプション')<value.body.indexOf('後の本文'));
+ const state=await start(f,await importArticle(f,value));assert.ok(state.messages.at(-1).content.includes(value.body));
+ const card=doc.getElementById('card');card.hidden=true;assert.ok(!extract().body.includes('https://github.com'));card.hidden=false;
+ for(const url of ['javascript:alert(1)','https://user:password@github.com/ruminar/OpenGepa']){card.setAttribute('data-src',url);assert.ok(!extract().body.includes('[リンクカード]'));}
 });
 
 test('カードの不可視情報・別URLのフレーム・危険なURLを取り込まない',()=>{
@@ -337,6 +350,18 @@ test('記事の本人情報は送信時のユーザーIDで判断し、全操作
  assert.equal(f.articleData.current.articles[0].author,'るみなー先生');assert.ok(!JSON.stringify(f.articleData.current).includes(relation));
 });
 
+
+test('添付ファイルはファイル名・サイズ・URLへ整形し、操作文言を除いて保存・送信する',async()=>{
+ const f=await ready(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="before"></p><figure embedded-service="attachment" id="attachment"><div><a class="file-widget__link" href="https://note.com/api/v2/attachments/download/fe2a0438f7f580abf17fd054ff1c036d"><div><strong class="file-widget__filename" id="filename"></strong><div class="file-widget__filesize" id="filesize"></div><span id="disclaimer"></span></div><div id="download"></div></a></div><figcaption id="caption"></figcaption></figure><p id="after"></p></div></div></article>');
+ for(const [id,text]of [['title','添付の記事'],['author','著者'],['before','前の本文'],['filename','iconSet_default.zip'],['filesize','783 KB'],['disclaimer','ファイルダウンロードについて'],['download','ダウンロード'],['caption','添付の説明'],['after','後の本文']])doc.getElementById(id).textContent=text;
+ const win={getComputedStyle:n=>({display:n.hidden?'none':'block',visibility:'visible'})},extract=()=>f.context.OshaberiNoteArticles.extract(doc,win,article().url);
+ const value=extract(),url='https://note.com/api/v2/attachments/download/fe2a0438f7f580abf17fd054ff1c036d';
+ assert.ok(value.body.includes(`[ファイルダウンロード]\nファイル名：iconSet_default.zip （783 KB）\nリンク先URL：${url}`));assert.equal(value.body.split(url).length-1,1);assert.ok(!value.body.includes('ファイルダウンロードについて'));
+ assert.ok(value.body.indexOf('前の本文')<value.body.indexOf('ファイル名：'));assert.ok(value.body.indexOf(url)<value.body.indexOf('添付の説明'));assert.ok(value.body.indexOf('添付の説明')<value.body.indexOf('後の本文'));
+ const state=await start(f,await importArticle(f,value));assert.ok(state.messages.at(-1).content.includes(value.body));
+ doc.getElementById('filesize').hidden=true;assert.ok(extract().body.includes(`ファイル名：iconSet_default.zip\nリンク先URL：${url}`));assert.ok(!extract().body.includes('783 KB'));
+ doc.getElementById('attachment').hidden=true;assert.ok(!extract().body.includes('iconSet_default.zip'));
+});
 
 test('本文中の文字列リンクと添付ファイルのURLを文字の位置に残し、非表示・画像だけ・危険なリンクを除外する',async()=>{
  const f=await ready(),doc=documentFromHtml('<article id="note-article"><div data-note-key="n123"><h1 id="title"></h1><div><a href="https://note.com/test" id="author"></a><time></time></div><div id="note-body" data-name="body"><p id="intro"></p><p><a href="https://note.com/other/n/n456"><strong id="link-text"></strong></a></p><figure embedded-service="attachment"><a href="https://note.com/api/v2/attachments/download/key"><strong id="file"></strong></a></figure><a id="url-text" href="https://example.org/plain"></a><a hidden href="https://hidden.example/"><span id="hidden"></span></a><a href="javascript:alert(1)" id="unsafe"></a><a href="https://user:secret@example.com/" id="credentials"></a><a href="https://image.example/full"><img></a><p id="end"></p></div></div></article>');
