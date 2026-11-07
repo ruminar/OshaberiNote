@@ -1045,8 +1045,8 @@
         articleSummaryBusy = true; button.disabled = true; copy.disabled = true; status.textContent = "記事を取り込んでいます…";
         try {
           const article = globalThis.OshaberiNoteArticles.extract(doc, win, currentUrl);
-          await actions.summarizeArticle(article);
-          if (wrapper.isConnected) status.textContent = "記事の会話を開きました。";
+          const result = await actions.summarizeArticle(article);
+          if (wrapper.isConnected) status.textContent = result?.duplicate ? "この記事の要約は実行中または待機中です。追加しませんでした。" : "要約依頼を追加しました。右隣のおしゃべり画面で確認できます。";
         } catch (error) { if (wrapper.isConnected) status.textContent = error.message || "記事を取得できませんでした。送信は行いません。"; }
         finally { articleSummaryBusy = false; button.disabled = false; copy.disabled = false; }
       };

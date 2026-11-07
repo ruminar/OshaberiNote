@@ -106,7 +106,7 @@ test('記事全文取得はURLとDOMの不一致を拒否し、コピー失敗�
 });
 async function ready(){const f=backend();f.connect('owner');await f.save({ollamaModel:'local-model'});const state=await f.chat('get');await f.chat('approve',{epoch:state.epoch,endpoint:state.endpoint});return f;}
 async function importArticle(f,value=article()){
- f.context.chrome.tabs.get=async()=>({url:value.url});
+ f.context.chrome.tabs.get=async()=>({url:value.url,windowId:3,index:4});
  await f.send({type:'import-article',patch:{article:value,pageUrl:value.url}},{id:'test',url:value.url,frameId:0,tab:{id:7}});
  return f.opened.at(-1).url.split('#article-request=')[1];
 }
@@ -212,9 +212,65 @@ test('別記事・記事以外・外部URLへの遷移中や古い取得結果�
 });
 
 test('同じ記事IDの再取り込みはMapを更新し、別記事を削除しない',async()=>{
- const f=await ready();await importArticle(f,article('n123','同名','以前の本文'));await importArticle(f,article('n456','同名','別の記事'));
+ const f=await ready();const old=await importArticle(f,article('n123','同名','以前の本文'));await f.send({type:'article-operation',patch:{operation:'cancel',requestToken:old}});await importArticle(f,article('n456','同名','別の記事'));
  await importArticle(f,article('n123','変更した題','最新の本文'));
  const values=f.articleData.current.articles;assert.equal(values.length,2);assert.equal(values.find(a=>a.articleId==='n123').body,'最新の本文');assert.equal(values.find(a=>a.articleId==='n456').body,'別の記事');
+});
+
+test('要約の待ち行列はFIFOで共有し、同じ先頭を複数画面から開始しても一度だけ確定する',async()=>{
+ const f=await ready();f.connect('other');const a=article('n111','A','本文A'),b=article('n222','B','本文B'),c=article('n333','C','本文C');
+ const tokens=[];for(const value of [a,b,c])tokens.push(await importArticle(f,value));
+ const snapshot=await f.send({type:'article-operation',patch:{operation:'snapshot'}});assert.deepEqual(snapshot.queue.map(item=>item.articleId),['n111','n222','n333']);assert.ok(!JSON.stringify(snapshot.queue).includes('本文A'));
+ await assert.rejects(start(f,tokens[2]),{code:'ARTICLE_QUEUE_WAIT'});assert.equal(Object.keys(f.articleData.current.requests).length,3);
+ const results=await Promise.allSettled([start(f,tokens[0]),start(f,tokens[0],'other')]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);const first=results.find(r=>r.status==='fulfilled').value;
+ assert.equal(Object.keys(f.articleData.current.requests).length,2);await f.chat('complete',{actionId:'article',epoch:first.epoch,endpoint:first.endpoint,owner:first.active.owner,model:'local-model',id:first.active.id,text:'A完了'});
+ const second=await start(f,tokens[1]);await f.chat('stop',{actionId:'article',owner:second.active.owner,id:second.active.id});assert.deepEqual(Object.keys(f.articleData.current.requests),[tokens[2]]);
+ await complete(f,await start(f,tokens[2]),'C完了');assert.equal(Object.keys(f.articleData.current.requests).length,0);assert.deepEqual(f.articleData.current.conversation.turns.map(turn=>turn.status),['complete','interrupted','complete']);
+});
+
+test('明示的な中止は実行中と全待機要約を同時に取り消し、保存失敗では取り消し前を維持する',async()=>{
+ const f=await ready(),tokens=[];for(const id of ['n111','n222','n333'])tokens.push(await importArticle(f,article(id)));
+ await start(f,tokens[0]);const before=structuredClone(f.articleData.current);f.fail=true;
+ await assert.rejects(f.chat('stop',{actionId:'article',cancelArticleQueue:true}),/storage failed/);assert.deepEqual(f.articleData.current,before);f.fail=false;
+ await f.chat('stop',{actionId:'article',cancelArticleQueue:true});assert.equal(f.articleData.current.conversation.active,null);assert.deepEqual(f.articleData.current.requests,{});assert.equal(f.articleData.current.articles.length,3);
+ await assert.rejects(start(f,tokens[1]),/処理済み/);
+});
+
+test('同じ記事の並行受付・待機中・実行中の追加は無視し、本文を変更せず完了後は再要約できる',async()=>{
+ const f=await ready(),value=article(),sender={id:'test',url:value.url,frameId:0,tab:{id:7}};
+ f.context.chrome.tabs.get=async()=>({url:value.url,windowId:3,index:4});
+ const submit=article=>f.send({type:'import-article',patch:{article,pageUrl:value.url}},sender);
+ const results=await Promise.all([submit(value),submit(value)]);assert.equal(results.filter(r=>r.duplicate).length,1);assert.equal(f.opened.length,1);
+ const token=Object.keys(f.articleData.current.requests)[0],before=structuredClone(f.articleData.current);
+ assert.equal((await submit({...value,body:'変更後の本文'})).duplicate,true);assert.deepEqual(f.articleData.current,before);
+ const running=await start(f,token);assert.equal((await submit(value)).duplicate,true);assert.equal(f.opened.length,1);assert.equal(Object.keys(f.articleData.current.requests).length,0);
+ await complete(f,running);assert.equal((await submit(value)).queued,true);assert.equal(f.opened.length,2);
+});
+
+test('右隣の自分のホームだけを再利用し、再読込・タブ切替を行わず依頼だけ追加する',async()=>{
+ const f=await ready(),value=article(),queries=[];f.context.chrome.tabs.get=async()=>({url:value.url,windowId:9,index:2});
+ f.context.chrome.tabs.query=async query=>{queries.push(structuredClone(query));return [{id:8,url:'chrome-extension://test/home.html#article-request=old'}];};
+ const result=await f.send({type:'import-article',patch:{article:value,pageUrl:value.url}},{id:'test',url:value.url,frameId:0,tab:{id:7}});
+ assert.equal(result.opened,false);assert.equal(result.queued,true);assert.deepEqual(queries,[{windowId:9,index:3}]);assert.equal(f.opened.length,0);assert.equal(Object.keys(f.articleData.current.requests).length,1);
+});
+
+test('右隣が別ページ・遷移中・存在しない場合は同じウィンドウの右隣へ非アクティブで作る',async()=>{
+ for(const neighbor of [undefined,{url:'https://note.com/'},{url:'chrome-extension://another/home.html'},{url:'chrome-extension://test/home.html.fake'},{url:'chrome-extension://test/home.html',pendingUrl:'https://example.com/'}]){
+  const f=await ready();f.context.chrome.tabs.query=async()=>neighbor?[neighbor]:[];
+  await importArticle(f);assert.equal(f.opened.length,1);assert.equal(f.opened[0].windowId,3);assert.equal(f.opened[0].index,5);assert.equal(f.opened[0].active,false);
+ }
+});
+
+test('右隣の照会失敗では受付せず、タブ作成失敗では待機依頼を残さない',async()=>{
+ const f=await ready();f.context.chrome.tabs.query=async()=>{throw Error('query failed');};await assert.rejects(importArticle(f),/query failed/);assert.equal(f.articleData.current,undefined);
+ f.context.chrome.tabs.query=async()=>[];f.context.chrome.tabs.create=async()=>{throw Error('create failed');};await assert.rejects(importArticle(f),/create failed/);assert.deepEqual(f.articleData.current.requests,{});
+});
+
+test('接続先・モデル変更と拡張OFFで待機を取り消し、ブラウザ再起動でも自動再送しない',async()=>{
+ for(const change of [{ollamaModel:'another-model'},{enabled:false},{ollamaUrl:'http://localhost:11434'}]){
+  const f=await ready();await importArticle(f);await f.save(change);assert.deepEqual(f.articleData.current.requests,{});
+ }
+ const f=await ready();await importArticle(f);delete f.sessionData[f.context.OshaberiNoteArticles.requestSessionKey];await f.chat('get',{actionId:'article'});assert.deepEqual(f.articleData.current.requests,{});assert.equal(f.articleData.current.articles.length,1);
 });
 
 test('表示中の本文領域だけを抽出し、不可視・スクリプト・有料境界・コメントを除外する',async()=>{
@@ -540,17 +596,17 @@ test('著者IDごとの要約Mapを感想とその続きだけに付与し、対
  assert.ok(!JSON.stringify(state.messages).includes('SUM-A2'));assert.ok(!JSON.stringify(state.messages).includes('BODY-TARGET'));
 });
 
-test('要約は正常完了時だけ上書きし、本文変更と生成中の再取り込みでは古い要約を登録しない',async()=>{
+test('要約は正常完了時だけ上書きし、生成中の再取り込みは無視して完了後の本文変更を反映する',async()=>{
  const f=await ready(),a=article('n123','作品','初期本文');await summarizeArticle(f,a,'最初の要約');
  const original=f.articleData.current.summaries[0];
  assert.equal(original.sourceHash,require('node:crypto').createHash('sha256').update(JSON.stringify(a)).digest('hex'));
- await importArticle(f,a);assert.equal(f.articleData.current.summaries[0].summary,'最初の要約');
+ const unused=await importArticle(f,a);assert.equal(f.articleData.current.summaries[0].summary,'最初の要約');await f.send({type:'article-operation',patch:{operation:'cancel',requestToken:unused}});
  let state=await startArticleAction(f,a,'summary');await f.chat('progress',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'owner',model:'local-model',id:state.active.id,text:'途中の要約'});
  assert.equal(f.articleData.current.summaries[0].summary,'最初の要約');await f.chat('stop',{actionId:'article',owner:'owner',id:state.active.id});
  state=await startArticleAction(f,a,'summary');await complete(f,state,'');assert.equal(f.articleData.current.summaries[0].summary,'最初の要約');
  await complete(f,await startArticleAction(f,a,'summary'),'改訂した要約');assert.equal(f.articleData.current.summaries.length,1);assert.equal(f.articleData.current.summaries[0].summary,'改訂した要約');
  const changed={...a,body:'変更後本文'};const token=await importArticle(f,changed);assert.equal(f.articleData.current.summaries.length,0);
- state=await start(f,token);const newest={...changed,body:'さらに変更した本文'};const next=await importArticle(f,newest);await complete(f,state,'変更前本文の要約');assert.equal(f.articleData.current.summaries.length,0);
+ state=await start(f,token);const newest={...changed,body:'さらに変更した本文'};await importArticle(f,newest);assert.equal(f.articleData.current.articles[0].body,changed.body);await complete(f,state,'変更前本文の要約');assert.equal(f.articleData.current.summaries[0].summary,'変更前本文の要約');const next=await importArticle(f,newest);assert.equal(f.articleData.current.summaries.length,0);
  await complete(f,await start(f,next),'最新本文の要約');assert.equal(f.articleData.current.summaries[0].summary,'最新本文の要約');
  for(const action of ['impression','revision','citations'])await complete(f,await startArticleAction(f,newest,action),'要約以外の回答');
  assert.equal(f.articleData.current.summaries[0].summary,'最新本文の要約');assert.equal(f.articleData.current.articles[0].body,newest.body);

@@ -150,7 +150,7 @@
           interrupt(item);
         }
         if (operation === "revoke") store.approvedUrl = "";
-        state = select(store, id); await save(store); return view(store, state);
+        state = select(store, id); await save(store, undefined, { cancelArticleQueue: patch.cancelArticleQueue === true || operation === "revoke" }); return view(store, state);
       }
       if (patch.epoch !== state.epoch || patch.endpoint !== settings.ollamaUrl) throw Object.assign(new Error("接続先または会話が変更されました。状態を再確認してください。"), { code: "STALE_CHAT" });
       if (operation === "approve") {

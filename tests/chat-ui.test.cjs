@@ -52,6 +52,48 @@ async function articleTransfer() {
   await f.send({type:'import-article',patch:{article,pageUrl:article.url}},{id:'test',url:article.url,frameId:0,tab:{id:7}});
   return {f,article,key:f.context.OshaberiNoteChatState.key,sessionKey:f.context.OshaberiNoteArticles.key,hash:f.opened[0].url.slice(f.opened[0].url.indexOf('#'))};
 }
+async function queuedArticles() {
+ const seed=await articleTransfer(),articles=[seed.article];
+ for(const [articleId,body]of [['n222','待機Bの本文'],['n333','待機Cの本文']]){
+  const value={...seed.article,articleId,title:articleId,body,url:`https://note.com/test/n/${articleId}`};articles.push(value);
+  seed.f.context.chrome.tabs.get=async()=>({url:value.url});await seed.f.send({type:'import-article',patch:{article:value,pageUrl:value.url}},{id:'test',url:value.url,frameId:0,tab:{id:7}});
+ }
+ return {...seed,articles,hash:seed.f.opened.at(-1).url.split('home.html')[1]};
+}
+
+test('要約キューは最後の依頼画面からでもFIFOで実行し、失敗だけを飛ばして下書きを保持する',async t=>{
+ const seed=await queuedArticles();let release,count=0;
+ const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,confirm:false,stream:init=>{
+  count++;
+  if(count===1)return new Response(new ReadableStream({start(controller){release=()=>{controller.enqueue(new TextEncoder().encode(JSON.stringify({message:{role:'assistant',content:'Aの要約'},done:true})+'\n'));controller.close();};init.signal.addEventListener('abort',()=>{try{controller.error(new DOMException('aborted','AbortError'));}catch{}});}}));
+  if(count===2)return new Response('',{status:500});
+  return new Response(JSON.stringify({message:{role:'assistant',content:'Cの要約'},done:true})+'\n');
+ }}),n=f.nodes;
+ assert.equal(count,1);assert.match(n.get('chat-article-queue').textContent,/2件/);n.get('chat-input').value='書きかけの質問';n.get('chat-input').fire('input');release();
+ for(let i=0;i<12;i++){await flush();if(count===3&&!f.articleData.current.conversation.active)break;}
+ const posts=f.requests.filter(r=>r.url.endsWith('/api/chat')).map(r=>JSON.parse(r.init.body));assert.equal(posts.length,3);
+ for(let i=0;i<3;i++)assert.ok(posts[i].messages.at(-1).content.includes(seed.articles[i].body));
+ assert.deepEqual(f.articleData.current.conversation.turns.map(turn=>turn.status),['complete','interrupted','complete']);assert.equal(f.articleData.current.summaries.length,2);assert.deepEqual(f.articleData.current.requests,{});assert.equal(n.get('chat-article-queue').hidden,true);assert.equal(n.get('chat-input').value,'書きかけの質問');
+ n.get('chat-form').fire('submit');await flush();assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,3);assert.match(f.confirmations.at(-1),/対象の会話区間/);
+});
+
+test('中止ボタンは実行中の要約と残りのキューをすべて取り消し、次の送信を発生させない',async t=>{
+ const seed=await queuedArticles(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,stream:init=>new Response(new ReadableStream({start(controller){init.signal.addEventListener('abort',()=>controller.error(new DOMException('aborted','AbortError')));}}))}),n=f.nodes;
+ assert.equal(n.get('chat-stop').disabled,false);assert.match(n.get('chat-article-queue').textContent,/2件/);await n.get('chat-stop').onclick();await flush();await flush();
+ assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,1);assert.deepEqual(f.articleData.current.requests,{});assert.equal(f.articleData.current.conversation.active,null);assert.equal(f.articleData.current.conversation.turns[0].status,'interrupted');assert.equal(f.articleData.current.articles.length,3);assert.equal(n.get('chat-stop').disabled,true);assert.equal(n.get('chat-article-queue').hidden,true);
+});
+
+test('未接続で待機中の要約も中止だけで一括キャンセルできる',async t=>{
+ const seed=await queuedArticles();seed.f.data[seed.key].approvedUrl='';
+ const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash});assert.equal(f.requests.length,0);assert.equal(f.nodes.get('chat-stop').disabled,false);
+ await f.nodes.get('chat-stop').onclick();await flush();assert.deepEqual(f.articleData.current.requests,{});assert.equal(f.requests.length,0);assert.equal(f.nodes.get('chat-input').value,'');
+});
+
+test('元の依頼画面がなくても接続済みの記事画面が共有キューを順に処理する',async t=>{
+ const seed=await queuedArticles(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current});
+ for(let i=0;i<12;i++){await flush();if(f.requests.filter(r=>r.url.endsWith('/api/chat')).length===3&&!f.articleData.current.conversation.active)break;}
+ assert.equal(f.requests.filter(r=>r.url.endsWith('/api/chat')).length,3);assert.deepEqual(f.articleData.current.conversation.turns.map(turn=>turn.articleId),['n123','n222','n333']);assert.deepEqual(f.articleData.current.requests,{});
+});
 
 test('記事ページからの依頼を既存会話へ自動送信し、本文は隠して信頼できる記事参照だけをボタンにする',async t=>{
   const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,reply:'記事の要約です。 [&偽の記事]'}),n=f.nodes;
@@ -137,10 +179,11 @@ test('送信直前の共有対象変更は背景で拒否し、下書きを保�
 test('一覧を置かず、過去の同名記事のタイトルから再操作して自由入力を続けられる',async t=>{
  const seed=await articleTransfer(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash}),n=f.nodes;
  for(const id of ['chat-article-help','chat-article-target','chat-article-library'])assert.equal(n.has(id),false);
+ f.c.OshaberiNoteChatUI.setVisible(false);
  f.connect('other-article');const b={...seed.article,articleId:'n456',body:'別記事Bの本文',url:'https://note.com/test/n/n456'};f.c.chrome.tabs.get=async()=>({url:b.url});
  await f.send({type:'import-article',patch:{article:b,pageUrl:b.url}},{id:'test',url:b.url,frameId:0,tab:{id:9}});
  let state=await f.chat('get',{actionId:'article'});state=await f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other-article',model:'local',text:'B',requestToken:f.opened.at(-1).url.split('=')[1]});
- await f.chat('complete',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:state.active.owner,model:'local',id:state.active.id,text:'別記事Bの回答'});await flush();
+ await f.chat('complete',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:state.active.owner,model:'local',id:state.active.id,text:'別記事Bの回答'});await flush();f.c.OshaberiNoteChatUI.setVisible(true);
  const refs=n.get('chat-messages').querySelectorAll('button[aria-haspopup="dialog"]');assert.equal(refs.length,2);assert.equal(refs[0].textContent,refs[1].textContent);
  await refs[0].onclick();await flush();n.get('chat-article-impression').onclick();await flush();
  const posts=()=>f.requests.filter(r=>r.url.endsWith('/api/chat')).map(r=>JSON.parse(r.init.body));
@@ -163,7 +206,8 @@ test('記事タブへ手入力した偽参照はボタン化せず、修正点�
 test('別画面の生成中に届いた記事依頼は待機し、完了後に一度だけ自動送信する',async t=>{
   const seed=await articleTransfer(),token=seed.hash.split('=')[1],state=await seed.f.chat('get',{actionId:'article'});
   const started=await seed.f.chat('start',{actionId:'article',epoch:state.epoch,endpoint:state.endpoint,model:'local',owner:'other',text:'依頼',requestToken:token});
-  await seed.f.send({type:'import-article',patch:{article:seed.article,pageUrl:seed.article.url}},{id:'test',url:seed.article.url,frameId:0,tab:{id:7}});
+  const next={...seed.article,articleId:'nNext',url:'https://note.com/test/n/nNext'};seed.f.context.chrome.tabs.get=async()=>({url:next.url,windowId:1,index:0});
+  await seed.f.send({type:'import-article',patch:{article:next,pageUrl:next.url}},{id:'test',url:next.url,frameId:0,tab:{id:7}});
   const hash=seed.f.opened[1].url.slice(seed.f.opened[1].url.indexOf('#'));
   const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash,otherOwner:'other'});
   assert.equal(f.requests.filter(item=>item.url.endsWith('/api/chat')).length,0);

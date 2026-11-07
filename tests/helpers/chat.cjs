@@ -25,7 +25,7 @@ module.exports = function backend(options = {}) {
         Object.assign(data, copy(value));
         if (Object.keys(changes).length) queueMicrotask(() => { for (const fn of handlers.storage ?? []) fn(copy(changes), 'local'); });
       } }, onChanged: event('storage') },
-      action: { onClicked: event('action') }, tabs: { create: async value => { opened.push(copy(value)); return {id:opened.length}; }, get: async () => ({url:'https://note.com/test/n/n123'}) }, declarativeNetRequest: { updateDynamicRules: async () => {} }
+      action: { onClicked: event('action') }, tabs: { query: async () => [], create: async value => { opened.push(copy(value)); return {id:opened.length}; }, get: async () => ({url:'https://note.com/test/n/n123',windowId:1,index:0}) }, declarativeNetRequest: { updateDynamicRules: async () => {} }
     }
   });
   context.OshaberiNoteArticleStore = {

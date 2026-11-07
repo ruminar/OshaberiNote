@@ -93,7 +93,8 @@
     result.activeArticleId ??= result.conversation?.turns.findLast(turn => turn.articleId)?.articleId ?? null;
     if (result.activeArticleId !== null && !map.has(result.activeArticleId)) throw new Error("対象記事の参照が不正です。");
     for (const [token, request] of Object.entries(result.requests)) {
-      if (!/^[a-zA-Z0-9-]{36}$/.test(token) || !request || !map.has(request.articleId) || request.action !== "summary" || typeof request.epoch !== "string") throw new Error("記事受け渡し情報が不正です。");
+      if (!/^[a-zA-Z0-9-]{36}$/.test(token) || !request || !map.has(request.articleId) || request.action !== "summary" || typeof request.epoch !== "string" ||
+          (request.sourceHash !== undefined && !/^[a-f0-9]{64}$/.test(request.sourceHash))) throw new Error("記事受け渡し情報が不正です。");
     }
     bounded(result); return result;
   }

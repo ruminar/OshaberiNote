@@ -74,6 +74,7 @@
         session.conversation = globalThis.OshaberiNoteChatState.fresh(store.endpoint, articles.id);
       }
       if (options.requestToken) delete session.requests[options.requestToken];
+      if (options.cancelArticleQueue) session.requests = {};
       if (options.articleId) session.activeArticleId = options.articleId;
       if (options.completedSummary) await articles.captureSummary(session, options.completedSummary);
       articles.bounded(session);
@@ -87,6 +88,11 @@
 
   async function prepareArticleMessage(patch, state, settings) {
     const session = articles.read(await articleRaw(), state.endpoint);
+    if (patch.requestToken && Object.hasOwn(session.requests, patch.requestToken)) {
+      if (Object.keys(session.requests)[0] !== patch.requestToken) throw Object.assign(new Error("先に登録された要約を待機しています。"), { code: "ARTICLE_QUEUE_WAIT" });
+      const queued = session.requests[patch.requestToken], article = session.articles.find(item => item.articleId === queued.articleId);
+      if (queued.sourceHash && await articles.fingerprint(article) !== queued.sourceHash) throw Object.assign(new Error("待機中に記事本文が変更されたため、この要約依頼を取り消します。"), { code: "INVALID_INPUT" });
+    }
     const message = articles.request(session, patch, state.epoch, state, settings);
     if (message.articleAction === "summary") message.articleSourceHash = await articles.fingerprint(session.articles.find(item => item.articleId === message.articleId));
     return message;
@@ -110,20 +116,37 @@
         const store = globalThis.OshaberiNoteChatState.readStore(await loadChat(), settings.ollamaUrl);
         const session = articles.read(await articleRaw(), settings.ollamaUrl);
         session.conversation ??= globalThis.OshaberiNoteChatState.fresh(settings.ollamaUrl, articles.id);
+        const activeTurn = session.conversation.active ? session.conversation.turns.at(-1) : undefined;
+        if (Object.values(session.requests).some(item => item.epoch === session.conversation.epoch && item.articleId === article.articleId && item.action === "summary") ||
+            activeTurn?.articleId === article.articleId && activeTurn.articleAction === "summary") return { opened: false, duplicate: true };
+        const homeUrl = api.runtime.getURL("home.html");
+        const isHome = url => {
+          try { const value = new URL(url); value.hash = ""; value.search = ""; return value.href === homeUrl; }
+          catch { return false; }
+        };
+        const [neighbor] = await api.tabs.query({ windowId: tab.windowId, index: tab.index + 1 });
+        const reuse = neighbor && isHome(neighbor.url) && (!neighbor.pendingUrl || isHome(neighbor.pendingUrl));
         const map = new Map(session.articles.map(item => [item.articleId, item])); map.set(article.articleId, article); session.articles = [...map.values()];
         const sourceHash = await articles.fingerprint(article);
         session.summaries = session.summaries.filter(item => item.articleId !== article.articleId || item.sourceHash === sourceHash);
         session.activeArticleId = article.articleId;
-        const token = crypto.randomUUID(); session.requests[token] = { articleId: article.articleId, action: "summary", epoch: session.conversation.epoch };
+        const token = crypto.randomUUID(); session.requests[token] = { articleId: article.articleId, action: "summary", epoch: session.conversation.epoch, sourceHash };
         articles.request(session, { requestToken: token }, session.conversation.epoch, session.conversation, settings);
         store.conversations.article = session.conversation; store.selectedActionId = articles.id;
         await persistChat(store, { articleSession: session });
-        try { await api.tabs.create({ url: api.runtime.getURL("home.html") + "#article-request=" + token }); }
+        try { if (!reuse) await api.tabs.create({ url: homeUrl + "#article-request=" + token, windowId: tab.windowId, index: tab.index + 1, active: false }); }
         catch (error) { delete session.requests[token]; await writeArticle(session); throw error; }
-        return { opened: true };
+        return { opened: !reuse, queued: true };
       }
       const session = articles.read(await articleRaw(), settings.ollamaUrl);
-      if (operation === "snapshot") return { endpoint: session.endpoint, conversation: session.conversation, articles: session.articles.map(({ articleId, title, author, url }) => ({ articleId, title, author, url })) };
+      if (operation === "snapshot") return {
+        endpoint: session.endpoint, conversation: session.conversation,
+        articles: session.articles.map(({ articleId, title, author, url }) => ({ articleId, title, author, url })),
+        queue: Object.entries(session.requests).filter(([, item]) => item.epoch === session.conversation?.epoch).map(([requestToken, item]) => {
+          const article = session.articles.find(article => article.articleId === item.articleId);
+          return { requestToken, articleId: item.articleId, articleAction: item.action, displayText: articles.display(article, item.action) };
+        })
+      };
       if (operation === "cancel") {
         if (typeof patch.requestToken === "string" && Object.hasOwn(session.requests, patch.requestToken)) {
           delete session.requests[patch.requestToken];
@@ -208,7 +231,7 @@
         nextChat = chat.interruptStore(chat.readStore(await loadChat(), previous.ollamaUrl));
         if (options.importing) nextChat.approvedUrl = "";
       }
-      if (nextChat) await persistChat(nextChat, {}, { [key]: settings });
+      if (nextChat) await persistChat(nextChat, { cancelArticleQueue: settings.enabled === false || settings.ollamaModel !== previous.ollamaModel || options.importing }, { [key]: settings });
       else await api.storage.local.set({ [key]: settings });
     },
     loadChat, storeChat: persistChat, prepareArticleMessage, articleOperation,
