@@ -10,7 +10,7 @@ function articleCopyUi(options={}) {
  const ui=f.context.OshaberiNoteUi.create(doc,win,{summarizeArticle:async value=>imports.push(value),copyArticle:async (value,date)=>{if(options.fail)throw Error('clipboard denied');copies.push(value.body);dates.push(date);},...(options.loadAdjacent?{loadArticleAdjacent:options.loadAdjacent}:{})});
  const update=url=>ui.update(f.context.OshaberiNote.defaultSettings(),url||article().url);update();
  const wrapper=doc.querySelectorAll('div').find(n=>n.className==='oshaberi-note-article-summary');
- return {f,doc,win,copies,dates,imports,update,wrapper,buttons:wrapper.querySelectorAll('button'),status:wrapper.querySelector('span')};
+ return {f,doc,win,copies,dates,imports,update,wrapper,controller:ui,buttons:wrapper.querySelectorAll('button'),status:wrapper.querySelector('span')};
 }
 
 function appendAdjacent(f, label, href, title='前後の記事', host=f.doc.body) {
@@ -645,4 +645,35 @@ test('同著者要約を件数で間引かず、送信文字数と8MiB保存容�
 test('隣のホームから受領応答がない場合は背景タブを作り、受付済み依頼を失わない',async()=>{
  const f=await ready();f.context.chrome.tabs.query=async()=>[{id:8,url:'chrome-extension://test/home.html'}];f.context.chrome.runtime.sendMessage=async()=>{throw Error('No receiver');};
  await importArticle(f);assert.equal(f.opened.length,1);assert.equal(f.opened[0].active,false);assert.equal(Object.keys(f.articleData.current.requests).length,1);
+});
+
+
+function compactArticleUi(){
+ const f=articleCopyUi();const header=documentFromHtml('<header data-header-state="navbar"><div><a href="https://note.com/"><svg role="img" aria-label="note"></svg></a></div></header>').root.children[0];f.doc.body.prepend(header);
+ const avatar=f.doc.createElement('span');avatar.setAttribute('data-name','avatar');f.doc.getElementById('author').append(avatar);
+ let compact=true;f.win.matchMedia=query=>({matches:query==='(min-width: 1100px)'?!compact:true});f.update();
+ return {...f,ui:f.doc.querySelector('[class=\"oshaberi-note-article-menu\"]'),header,setCompact:value=>{compact=value;f.update();}};
+}
+
+test('狭幅の記事はハンバーガーから同じ操作を使え、開くだけでは送信・コピーせずEscapeで戻る',async()=>{
+ const f=compactArticleUi(),toggle=f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]'),panel=f.doc.querySelector('[class=\"oshaberi-note-mobile-panel\"]');
+ assert.ok(toggle);assert.equal(toggle.textContent,'☰');assert.equal(panel.hidden,true);assert.deepEqual(f.ui.children.map(n=>n.className),['oshaberi-note-article-following','oshaberi-note-article-author','oshaberi-note-article-author-search','oshaberi-note-article-summary']);
+ assert.equal(f.ui.children[0].href,'https://note.com/following');assert.equal(f.ui.children[1].href,'https://note.com/test');assert.ok(f.ui.children[2].href.includes('test'));
+ toggle.onclick();assert.equal(panel.hidden,false);assert.equal(toggle.getAttribute('aria-expanded'),'true');assert.deepEqual(f.imports,[]);assert.deepEqual(f.copies,[]);
+ await f.buttons[0].onclick();assert.equal(f.imports.length,1);assert.equal(panel.hidden,false);await f.buttons[1].onclick();assert.equal(f.copies.length,1);assert.equal(panel.hidden,false);
+ panel.onkeydown({key:'Escape',preventDefault(){}});assert.equal(panel.hidden,true);assert.equal(f.doc.activeElement,toggle);assert.equal(toggle.getAttribute('aria-expanded'),'false');
+});
+
+test('記事メニューは再描画で増殖せず、前後リンク・URL変更を反映し、狭幅と広幅で操作要素を移す',()=>{
+ const f=compactArticleUi(),toggle=f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]'),panel=f.doc.querySelector('[class=\"oshaberi-note-mobile-panel\"]'),button=f.buttons[0];toggle.onclick();f.update();assert.equal(panel.hidden,false);assert.equal(f.doc.querySelectorAll('[class=\"oshaberi-note-mobile-toggle\"]').length,1);
+ appendAdjacent(f,'次の記事','/test/n/n456');f.update();const next=f.wrapper.querySelector('[data-oshaberi-note-adjacent="next"]');assert.equal(next.href,'https://note.com/test/n/n456');panel.onclick({target:next});assert.equal(panel.hidden,true);
+ f.setCompact(false);assert.equal(f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]'),null);assert.equal(f.wrapper.parentElement,f.doc.body);assert.equal(f.buttons[0],button);
+ f.setCompact(true);assert.ok(f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]'));assert.equal(f.doc.querySelectorAll('[class=\"oshaberi-note-article-summary\"]').length,1);const current=f.doc.querySelector('[class=\"oshaberi-note-mobile-panel\"]');f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]').onclick();f.update(article('n456').url);assert.equal(current.hidden,true);assert.ok(!next.hasAttribute('href'));
+});
+
+test('狭幅の記事メニューはOFF・離脱・停止で撤去し、公式ヘッダを確認できない場合は作らない',()=>{
+ const f=compactArticleUi();const settings=f.f.context.OshaberiNote.defaultSettings();
+ f.controller.update({...settings,enabled:false},article().url);assert.equal(f.doc.querySelector('[class="oshaberi-note-mobile-toggle"]'),null);f.update();assert.ok(f.doc.querySelector('[class="oshaberi-note-mobile-toggle"]'));
+ f.header.remove();f.update();assert.equal(f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]'),null);assert.equal(f.doc.querySelector('[class=\"oshaberi-note-article-summary\"]'),null);
+ f.doc.body.prepend(f.header);f.update();assert.ok(f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]'));f.update('https://note.com/test');assert.equal(f.doc.querySelector('[class=\"oshaberi-note-article-menu\"]'),null);
 });

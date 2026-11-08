@@ -207,6 +207,12 @@
     const authorControls = createAuthorControls(doc, win, actions, profileSlot);
     let host, menu, signature;
     let articleFollowing, articleSummary, articleSummaryBusy = false;
+    let articleMenu;
+    function clearArticleMenu() {
+      if (!articleMenu) return;
+      for (const child of [...articleMenu.children]) doc.body.append(child);
+      articleMenu.remove(); articleMenu = undefined;
+    }
     let articleAuthor, articleAuthorSearch, authorSignature;
     let questionFollowing, questionAuthor, questionSelf, questionAuthorSignature;
     let searchAuthorInfo, searchAuthorDirty = true;
@@ -1075,9 +1081,13 @@
     }
     function syncArticleFollowing(settings, url) {
       const article = doc.querySelector('article[id="note-article"]');
+      const articlePage = core.isArticle(url) || core.isPreviewArticle(url);
+      const compact = !win.matchMedia("(min-width: 1100px)").matches || article?.getBoundingClientRect().left < 228;
+      let compactHost;
+      if (settings.enabled && articlePage && article && visible(article) && compact) compactHost = syncMobile(true, url);
+      else if (articleMenu || articlePage) { clearArticleMenu(); removeMobile(); }
       const show = settings.enabled && (core.isArticle(url) || core.isPreviewArticle(url)) &&
-        win.matchMedia("(min-width: 1100px)").matches && article && visible(article) &&
-        article.getBoundingClientRect().left >= 228 && doc.body;
+        article && visible(article) && (compact ? compactHost : article.getBoundingClientRect().left >= 228) && doc.body;
       syncArticleSummary(show, url);
       if (!show) { articleFollowing?.remove(); articleFollowing = undefined; clearArticleAuthor(); syncSideProfiles(false); return; }
       if (!core.usesFollowing(settings)) { articleFollowing?.remove(); articleFollowing = undefined; }
@@ -1098,7 +1108,15 @@
         if (articleFollowing?.isConnected) articleAuthorSearch.classList.remove("oshaberi-note-article-author-search-only");
         else articleAuthorSearch.classList.add("oshaberi-note-article-author-search-only");
       }
-      syncSideProfiles(Boolean(articleFollowing?.isConnected || articleAuthor?.isConnected));
+      if (compactHost) {
+        if (!articleMenu?.isConnected) {
+          articleMenu = doc.createElement("nav"); articleMenu.setAttribute(owned, "");
+          articleMenu.className = "oshaberi-note-article-menu"; articleMenu.setAttribute("aria-label", "記事の操作"); compactHost.append(articleMenu);
+        }
+        const nodes = [articleFollowing, articleAuthor, articleAuthorSearch, articleSummary].filter(Boolean);
+        if (nodes.length !== articleMenu.children.length || nodes.some((node, index) => articleMenu.children[index] !== node)) articleMenu.replaceChildren(...nodes);
+      }
+      syncSideProfiles(!compact && Boolean(articleFollowing?.isConnected || articleAuthor?.isConnected));
     }
     function isRecommendations(element) {
       if (element.tagName !== "DIV" || !element.classList.contains("pt-6") ||
@@ -1572,6 +1590,7 @@
       syncPaidCards(settings, url);
       syncHomePaidRecommendations(settings, url);
       syncProfilePromotions(settings, url);
+      if (core.isArticle(url) || core.isPreviewArticle(url)) { restore(); pruneProfileLayout(); return; }
       if (!settings.enabled || !page || core.membershipPage(url) || page.type === "magazine" || !(page.type === "profile" ? core.usesFollowing(settings) : core.modeOf(settings) !== "social")) { removeMobile(); restore(); pruneProfileLayout(); return; }
       const common = ["following", "tag", "search", "topic"].includes(page.type);
       const officialAside = common && (navigationSidebars(doc)[0] || [...doc.querySelectorAll("aside")].find(a => a.classList.contains("w-[11.375rem]") && a.classList.contains("sticky")));
@@ -1727,6 +1746,7 @@
         favoriteProfile?.toggle.remove(); favoriteProfile?.block.remove(); favoriteProfile?.mount?.remove(); favoriteProfile = undefined;
         profileLayout?.root.remove(); profileLayout = undefined;
         syncPinnedHeader({ enabled: false }, currentUrl);
+        clearArticleMenu();
         removeMobile();
         syncHeaderSettings(false);
         syncSearchClear(false);
