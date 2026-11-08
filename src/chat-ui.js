@@ -122,6 +122,11 @@
     }
   });
   let scrollTail;
+  const scrollPositions = new Map();
+  let pendingScroll;
+  function rememberScroll() {
+    if (state && visible) scrollPositions.set(state.actionId, { epoch: state.epoch, top: byId("chat-messages").scrollTop || 0 });
+  }
   function scrollRange() {
     const container = byId("chat-messages");
     return Math.max(0, (container.scrollHeight || 0) - (container.clientHeight || 0));
@@ -151,8 +156,17 @@
     const index = Math.max(0, positions.findLastIndex(top => top <= current + 2));
     byId("chat-message-position").textContent = positions.length ? `${index + 1} / ${positions.length} 発言` : "発言なし";
   }
-  function refreshMessageNavigation() { updateScrollTail(); updateMessageNavigation(); }
+  function refreshMessageNavigation() {
+    updateScrollTail();
+    if (visible && pendingScroll && state?.actionId === pendingScroll.actionId && state?.epoch === pendingScroll.epoch) {
+      const target = pendingScroll.top ?? messagePositions()[pendingScroll.index];
+      if (target !== undefined && scrollRange() > 1) byId("chat-messages").scrollTop = Math.min(scrollRange(), target);
+      pendingScroll = undefined;
+    }
+    updateMessageNavigation();
+  }
   function alignMessage(index) {
+    pendingScroll = undefined;
     if (!visible || scrollRange() <= 1) return;
     const target = messagePositions()[index];
     if (target === undefined) return;
@@ -221,6 +235,11 @@
   }
   function render(next) {
     const sameConversation = state?.actionId === next.actionId && state?.epoch === next.epoch;
+    if (!sameConversation) {
+      rememberScroll();
+      const saved = scrollPositions.get(next.actionId);
+      pendingScroll = { actionId: next.actionId, epoch: next.epoch, ...(saved?.epoch === next.epoch ? { top: saved.top } : { index: Math.max(0, next.turns.length * 2 - (next.actionId === "article" ? 2 : 1)) }) };
+    }
     const accepted = sameConversation && next.active && next.active.id !== state.active?.id;
     const completed = sameConversation && state.active && !next.active && next.turns.at(-1)?.status === "complete";
     if (state && (state.actionId !== next.actionId || state.epoch !== next.epoch)) {
@@ -283,7 +302,7 @@
     // 初回も含め、短いAI発言の先頭を上端へ合わせられる余白を設ける。
     if (state.turns.length) { scrollTail = document.createElement("div"); scrollTail.className = "chat-scroll-tail"; scrollTail.setAttribute("aria-hidden", "true"); container.append(scrollTail); }
     refreshMessageNavigation();
-    if (scrollRange() > 1 && Math.abs(container.scrollTop - previousTop) > 1) container.scrollTop = previousTop;
+    if (sameConversation && scrollRange() > 1 && Math.abs(container.scrollTop - previousTop) > 1) container.scrollTop = previousTop;
     if (accepted) alignMessage(state.turns.length * 2 - 2);
     // 記事操作のタイトルボタンを残す。自由入力の回答だけはAI発言へ移動する。
     else if (completed && !(state.actionId === "article" && articles.actions[state.turns.at(-1).articleAction])) alignMessage(state.turns.length * 2 - 1);
@@ -558,6 +577,11 @@
   }, setVisible(value, llm = false) {
     const leavingChat = visible && !value;
     const leavingBoth = (visible || llmVisible) && !value && !llm;
+    if (leavingChat) rememberScroll();
+    if (!visible && value && state) {
+      const saved = scrollPositions.get(state.actionId);
+      if (saved?.epoch === state.epoch) pendingScroll = { actionId: state.actionId, epoch: state.epoch, top: saved.top };
+    }
     visible = value; llmVisible = llm;
     if (visible) setTimeout(refreshMessageNavigation, 0);
     if (leavingChat || leavingBoth) {

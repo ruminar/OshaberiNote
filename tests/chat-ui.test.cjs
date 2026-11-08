@@ -9,6 +9,14 @@ async function fixture(t, options = {}) {
   if (options.otherOwner) f.connect(options.otherOwner);
   if (options.storedChat) f.data[f.context.OshaberiNoteChatState.key] = structuredClone(options.storedChat);
   const document = documentFromHtml(source('home.html')), sessionValues = options.sessionValues ?? new Map();
+  if (options.messageLayout) {
+    const container=document.getElementById('chat-messages'),create=document.createElement.bind(document),replace=container.replaceChildren.bind(container);
+    let top=0;container.clientHeight=200;container.getBoundingClientRect=()=>({top:0});
+    Object.defineProperty(container,'scrollHeight',{get:()=>Math.max(200,container.querySelectorAll('article').length*80+200)});
+    Object.defineProperty(container,'scrollTop',{get:()=>top,set:value=>{top=Math.max(0,Math.min(value,container.scrollHeight-200));}});
+    container.replaceChildren=(...nodes)=>{replace(...nodes);top=0;};
+    document.createElement=tag=>{const node=create(tag);if(tag==='article')node.getBoundingClientRect=()=>({top:container.querySelectorAll('article').indexOf(node)*80-top,height:60});return node;};
+  }
   const timers = new Set();
   Object.assign(c, { document, location: { hash: options.hash ?? '', assign() {} }, AbortController, AbortSignal, TextDecoder,
     sessionStorage: { getItem:key=>sessionValues.get(key) ?? null,setItem:(key,value)=>sessionValues.set(key,value),removeItem:key=>sessionValues.delete(key) },
@@ -898,4 +906,26 @@ test('別の会話を初期化しても生成は継続し、別会話からの�
  const seed=await queuedArticles(),f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,hash:seed.hash,stream:init=>new Response(new ReadableStream({start(c){init.signal.addEventListener('abort',()=>c.error(new DOMException('aborted','AbortError')));}}))}),n=f.nodes;
  const request=f.requests.find(r=>r.url.endsWith('/api/chat'));await n.get('chat-tab-chat').onclick();await flush();await n.get('chat-new').onclick();await flush();assert.equal(request.init.signal.aborted,false);assert.ok(f.articleData.current.conversation.active);assert.equal(n.get('chat-stop').disabled,false);
  await n.get('chat-stop').onclick();await flush();assert.equal(request.init.signal.aborted,true);assert.equal(f.articleData.current.conversation.active,null);assert.deepEqual(f.articleData.current.requests,{});assert.equal(n.get('chat-tab-chat').getAttribute('aria-selected'),'true');
+});
+
+
+test('上部タブは記憶位置を復元し、記憶のない通常・タグ会話は最後の発言へ合わせる',async t=>{
+ const seed=await fixture(t);await seed.nodes.get('connect-ollama').onclick();await flush();
+ for(let i=0;i<3;i++){seed.nodes.get('chat-input').value='通常'+i;seed.nodes.get('chat-form').fire('submit');await flush();}
+ await seed.nodes.get('chat-tab-tag-suggestion-v1').onclick();await flush();
+ const f=await fixture(t,{storedChat:seed.data[seed.context.OshaberiNoteChatState.key],messageLayout:true}),n=f.nodes,c=n.get('chat-messages');
+ assert.equal(n.get('chat-message-position').textContent,'2 / 2 発言');assert.equal(c.scrollTop,80);
+ await n.get('chat-tab-chat').onclick();await flush();assert.equal(c.scrollTop,400);assert.equal(n.get('chat-message-position').textContent,'6 / 6 発言');
+ c.scrollTop=160;c.fire('scroll');await n.get('chat-tab-tag-suggestion-v1').onclick();await flush();assert.equal(c.scrollTop,80);await n.get('chat-tab-chat').onclick();await flush();assert.equal(c.scrollTop,160);assert.equal(n.get('chat-message-position').textContent,'3 / 6 発言');
+ n.get('nav-settings').onclick();n.get('nav-chat').onclick();await new Promise(r=>setTimeout(r,5));assert.equal(c.scrollTop,160);
+ await n.get('chat-new').onclick();await flush();assert.equal(c.scrollTop,0);assert.equal(n.get('chat-message-position').textContent,'発言なし');
+});
+
+test('記事会話は位置の記憶がなければ最後の依頼へ合わせ、以後は自分で動かした位置を復元する',async t=>{
+ const seed=await articleTransfer(),state=await seed.f.chat('get',{actionId:'article'}),p={actionId:'article',epoch:state.epoch,endpoint:state.endpoint,owner:'other',model:'local'};
+ let running=await seed.f.chat('start',{...p,text:'要約',requestToken:seed.hash.split('=')[1]});await seed.f.chat('complete',{...p,id:running.active.id,text:'記事の要約'});
+ running=await seed.f.chat('start',{...p,text:'感想',articleId:seed.article.articleId,articleAction:'impression'});await seed.f.chat('complete',{...p,id:running.active.id,text:'記事の感想'});
+ const f=await fixture(t,{storedChat:seed.f.data[seed.key],storedArticles:seed.f.articleData.current,messageLayout:true}),n=f.nodes,c=n.get('chat-messages');
+ assert.equal(c.scrollTop,160);assert.equal(n.get('chat-message-position').textContent,'3 / 4 発言');c.scrollTop=80;c.fire('scroll');
+ await n.get('chat-tab-chat').onclick();await flush();await n.get('chat-tab-article').onclick();await flush();assert.equal(c.scrollTop,80);assert.equal(n.get('chat-message-position').textContent,'2 / 4 発言');
 });
