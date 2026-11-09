@@ -106,3 +106,19 @@ test("両ブラウザの配布フォルダはmanifest直下・必要ファイル
     await assert.rejects(fs.stat(path.join(output, "stale.txt")), { code: "ENOENT" });
   }
 });
+
+
+test('Windowsの配布ZIPは生のエントリ名にバックスラッシュを含まず、階層・日本語名・ファイル内容を保つ', {skip:process.platform!=='win32'}, async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'oshaberi-zip-test-'));t.after(()=>fs.rm(temp,{recursive:true,force:true}));const input=path.join(temp,'payload'),output=path.join(temp,'package.zip');
+ const expected=new Map([['manifest.json',Buffer.from('{"version":"0.1.1"}')],['icons/icon128.png',Buffer.from([0,1,2,255])],['src/階層/日本語.txt',Buffer.from('テスト本文')]]);
+ for(const [name,bytes]of expected){const file=path.join(input,name);await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,bytes);}
+ await require('node:util').promisify(require('node:child_process').execFile)('powershell.exe',['-NoProfile','-File',path.join(root,'scripts/zip.ps1'),'-InputDirectory',input,'-OutputFile',output]);
+ const zip=await fs.readFile(output),end=zip.lastIndexOf(Buffer.from([0x50,0x4b,0x05,0x06]));assert.ok(end>=0);let offset=zip.readUInt32LE(end+16);const count=zip.readUInt16LE(end+10);assert.equal(count,expected.size);
+ for(let i=0;i<count;i++){
+  assert.equal(zip.readUInt32LE(offset),0x02014b50);const size=zip.readUInt32LE(offset+20),n=zip.readUInt16LE(offset+28),extra=zip.readUInt16LE(offset+30),comment=zip.readUInt16LE(offset+32),local=zip.readUInt32LE(offset+42);
+  const name=zip.subarray(offset+46,offset+46+n).toString('utf8');assert.ok(!name.includes('\\'),name);assert.ok(expected.has(name),name);
+  assert.equal(zip.readUInt32LE(local),0x04034b50);const localName=zip.readUInt16LE(local+26),localExtra=zip.readUInt16LE(local+28);assert.equal(zip.subarray(local+30,local+30+localName).toString('utf8'),name);
+  const start=local+30+localName+localExtra,packed=zip.subarray(start,start+size),method=zip.readUInt16LE(offset+10);const bytes=method===0?packed:require('node:zlib').inflateRawSync(packed);assert.deepEqual(bytes,expected.get(name));expected.delete(name);offset+=46+n+extra+comment;
+ }
+ assert.equal(expected.size,0);
+});

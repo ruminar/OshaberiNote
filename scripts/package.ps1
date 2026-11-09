@@ -11,7 +11,7 @@ try {
         $output = & node scripts/package.mjs $target
         if ($LASTEXITCODE -ne 0) { throw "生成失敗: $target" }
         $zip = "$output.zip"
-        Compress-Archive -Path (Join-Path $output '*') -DestinationPath $zip -Force
+        & (Join-Path $PSScriptRoot 'zip.ps1') -InputDirectory $output -OutputFile $zip
         Write-Output "読込用フォルダ: $output"
         Write-Output "ZIP: $zip"
     }
