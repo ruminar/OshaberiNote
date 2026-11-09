@@ -677,3 +677,12 @@ test('狭幅の記事メニューはOFF・離脱・停止で撤去し、公式�
  f.header.remove();f.update();assert.equal(f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]'),null);assert.equal(f.doc.querySelector('[class=\"oshaberi-note-article-summary\"]'),null);
  f.doc.body.prepend(f.header);f.update();assert.ok(f.doc.querySelector('[class=\"oshaberi-note-mobile-toggle\"]'));f.update('https://note.com/test');assert.equal(f.doc.querySelector('[class=\"oshaberi-note-article-menu\"]'),null);
 });
+
+
+test('記事ハンバーガー内のTLも現在の公式ヘッダで切り替え、判定不能とOFFでは元へ戻る',()=>{
+ const f=compactArticleUi(),header=f.doc.createElement('header'),nav=f.doc.createElement('nav');header.setAttribute('data-header-state','navbar');nav.setAttribute('aria-label','アカウント');header.append(nav);
+ for(const [href,text]of [['/login','ログイン'],['/signup','会員登録']]){const a=f.doc.createElement('a');a.href=href;a.textContent=text;nav.append(a);}f.doc.body.prepend(header);f.controller.invalidatePaidCards();f.update();
+ const link=f.doc.querySelector('a[data-oshaberi-note-following]'),panel=f.doc.querySelector('[class="oshaberi-note-mobile-panel"]');assert.ok(panel.contains(link));assert.equal(link.href,'https://note.com/search?q=&context=note&mode=search&sort=new');assert.equal(link.textContent,'フォロー中のTL');assert.equal(link.getAttribute('title'),'未ログインのため検索画面を開きます');
+ nav.hidden=true;link.fire('contextmenu',{button:2});assert.equal(link.href,'https://note.com/following');nav.hidden=false;f.controller.invalidatePaidCards();f.update();assert.ok(link.href.includes('/search?'));
+ f.controller.update({...f.f.context.OshaberiNote.defaultSettings(),enabled:false},article().url);assert.equal(link.href,'https://note.com/following');assert.equal(link.isConnected,false);f.controller.stop();link.fire('click');assert.equal(link.href,'https://note.com/following');
+});

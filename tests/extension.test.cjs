@@ -143,7 +143,7 @@ test("設定の型・未知項目・不正ユーザー名はルール更新前�
 function contentFixture(stored, options = {}) {
   const documentEvents = new Map(), events = new Map(), navigationEvents = new Map();
   const moves = [];
-  let subscriber, tick, mutation;
+  let subscriber, tick, mutation, observation, observers = 0, intervals = 0;
   let disconnected = false;
   const anchors = [];
   function addAnchor(url) {
@@ -166,15 +166,15 @@ function contentFixture(stored, options = {}) {
       querySelectorAll: () => anchors.filter(anchor => anchor.isConnected && anchor.href)
     },
     MutationObserver: class {
-      constructor(callback) { mutation = callback; }
-      observe() {}
+      constructor(callback) { mutation = callback; observers++; }
+      observe(target, options) { observation = plain(options); }
       disconnect() { disconnected = true; }
     },
     window: {
       addEventListener: (name, fn) => events.set(name, fn), removeEventListener: name => events.delete(name),
       navigation: { addEventListener: (name, fn) => navigationEvents.set(name, fn), removeEventListener: name => navigationEvents.delete(name) }
     },
-    setInterval(fn) { tick = fn; return 1; }, clearInterval() { tick = undefined; },
+    setInterval(fn) { tick = fn; intervals++; return 1; }, clearInterval() { tick = undefined; },
     OshaberiNotePlatform: {
       isAvailable: () => !options.invalid,
       homeUrl: () => home,
@@ -193,7 +193,8 @@ function contentFixture(stored, options = {}) {
     return event;
   }
   return { c, home, moves, location, events, navigationEvents, documentEvents, click,
-    addAnchor, mutate: () => { if (!disconnected) mutation?.(); },
+    addAnchor, mutate: records => { if (!disconnected) mutation?.(records); },
+    get observation() { return observation; }, get observers() { return observers; }, get intervals() { return intervals; },
     tick: () => tick?.(), changed: value => subscriber?.(value) };
 }
 test("記事全文のコピーにはタイトル・著者名・投稿日・URL・本文を含め、不明な日付は推測しない",async()=>{
@@ -439,7 +440,7 @@ test("アダプターは自拡張のhome.htmlだけを設定メッセージ送�
 });
 test("Manifest・専用HTMLの参照、権限と公開範囲が一致し、ホーム全体を隠さない", () => {
   const m = JSON.parse(source("manifest.json"));
-  assert.equal(m.manifest_version, 3); assert.equal(m.version, "0.1.1");
+  assert.equal(m.manifest_version, 3); assert.equal(m.version, "0.1.2");
   assert.deepEqual(m.permissions, ["storage", "declarativeNetRequestWithHostAccess"]);
   assert.deepEqual(m.host_permissions, ["https://note.com/*"]);
   assert.deepEqual(m.web_accessible_resources, [{ resources: ["home.html"], matches: ["https://note.com/*"] }]);
@@ -469,3 +470,12 @@ test('社会復帰でも検索の記事タブへの新着復帰を行い、タ�
  assert.equal(f.click('https://note.com/tag/AI').defaultPrevented,false);
 });
 
+
+
+test('既存DOM監視がヘッダの可視性・状態変更を通知し、定期同期では再確認フラグを立てない',async()=>{
+ let invalidations=0,updates=0;const f=contentFixture({}, {ui:{create:()=>({invalidatePaidCards(){invalidations++;},update(){updates++;}})}});await flush();
+ assert.ok(f.observation.attributeFilter.includes('aria-hidden'));assert.ok(f.observation.attributeFilter.includes('data-header-state'));assert.equal(f.observers,1);assert.equal(f.intervals,1);
+ f.tick();f.tick();assert.equal(invalidations,0);const before=updates;
+ const node={nodeType:1};f.mutate([{type:'attributes',attributeName:'aria-hidden',target:node}]);f.mutate([{type:'attributes',attributeName:'data-header-state',target:node}]);await flush();assert.equal(invalidations,2);assert.equal(updates,before+1);
+ f.tick();assert.equal(invalidations,2);assert.equal(f.observers,1);assert.equal(f.intervals,1);
+});
