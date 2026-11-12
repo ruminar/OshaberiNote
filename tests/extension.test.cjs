@@ -455,11 +455,14 @@ test("Manifest・専用HTMLの参照、権限と公開範囲が一致し、ホ�
   assert.equal(/<script[^>]*>[^<]+<\/script>/.test(source("home.html")), false);
 });
 
-test('note上の歯車はページ種別によらず設定へ、ホームリンクはおしゃべりへ向かう',async()=>{
- let actions; const f=contentFixture({}, {ui:{create(doc,win,a){actions=a;return {update(){}};}}});await flush();
- for(const path of ['/yeku','/yeku/n/n123','/search?q=AI','/following','/tag/AI','/akb428/membership','/dashboard']){
-  f.location.href='https://note.com'+path; assert.equal(actions.settingsUrl(),f.home+'#settings');
-  f.click(); assert.equal(f.moves.at(-1)[1],f.home);
+test('note上の歯車は作者ページで表示管理、一覧とお気に入り導線ではお気に入りへ向かい、ロゴはおしゃべりを維持する',async()=>{
+ let actions;const f=contentFixture({}, {ui:{create(doc,win,a){actions=a;return {update(){}};}}});await flush();
+ for(const [url,hash]of [
+  ['https://note.com/creator','#authors'],['https://note.com/creator/?from=home','#authors'],
+  ['https://note.com/following','#tags'],['https://note.com/search?q=AI','#tags'],['https://note.com/tag/AI','#tags'],['https://note.com/creator/m/m123','#tags'],['https://note.com/creator/membership','#tags'],['https://note.com/creator/membership/join','#tags'],
+  ['https://note.com/creator/n/n123','#tags'],['https://note.com/creator/n/n123/?from=profile#part','#tags'],['https://note.com/preview/n123','#settings'],['https://note.com/qa/creator','#settings'],['https://note.com/dashboard','#settings'],['https://note.com/login','#settings'],['https://outside.test/creator','#settings']
+ ]){
+  f.location.href=url;assert.equal(actions.settingsUrl(),f.home+hash,url);f.click();assert.equal(f.moves.at(-1)[1],f.home);
  }
 });
 

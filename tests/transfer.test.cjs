@@ -46,7 +46,7 @@ test('古いタグ形式と作者・マガジン・メンバーシップを既�
 test('対応項目の不正値・未知形式・未来バージョン・巨大JSONでは全体を拒否する', async () => {
   const f = backend(), core = f.context.OshaberiNote;
   for (const settings of [{ enabled: 'false' }, { noteUserId: '<script>' }, { tagGroups: [] }, { authorDisplayRules: [{}] }, { ollamaUrl: 'http://user:pass@localhost:11434' }, { ollamaModel: 'bad name' }]) assert.throws(() => core.parseSettingsExport(own(settings)));
-  for (const json of ['{bad', '{"format":"unknown","schemaVersion":1,"settings":{}}', '{"format":"hikikomori-note-settings","schemaVersion":8,"settings":{}}', ' '.repeat(1048577)]) assert.throws(() => core.parseSettingsExport(json));
+  for (const json of ['{bad', '{"format":"unknown","schemaVersion":1,"settings":{}}', '{"format":"hikikomori-note-settings","schemaVersion":9,"settings":{}}', ' '.repeat(1048577)]) assert.throws(() => core.parseSettingsExport(json));
 });
 test('不正な移行は保存せず、既存設定と会話を保持する', async () => {
   const f = backend(); const state = await f.settings(), before = structuredClone(f.data);

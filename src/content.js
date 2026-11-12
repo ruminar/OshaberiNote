@@ -11,10 +11,15 @@
     return state;
   }
   const noteUi = globalThis.OshaberiNoteUi?.create(document, window, {
-    settingsUrl: () => platform.homeUrl() + "#settings",
+    settingsUrl: () => settingsDestination(),
     summarizeArticle: article => platform.importArticle(article),
     loadArticleAdjacent: url => globalThis.OshaberiNoteArticles.adjacent(url, fetch, AbortSignal.timeout(10000)),
     copyArticle: (article, publishedAt) => navigator.clipboard.writeText(`タイトル：${article.title}\n著者名：${article.author}\n投稿日：${publishedAt || "不明"}\nURL：${article.url}\n\n本文：\n${article.body}`),
+    async addCurrentArticle(groupId, articleId, url, title) {
+      const before = revision;
+      const value = await platform.addCurrentArticle(groupId, articleId, url, title);
+      if (!stopped && revision === before) { settings = readView(value); checkHome(); }
+    },
     async addCurrentMembership(groupId, userId, displayName) {
       const before = revision;
       const value = await platform.addCurrentMembership(groupId, userId, displayName);
@@ -104,6 +109,13 @@
   }
   function homeDestination() {
     return platform.homeUrl();
+  }
+  function settingsDestination() {
+    const page = core.pageKind(location.href);
+    if (core.usesTags(settings) && core.membershipPage(location.href)) return platform.homeUrl() + "#tags";
+    if (page?.type === "profile") return platform.homeUrl() + "#authors";
+    const favorites = core.usesTags(settings) && (core.isArticle(location.href) || ["following", "tag", "search", "topic", "magazine"].includes(page?.type));
+    return platform.homeUrl() + (favorites ? "#tags" : "#settings");
   }
   function checkHome() {
     if (enabled() && core.shouldRedirect(location.href, settings)) location.replace(platform.homeUrl());

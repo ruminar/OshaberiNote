@@ -46,8 +46,16 @@ port.onMessage((message, sender, respond) => {
       port.articleOperation("import", message.patch, sender).then(settings => respond({ ok: true, settings }), error => respond({ ok: false, error: error.message, code: error.code || "OPERATION_FAILED" }));
       return true;
     }
-    if (!["select-tag-group", "add-current-tag", "add-current-user", "add-current-magazine", "add-current-membership", "current-author-operation"].includes(message?.type) || !port.isNoteSender?.(sender)) return false;
+    if (!["select-tag-group", "add-current-tag", "add-current-user", "add-current-magazine", "add-current-membership", "add-current-article", "current-author-operation"].includes(message?.type) || !port.isNoteSender?.(sender)) return false;
     operation = (async () => {
+      if (message.type === "add-current-article") {
+        const patch = message.patch, page = await port.currentArticlePage(sender, patch?.pageUrl);
+        if (!page || page.articleId !== patch?.articleId || page.url !== patch?.url) throw Object.assign(new Error("現在の記事を確認できません。"), { code: "CONFLICT" });
+        return controller.tag({ type: "ADD_ARTICLE", groupId: patch.groupId, articleId: patch.articleId, url: patch.url, title: patch.title }, { requireEnabled: true, currentArticleId: page.articleId, currentArticleUrl: page.url, validateCurrent: async () => {
+          const current = await port.currentArticlePage(sender, patch.pageUrl);
+          return current?.articleId === page.articleId && current.url === page.url;
+        } });
+      }
       if (message.type === "add-current-membership") {
         const patch = message.patch, page = await port.currentMembershipPage(sender, patch?.pageUrl);
         if (page?.type !== "membership" || typeof patch?.userId !== "string" || page.user.toLowerCase() !== patch.userId.toLowerCase()) throw Object.assign(new Error("現在のメンバーシップを確認できません。"), { code: "CONFLICT" });
