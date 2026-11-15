@@ -2257,3 +2257,19 @@ test('DOM変更フラグがなくてもURL変更時には現在のヘッダでTL
  const f=uiFixture(sidebarHtml),g=guestAccountHeader(f),state=f.core.readSettings(groups());f.ui.update(state,'https://note.com/search?q=one');assert.equal(returnLink(f).href,guestReturnUrl);
  g.nav.remove();f.ui.update(state,'https://note.com/search?q=two');assert.equal(returnLink(f).href,'https://note.com/following');
 });
+
+
+test('フォロー中TLだけ公式カテゴリ非表示の印を付け、幅変更や遅延挿入でも維持して他画面で解除する',()=>{
+ const f=uiFixture(streamingLayout),root=f.doc.root.children[0],settings=f.core.readSettings(groups()),marked=()=>root.classList.contains('oshaberi-note-following-root');
+ f.ui.prepareSidebar('https://note.com/following',settings);assert.equal(marked(),true);
+ const wrapper=f.doc.createElement('div'),nav=f.doc.createElement('nav');wrapper.className='lg:hidden w-full';nav.className='overflow-x-auto';nav.setAttribute('aria-label','カテゴリナビゲーション');wrapper.append(nav);root.prepend(wrapper);
+ for(const wide of [false,true,false]){f.win.wide=wide;f.ui.update(settings,'https://note.com/following?from=test');assert.equal(marked(),true);assert.equal(f.doc.getElementById('main-content').isConnected,true);}
+ for(const path of ['/search?q=test','/tag/test','/topic/challenge','/example/n/n123']){f.ui.prepareSidebar('https://note.com/following',settings);f.ui.update(settings,'https://note.com'+path);assert.equal(marked(),false,path);}
+});
+
+test('フォロー中カテゴリの印はOFF・レイアウトの切断や不一致・停止で解除する',()=>{
+ const f=uiFixture(streamingLayout),root=f.doc.root.children[0],settings=f.core.readSettings(groups()),url='https://note.com/following',marked=()=>root.classList.contains('oshaberi-note-following-root');
+ f.ui.update(settings,url);assert.equal(marked(),true);f.ui.update({...settings,enabled:false},url);assert.equal(marked(),false);
+ f.ui.update(settings,url);root.remove();f.ui.prepareSidebar(url,settings);assert.equal(marked(),false);f.doc.root.append(root);f.ui.update(settings,url);assert.equal(marked(),true);
+ root.classList.remove('lg:grid-cols-[202px_minmax(0,1fr)]');f.ui.update(settings,url);assert.equal(marked(),false);root.classList.add('lg:grid-cols-[202px_minmax(0,1fr)]');f.ui.update(settings,url);assert.equal(marked(),true);f.ui.stop();assert.equal(marked(),false);assert.ok(root.classList.contains('min-h-screen'));
+});

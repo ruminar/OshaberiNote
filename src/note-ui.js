@@ -557,6 +557,7 @@
     const recommendations = new Set();
     const sidebarRoots = new Set();
     const rootClass = "oshaberi-note-navigation-root";
+    const followingRootClass = "oshaberi-note-following-root";
     const isSidebarGrid = root => sidebarGridClasses.some(name => root.classList.contains(name));
     function prepareSidebar(url, settings) {
       if (disposed) return;
@@ -564,7 +565,7 @@
         ["following", "tag", "search", "topic"].includes(core.pageKind(url)?.type);
       for (const root of sidebarRoots) {
         if (!active || !root.isConnected || !isSidebarGrid(root)) {
-          root.classList.remove(rootClass); sidebarRoots.delete(root);
+          root.classList.remove(rootClass); root.classList.remove(followingRootClass); sidebarRoots.delete(root);
         }
       }
       if (!active) return;
@@ -572,6 +573,9 @@
       for (const root of doc.querySelectorAll('div[class~="lg:grid"]')) {
         if (!root.classList.contains("min-h-screen") || !isSidebarGrid(root) || root.closest("article")) continue;
         if (!root.classList.contains(rootClass)) root.classList.add(rootClass);
+        const following = core.pageKind(url)?.type === "following";
+        if (following && !root.classList.contains(followingRootClass)) root.classList.add(followingRootClass);
+        else if (!following && root.classList.contains(followingRootClass)) root.classList.remove(followingRootClass);
         sidebarRoots.add(root);
       }
     }
@@ -1832,7 +1836,7 @@
         clearQuestionAuthor();
         searchAuthorInfo = undefined;
         likeVisibility.stop();
-        for (const root of sidebarRoots) root.classList.remove(rootClass);
+        for (const root of sidebarRoots) { root.classList.remove(rootClass); root.classList.remove(followingRootClass); }
         sidebarRoots.clear();
         authorControls.stop();
         disposed = true;
