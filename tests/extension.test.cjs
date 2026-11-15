@@ -477,7 +477,7 @@ test('社会復帰でも検索の記事タブへの新着復帰を行い、タ�
 
 test('既存DOM監視がヘッダの可視性・状態変更を通知し、定期同期では再確認フラグを立てない',async()=>{
  let invalidations=0,updates=0;const f=contentFixture({}, {ui:{create:()=>({invalidatePaidCards(){invalidations++;},update(){updates++;}})}});await flush();
- assert.ok(f.observation.attributeFilter.includes('aria-hidden'));assert.ok(f.observation.attributeFilter.includes('data-header-state'));assert.equal(f.observers,1);assert.equal(f.intervals,1);
+ assert.ok(f.observation.attributeFilter.includes('alt'));assert.ok(f.observation.attributeFilter.includes('aria-hidden'));assert.ok(f.observation.attributeFilter.includes('data-header-state'));assert.equal(f.observers,1);assert.equal(f.intervals,1);
  f.tick();f.tick();assert.equal(invalidations,0);const before=updates;
  const node={nodeType:1};f.mutate([{type:'attributes',attributeName:'aria-hidden',target:node}]);f.mutate([{type:'attributes',attributeName:'data-header-state',target:node}]);await flush();assert.equal(invalidations,2);assert.equal(updates,before+1);
  f.tick();assert.equal(invalidations,2);assert.equal(f.observers,1);assert.equal(f.intervals,1);

@@ -556,6 +556,41 @@
     const products = new Set();
     const recommendations = new Set();
     const sidebarRoots = new Set();
+    const notificationTitles = new Map();
+    let notificationTitlesDirty = true, notificationRules, notificationEnabled;
+    function restoreNotificationTitle(button, state) {
+      if (button.getAttribute("title") !== state.applied) return;
+      if (state.original === null) button.removeAttribute("title");
+      else button.setAttribute("title", state.original);
+    }
+    function syncNotificationTitles(settings) {
+      const enabled = Boolean(settings.enabled);
+      if (!notificationTitlesDirty && notificationEnabled === enabled && notificationRules === settings.authorDisplayRules) return;
+      notificationTitlesDirty = false; notificationEnabled = enabled; notificationRules = settings.authorDisplayRules;
+      const next = new Map(), panel = enabled ? doc.getElementById("notifications") : null;
+      for (const button of panel?.isConnected ? panel.querySelectorAll('button[data-name="avatar"]') : []) {
+        const link = button.closest("a[href]"), image = button.querySelector("img");
+        if (!link || !panel.contains(link) || !button.closest("li") || button.closest(`[${owned}]`) || !image) continue;
+        try {
+          const address = new URL(link.href), match = /^\/([a-zA-Z0-9_]+)\/?$/.exec(address.pathname);
+          if (address.origin !== "https://note.com" || address.username || address.password || !match) continue;
+          const id = core.authorId(match[1]), name = core.authorName(image.getAttribute("alt") || "") || id;
+          const prefix = core.authorRule(settings, id)?.action === "hide" ? "！" : "";
+          next.set(button, `　${prefix}${name}（@${id}）`);
+        } catch { /* プロフィールと確認できないリンクは変更しない。 */ }
+      }
+      for (const [button, state] of notificationTitles) {
+        if (!next.has(button)) { restoreNotificationTitle(button, state); notificationTitles.delete(button); }
+      }
+      for (const [button, title] of next) {
+        let state = notificationTitles.get(button);
+        if (!state || button.getAttribute("title") !== state.applied) {
+          state = { original: button.getAttribute("title"), applied: title }; notificationTitles.set(button, state);
+        }
+        if (button.getAttribute("title") !== title) button.setAttribute("title", title);
+        state.applied = title;
+      }
+    }
     const rootClass = "oshaberi-note-navigation-root";
     const followingRootClass = "oshaberi-note-following-root";
     const isSidebarGrid = root => sidebarGridClasses.some(name => root.classList.contains(name));
@@ -714,6 +749,16 @@
     function isPaidAmount(text) {
       return /^¥\s*[1-9]\d*(?:,\d{3})*\s*[〜～]?\s*$/.test(text.trim());
     }
+    function isArticlePrice(price) {
+      if (isPaidPrice(price)) return true;
+      // 拡散等を条件に無料になる有料記事。0円だけでは無料記事と区別できない。
+      if (!price.classList.contains("text-text-success") || !/^¥\s*0\s*[〜～~]\s*$/.test(price.textContent.trim())) return false;
+      const holder = price.parentElement, row = holder?.parentElement;
+      return holder?.tagName === "DIV" && holder.classList.contains("text-text-success") &&
+        row?.tagName === "DIV" && hasClasses(row, ["flex", "items-center", "gap-2"]) &&
+        [...row.children].some(badge => badge.tagName === "SPAN" &&
+          hasClasses(badge, ["bg-surface-offer", "rounded-full"]) && badge.textContent.trim() === "割引あり");
+    }
     let paidDirty = true, paidSignature;
     function isMagazineCard(card) {
       return card.tagName === "DIV" && ["relative", "mb-[6px]", "mr-[6px]", "flex", "w-[calc(100%-6px)]"].every(name => card.classList.contains(name));
@@ -758,7 +803,7 @@
         link.classList.contains("inset-0") && link.getAttribute("title") && link.getAttribute("aria-label") && core.isArticle(link.href) &&
         link.parentElement.querySelector("h3") &&
         !isAllowedCard(card, link, settings) &&
-        ([...link.parentElement.querySelectorAll("span[class]")].some(isPaidPrice) ||
+        ([...link.parentElement.querySelectorAll("span[class]")].some(isArticlePrice) ||
           [...link.parentElement.querySelectorAll("path[d]")].some(isMembershipLock)));
     }
     function isAllowedCard(card, link, settings) {
@@ -803,7 +848,7 @@
         }
       }
       if (!active) return;
-      const prices = [...doc.querySelectorAll("span[class]")].filter(isPaidPrice);
+      const prices = [...doc.querySelectorAll("span[class]")].filter(isArticlePrice);
       const locks = [...doc.querySelectorAll("path[d]")].filter(isMembershipLock);
       for (const indicator of [...prices, ...locks]) {
         let card = indicator.parentElement;
@@ -1657,6 +1702,7 @@
     }
     function update(settings, url) {
       if (disposed) return;
+      syncNotificationTitles(settings);
       likeVisibility.update(settings, url);
       const profilePage = core.pageKind(url);
       if (profileLayout && (profilePage?.type !== "profile" || profilePage.user !== profileLayout.userId ||
@@ -1820,6 +1866,7 @@
     return Object.freeze({
       update, prepareSidebar,
       invalidatePaidCards() {
+        notificationTitlesDirty = true;
         followingLinksDirty = true;
         searchAuthorDirty = true;
         likeVisibility.invalidate();
@@ -1833,6 +1880,8 @@
         profilePromotionsDirty = true;
       },
       stop() {
+        for (const [button, state] of notificationTitles) restoreNotificationTitle(button, state);
+        notificationTitles.clear();
         clearQuestionAuthor();
         searchAuthorInfo = undefined;
         likeVisibility.stop();

@@ -373,6 +373,57 @@ test('プレビューも狭幅・余白不足・OFF・離脱で固定リンク�
  f.ui.update(settings,url);f.ui.stop();assert.equal(following(),null);
 });
 
+const notificationAvatarHtml='<div id="notifications"><ul><li><a href="https://note.com/example"><button id="notice-avatar" data-name="avatar"><span><img alt="通知の作者"></span></button></a><a href="/other"><button id="notice-other" data-name="avatar" title="公式の説明"><img alt="別の作者"></button></a></li></ul></div>';
+test('通知の定期同期では再走査せず、公式が変更したtitleは再適用後もOFFで復元する',()=>{
+ const f=uiFixture(notificationAvatarHtml),settings=f.core.readSettings(groups()),url='https://note.com/following';
+ const panel=f.doc.getElementById('notifications'),button=f.doc.getElementById('notice-avatar');
+ const query=panel.querySelectorAll.bind(panel);let scans=0;
+ panel.querySelectorAll=selector=>{if(selector==='button[data-name="avatar"]')scans++;return query(selector);};
+ f.ui.update(settings,url);f.ui.update(settings,url);f.ui.update(settings,url);assert.equal(scans,1);
+ button.setAttribute('title','公式の更新値');f.ui.invalidatePaidCards();f.ui.update(settings,url);
+ assert.equal(scans,2);assert.equal(button.getAttribute('title'),'　通知の作者（@example）');
+ f.ui.update({...settings,enabled:false},url);assert.equal(button.getAttribute('title'),'公式の更新値');
+});
+test('通知の各作者に名前とID、非表示だけに！を付け、全モード・設定変更・OFFに追従する',()=>{
+ const f=uiFixture(notificationAvatarHtml),settings=f.core.readSettings(groups()),url='https://note.com/following';
+ for(const mode of ['normal','severe','social']){
+  f.ui.update({...settings,mode,authorDisplayRules:[{userId:'EXAMPLE',displayName:'保存名',action:'hide'},{userId:'other',displayName:'',action:'allow'}]},url);
+  assert.equal(f.doc.getElementById('notice-avatar').getAttribute('title'),'　！通知の作者（@example）');
+  assert.equal(f.doc.getElementById('notice-other').getAttribute('title'),'　別の作者（@other）');
+ }
+ f.ui.update({...settings,authorDisplayRules:[]},url);
+ assert.equal(f.doc.getElementById('notice-avatar').getAttribute('title'),'　通知の作者（@example）');
+ assert.equal(f.doc.getElementById('notice-avatar').closest('a').href,'https://note.com/example');
+ f.ui.update({...settings,enabled:false},url);
+ assert.equal(f.doc.getElementById('notice-avatar').getAttribute('title'),null);
+ assert.equal(f.doc.getElementById('notice-other').getAttribute('title'),'公式の説明');
+});
+test('通知の遅延挿入・作者変更をDOM通知後に反映し、定期同期では再走査しない',()=>{
+ const f=uiFixture(''),settings=f.core.readSettings(groups()),url='https://note.com/search';
+ f.ui.update(settings,url);
+ const panel=f.doc.createElement('div');panel.setAttribute('id','notifications');
+ const row=f.doc.createElement('li'),link=f.doc.createElement('a'),button=f.doc.createElement('button'),img=f.doc.createElement('img');
+ link.href='https://note.com/example';button.setAttribute('data-name','avatar');img.setAttribute('alt','初期名');
+ button.append(img);link.append(button);row.append(link);panel.append(row);f.doc.root.append(panel);
+ f.ui.invalidatePaidCards();f.ui.update(settings,url);assert.equal(button.getAttribute('title'),'　初期名（@example）');
+ img.setAttribute('alt','更新名');link.href='https://note.com/other';
+ f.ui.update(settings,url);assert.equal(button.getAttribute('title'),'　初期名（@example）');
+ f.ui.invalidatePaidCards();f.ui.update(settings,url);assert.equal(button.getAttribute('title'),'　更新名（@other）');
+ img.setAttribute('alt','');f.ui.invalidatePaidCards();f.ui.update(settings,url);assert.equal(button.getAttribute('title'),'　other（@other）');
+ panel.remove();f.ui.invalidatePaidCards();f.ui.update(settings,url);assert.equal(button.getAttribute('title'),null);
+ f.doc.root.append(panel);f.ui.invalidatePaidCards();f.ui.update(settings,url);f.ui.stop();assert.equal(button.getAttribute('title'),null);
+});
+test('通知外・記事URL・外部URLは変更せず、公式側が更新したtitleを停止時に壊さない',()=>{
+ const f=uiFixture(notificationAvatarHtml+'<a href="/example"><button id="outside" data-name="avatar"><img alt="通知外"></button></a>'),settings=f.core.readSettings(groups()),url='https://note.com/following';
+ const button=f.doc.getElementById('notice-avatar'),link=button.closest('a');
+ for(const href of ['https://other.test/example','https://note.com/example/n/n123','https://note.com/search','https://user:pass@note.com/example']){
+  link.href=href;f.ui.invalidatePaidCards();f.ui.update(settings,url);assert.equal(button.getAttribute('title'),null);
+ }
+ assert.equal(f.doc.getElementById('outside').getAttribute('title'),null);
+ link.href='https://note.com/example';f.ui.invalidatePaidCards();f.ui.update(settings,url);
+ button.setAttribute('title','公式の新しい説明');f.ui.stop();assert.equal(button.getAttribute('title'),'公式の新しい説明');
+});
+
 const logoHeaderHtml='<header data-header-state="navbar"><div><a href="/" target="_self"><svg role="img" aria-label="note"></svg></a></div></header>';
 test('狭幅の共通メニューはロゴ左のボタンで開閉し、広幅へ戻すと撤去・再狭幅では閉じる',()=>{
  const f=uiFixture(logoHeaderHtml+sidebarHtml),settings=f.core.readSettings(groups(['AI'])),url='https://note.com/following';
@@ -704,6 +755,39 @@ test('有料記事設定UIは未保存値を維持し、保存成功後に同期
 const paidCardHtml='<div class="grid-rows-subgrid"><div class="flex"><a class="absolute inset-0" aria-label="記事" title="記事" href="https://note.com/ai_urawaza_lab/n/n1cefb1215779"></a><div><h3></h3><div><div><span class="text-text-success text-sm"></span></div></div></div></div></div>';
 const paidMarker='data-oshaberi-note-paid-hidden';
 function paidFixture(){const f=uiFixture(paidCardHtml);f.doc.querySelector('span').textContent='¥300';return f;}
+
+function discountedZeroFixture(){
+ const f=paidFixture(),price=f.doc.querySelector('span'),holder=price.parentElement,row=holder.parentElement;
+ holder.className='flex items-center gap-1 text-text-success';row.className='mt-2 flex items-center gap-2 text-sm empty:hidden';
+ const currency=f.doc.createElement('span'),amount=f.doc.createElement('span'),badge=f.doc.createElement('span');
+ currency.textContent='¥';amount.textContent='0〜';price.replaceChildren(currency,amount);
+ badge.className='inline-flex bg-surface-offer rounded-full';badge.textContent='割引あり';row.append(badge);
+ const author=f.doc.createElement('a');author.setAttribute('data-name','avatar');author.href='https://note.com/ai_urawaza_lab';row.parentElement.append(author);
+ return {...f,price,amount,row,badge,card:f.doc.root.children[0]};
+}
+test('条件付き無料の¥0〜＋割引ありを各モードで隠し、許可作者・設定OFF・購入済み・停止は維持',()=>{
+ for(const mode of ['normal','severe','social']){
+  const f=discountedZeroFixture(),settings=f.core.readSettings({...groups(),mode,hidePaidArticles:true,noteUserId:'viewer'}),url='https://note.com/search?q=test';
+  for(const suffix of ['〜','～','~']){
+   f.amount.textContent='0'+suffix;f.ui.invalidatePaidCards();f.ui.update(settings,url);assert.equal(f.card.hasAttribute(paidMarker),true);
+  }
+  f.ui.update({...settings,authorDisplayRules:[{userId:'ai_urawaza_lab',displayName:'',action:'allow'}]},url);assert.equal(f.card.hasAttribute(paidMarker),false);
+  f.ui.update(settings,url);assert.equal(f.card.hasAttribute(paidMarker),true);
+  for(const patch of [{enabled:false},{hidePaidArticles:false}]){f.ui.update({...settings,...patch},url);assert.equal(f.card.hasAttribute(paidMarker),false);f.ui.update(settings,url);}
+  f.ui.update(settings,'https://note.com/notes/purchased');assert.equal(f.card.hasAttribute(paidMarker),false);
+  f.ui.update(settings,url);f.ui.stop();assert.equal(f.card.hasAttribute(paidMarker),false);
+ }
+});
+test('0円だけ・別行の割引・不明バッジ・本文内は隠さず、後挿入と価格変更を再判定する',()=>{
+ const f=discountedZeroFixture(),settings=f.core.readSettings({...groups(),hidePaidArticles:true}),url='https://note.com/following';
+ const hidden=()=>f.card.hasAttribute(paidMarker),refresh=()=>{f.ui.invalidatePaidCards();f.ui.update(settings,url);};
+ f.badge.remove();refresh();assert.equal(hidden(),false);f.row.append(f.badge);refresh();assert.equal(hidden(),true);
+ f.amount.textContent='0';refresh();assert.equal(hidden(),false);f.amount.textContent='0〜';
+ f.badge.textContent='割引についての説明';refresh();assert.equal(hidden(),false);f.badge.textContent='割引あり';
+ f.badge.className='rounded-full';refresh();assert.equal(hidden(),false);f.badge.className='bg-surface-offer rounded-full';
+ f.card.append(f.badge);refresh();assert.equal(hidden(),false);f.row.append(f.badge);refresh();assert.equal(hidden(),true);
+ const article=f.doc.createElement('article');f.doc.root.append(article);article.append(f.card);refresh();assert.equal(hidden(),false);
+});
 
 test('価格付き記事カードを両モードで隠し、OFF・購入済み一覧へのSPA遷移・停止で復元',()=>{
  for(const mode of ['normal']){
