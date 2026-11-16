@@ -440,7 +440,7 @@ test("アダプターは自拡張のhome.htmlだけを設定メッセージ送�
 });
 test("Manifest・専用HTMLの参照、権限と公開範囲が一致し、ホーム全体を隠さない", () => {
   const m = JSON.parse(source("manifest.json"));
-  assert.equal(m.manifest_version, 3); assert.equal(m.version, "0.1.2");
+  assert.equal(m.manifest_version, 3); assert.equal(m.version, "0.1.3");
   assert.deepEqual(m.permissions, ["storage", "declarativeNetRequestWithHostAccess"]);
   assert.deepEqual(m.host_permissions, ["https://note.com/*"]);
   assert.deepEqual(m.web_accessible_resources, [{ resources: ["home.html"], matches: ["https://note.com/*"] }]);
@@ -459,7 +459,7 @@ test('note上の歯車は作者ページで表示管理、一覧とお気に入�
  let actions;const f=contentFixture({}, {ui:{create(doc,win,a){actions=a;return {update(){}};}}});await flush();
  for(const [url,hash]of [
   ['https://note.com/creator','#authors'],['https://note.com/creator/?from=home','#authors'],
-  ['https://note.com/following','#tags'],['https://note.com/search?q=AI','#tags'],['https://note.com/tag/AI','#tags'],['https://note.com/creator/m/m123','#tags'],['https://note.com/creator/membership','#tags'],['https://note.com/creator/membership/join','#tags'],
+  ['https://note.com/help','#tags'],['https://note.com/help/pg/event','#tags'],['https://note.com/help/unknown','#settings'],['https://help-note.com/hc/ja','#settings'],['https://note.com/following','#tags'],['https://note.com/search?q=AI','#tags'],['https://note.com/tag/AI','#tags'],['https://note.com/creator/m/m123','#tags'],['https://note.com/creator/membership','#tags'],['https://note.com/creator/membership/join','#tags'],
   ['https://note.com/creator/n/n123','#tags'],['https://note.com/creator/n/n123/?from=profile#part','#tags'],['https://note.com/preview/n123','#settings'],['https://note.com/qa/creator','#settings'],['https://note.com/dashboard','#settings'],['https://note.com/login','#settings'],['https://outside.test/creator','#settings']
  ]){
   f.location.href=url;assert.equal(actions.settingsUrl(),f.home+hash,url);f.click();assert.equal(f.moves.at(-1)[1],f.home);

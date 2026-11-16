@@ -114,7 +114,7 @@
     const page = core.pageKind(location.href);
     if (core.usesTags(settings) && core.membershipPage(location.href)) return platform.homeUrl() + "#tags";
     if (page?.type === "profile") return platform.homeUrl() + "#authors";
-    const favorites = core.usesTags(settings) && (core.isArticle(location.href) || ["following", "tag", "search", "topic", "magazine"].includes(page?.type));
+    const favorites = core.usesTags(settings) && (core.isArticle(location.href) || ["following", "tag", "search", "topic", "help", "magazine"].includes(page?.type));
     return platform.homeUrl() + (favorites ? "#tags" : "#settings");
   }
   function checkHome() {

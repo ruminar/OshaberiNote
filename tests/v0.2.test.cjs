@@ -2357,3 +2357,66 @@ test('フォロー中カテゴリの印はOFF・レイアウトの切断や不�
  f.ui.update(settings,url);root.remove();f.ui.prepareSidebar(url,settings);assert.equal(marked(),false);f.doc.root.append(root);f.ui.update(settings,url);assert.equal(marked(),true);
  root.classList.remove('lg:grid-cols-[202px_minmax(0,1fr)]');f.ui.update(settings,url);assert.equal(marked(),false);root.classList.add('lg:grid-cols-[202px_minmax(0,1fr)]');f.ui.update(settings,url);assert.equal(marked(),true);f.ui.stop();assert.equal(marked(),false);assert.ok(root.classList.contains('min-h-screen'));
 });
+
+const accountMenuHtml='<div id="account-menu" class="min-w-[262px] py-6 md:py-0"><div class="border-border-weak border-t"><a href="/sample"><span data-name="avatar"></span></a><a href="https://note.com/settings/account"></a></div><div id="account-points" class="border-border-weak border-t py-2"><div class="relative"><a href="https://note.com/settings/point_history"><svg aria-label="所持noteポイント"></svg></a><div><a id="account-charge" href="https://note.com/settings/point_purchase"></a></div></div></div><div class="border-border-weak border-t"><a id="account-purchased" href="/notes/purchased"></a><a href="/membership/settings"></a><a href="/magazines/all"></a></div><div class="border-border-weak border-t"><a id="account-logout" href="https://note.com/logout"></a></div><div class="border-border-weak border-t border-none"><ul class="px-6"><li id="account-premium-item"><a id="account-premium" data-name="Button" href="https://premium.lp-note.com/"></a></li></ul><div class="flex items-center justify-center px-6"><a id="account-guide" href="/help"></a><span id="account-slash"></span><a id="account-help" href="https://help-note.com/hc/ja"></a></div></div></div>';
+function accountMenuFixture(html=accountMenuHtml){
+ const f=uiFixture(html);
+ for(const [id,text] of Object.entries({'account-charge':'チャージ','account-logout':'ログアウト','account-premium':'noteプレミアムサービス','account-guide':'note活用術','account-slash':'/','account-help':'ヘルプ'}))f.doc.getElementById(id).textContent=text;
+ return f;
+}
+const accountHidden='data-oshaberi-note-account-menu-hidden';
+test('アカウントメニューは有料非表示とおすすめ非表示を個別に適用し、全モードで履歴・ヘルプ・ログアウトを残す',()=>{
+ for(const mode of ['normal','social','severe'])for(const paid of [false,true])for(const recommendations of [false,true]){
+  const f=accountMenuFixture(),settings=f.core.readSettings({...groups(),mode,hidePaidArticles:paid,hideArticleRecommendations:recommendations});f.ui.update(settings,'https://note.com/search');
+  assert.equal(f.doc.getElementById('account-points').hasAttribute(accountHidden),paid);
+  for(const id of ['account-premium-item','account-guide','account-slash'])assert.equal(f.doc.getElementById(id).hasAttribute(accountHidden),recommendations);
+  for(const id of ['account-help','account-purchased','account-logout','account-menu'])assert.equal(f.doc.getElementById(id).hasAttribute(accountHidden),false);
+  f.ui.update({...settings,enabled:false},'https://note.com/search');assert.equal(f.doc.querySelectorAll(`[${accountHidden}]`).length,0);
+ }
+});
+test('メニューの後挿入・交換・設定変更・停止で非表示を更新し、初期メニューのない画面でも再検出する',()=>{
+ const f=accountMenuFixture(),root=f.doc.getElementById('account-menu'),s=f.core.readSettings({...groups(),hidePaidArticles:true,hideArticleRecommendations:true}),url='https://note.com/following';
+ root.remove();f.ui.update(s,url);f.doc.root.append(root);f.ui.invalidatePaidCards();f.ui.update(s,url);assert.equal(f.doc.getElementById('account-points').hasAttribute(accountHidden),true);
+ f.ui.update({...s,hidePaidArticles:false},url);assert.equal(f.doc.getElementById('account-points').hasAttribute(accountHidden),false);assert.equal(f.doc.getElementById('account-guide').hasAttribute(accountHidden),true);
+ root.remove();f.ui.invalidatePaidCards();f.ui.update(s,url);assert.equal(f.doc.getElementById('account-guide').hasAttribute(accountHidden),false);
+ f.doc.root.append(root);f.ui.invalidatePaidCards();f.ui.update(s,url);f.ui.stop();assert.equal(f.doc.querySelectorAll(`[${accountHidden}]`).length,0);
+});
+test('本文・拡張所有・未知のメニューや外部の同名リンクを隠さず、ポイント欄に別機能があればその機能を残す',()=>{
+ for(const wrapper of ['article','owned','unknown']){
+  const f=accountMenuFixture(),root=f.doc.getElementById('account-menu');
+  if(wrapper==='unknown')root.className='other';else{const block=f.doc.createElement(wrapper==='article'?'article':'div');if(wrapper==='owned')block.setAttribute('data-oshaberi-note-owned','');f.doc.root.append(block);block.append(root);}
+  f.ui.update(f.core.readSettings({...groups(),hidePaidArticles:true,hideArticleRecommendations:true}),'https://note.com/following');assert.equal(f.doc.querySelectorAll(`[${accountHidden}]`).length,0);
+ }
+ const f=accountMenuFixture(),s=f.core.readSettings({...groups(),hidePaidArticles:true,hideArticleRecommendations:true});
+ f.doc.getElementById('account-premium').href='https://other.test/';f.doc.getElementById('account-guide').href='https://other.test/help';
+ const extra=f.doc.createElement('button');f.doc.getElementById('account-points').append(extra);f.ui.update(s,'https://note.com/following');
+ assert.equal(f.doc.getElementById('account-points').hasAttribute(accountHidden),false);assert.equal(extra.hasAttribute(accountHidden),false);
+ assert.equal(f.doc.getElementById('account-points').children[0].hasAttribute(accountHidden),true);assert.equal(f.doc.getElementById('account-premium-item').hasAttribute(accountHidden),false);assert.equal(f.doc.getElementById('account-guide').hasAttribute(accountHidden),false);
+});
+test('helpとhelp/pg配下を共通メニューとして認識し、外部ヘルプと未知パスを作者扱いしない',()=>{
+ const {core}=fixture();
+ for(const path of ['/help','/help/','/help/pg/event','/help/pg/membership/?a=1','/help/pg/event/details'])assert.equal(core.pageKind('https://note.com'+path)?.type,'help',path);
+ for(const url of ['https://help-note.com/hc/ja','https://other.test/help','https://note.com/help/all','https://note.com/help/unknown','https://note.com/help/pg/'])assert.equal(core.pageKind(url),null,url);
+});
+
+test('活用術は4／8グループと狭幅メニューを共用し、SPA・OFF・停止で本文タブを壊さず復元する',()=>{
+ for(const display of ['normal','double'])for(const path of ['/help','/help/pg/event']){
+  const f=uiFixture(logoHeaderHtml+categorySidebarHtml),raw={...f.core.defaultSettings(),noteUserId:'sample',favoriteGroupDisplay:display};
+  if(display==='double'){raw.tagGroups=f.core.expandGroups(raw.tagGroups);raw.tagSchemaVersion=7;}
+  const settings=f.core.readSettings(raw),url='https://note.com'+path,main=f.doc.getElementById('category-main'),tabs=f.doc.createElement('nav');main.append(tabs);
+  const menu=()=>f.doc.querySelector('[class="oshaberi-note-navigation"]');f.ui.update(settings,url);assert.ok(menu());
+  assert.equal(menu().querySelectorAll('[data-group-id]').length,display==='double'?8:4);assert.equal(main.contains(tabs),true);assert.equal(tabs.hasAttribute('data-oshaberi-note-menu-hidden'),false);
+  f.doc.getElementById('category-sidebar').width=0;f.win.wide=false;f.ui.update(settings,url);assert.ok(menu().closest('[class="oshaberi-note-mobile-panel"]'));
+  f.ui.update(settings,'https://note.com/help/pg/membership');assert.equal(f.doc.querySelectorAll('[class="oshaberi-note-navigation"]').length,1);
+  f.ui.update({...settings,enabled:false},url);assert.equal(menu(),null);assert.equal(main.contains(tabs),true);
+  f.ui.update(settings,url);assert.ok(menu());f.ui.update(settings,'https://note.com/help/unknown');assert.equal(menu(),null);
+  f.ui.update(settings,url);f.ui.stop();assert.equal(menu(),null);assert.equal(main.contains(tabs),true);
+ }
+});
+
+test('変化のない定期同期ではアカウントメニューを再走査せず、DOM通知後だけ再評価する',()=>{
+ const f=accountMenuFixture(),settings=f.core.readSettings({...groups(),hidePaidArticles:true}),query=f.doc.querySelectorAll.bind(f.doc);let scans=0;
+ f.doc.querySelectorAll=selector=>{if(selector==='div[class~="min-w-[262px]"]')scans++;return query(selector);};
+ f.ui.update(settings,'https://note.com/following');f.ui.update(settings,'https://note.com/following');assert.equal(scans,1);
+ f.ui.invalidatePaidCards();f.ui.update(settings,'https://note.com/following');assert.equal(scans,2);
+});
