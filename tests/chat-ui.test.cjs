@@ -285,7 +285,7 @@ test('権限拒否時にはAPIへ接続せず、既存の設定・お気に入�
   const f = await fixture(t, { grant: false }), n = f.nodes;
   n.get('connect-ollama').onclick(); await flush();
   assert.equal(f.requests.length, 0); assert.equal(n.get('chat-send').disabled, true);
-  n.get('nav-tags').onclick(); assert.equal(n.get('panel-tags').hidden, false); assert.equal(n.get('add-tag').disabled, false);
+  n.get('nav-tags').onclick(); assert.equal(n.get('panel-tags').hidden, false); assert.equal(n.get('favorite-destination').disabled, false);
 });
 
 test('タグタブの初回送信と通常会話の復元で、プロンプトと履歴を分離する', async t => {

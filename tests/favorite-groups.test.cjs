@@ -97,8 +97,8 @@ test('管理画面の表示選択・8グループ編集・移動先を同期し�
  n.get('favorite-group-display').value='double';n.get('favorite-group-display').fire('change');n.get('settings').fire('submit');await flush();
  assert.equal(f.state.tagGroups.length,8);assert.equal(n.get('edit-groups').querySelectorAll('button').length,8);
  n.get('edit-groups').querySelector('[data-group-id="group8"]').onclick();await flush();
- n.get('tag-input').value='back';n.get('tag-form').fire('submit');await flush();
- assert.deepEqual(f.state.tagGroups[7].tags,['back']);assert.equal(n.get('edit-tags').querySelector('select').children.length,7);
+ await f.c.OshaberiNotePlatform.tag({type:'ADD_TAG',groupId:'group8',tag:'back'});f.changed({});await flush();
+ assert.deepEqual(f.state.tagGroups[7].tags,['back']);assert.equal(n.get('favorite-destination').children.length,8);
  n.get('favorite-group-display').value='normal';n.get('favorite-group-display').fire('change');n.get('settings').fire('submit');await flush();
  assert.equal(f.state.selectedTagGroupId,'group1');assert.equal(n.get('edit-groups').querySelectorAll('button').length,4);assert.deepEqual(f.state.tagGroups[7].tags,['back']);
 });
@@ -126,4 +126,57 @@ test('AIタグ登録ダイアログは設定変更に追従し、旧⑧ボタン
 test('タグ提案は通常表示でも保存した後半グループのタグを最新参考データに含める',async()=>{
  const f=fixture();await f.controller.save({favoriteGroupDisplay:'double'});await f.controller.tag({type:'ADD_TAG',groupId:'group8',tag:'back'});const state=await f.controller.save({favoriteGroupDisplay:'normal'});
  const prompt=f.c.OshaberiNoteChatActions.systemPrompt('tag-suggestion-v1',state);assert.ok(prompt.includes('["back"]'));
+});
+
+test('整理画面は手入力欄と行ごとの宛先を撤去し、初回は移動先未選択で始まる',async()=>{
+ const f=homeFixture({state:{tagGroups:fixture().core.defaultSettings().tagGroups.map((g,i)=>({...g,tags:i===0?['A','B']:[]}))}});await flush();const n=f.nodes;
+ assert.equal(n.has('tag-input'),false);assert.equal(n.has('tag-form'),false);assert.equal(n.get('favorite-destination').value,'');
+ assert.equal(n.get('favorite-list').contains(n.get('favorite-destination')),false);
+ for(const row of n.get('edit-tags').children){assert.equal(row.querySelector('select'),null);assert.equal(row.querySelectorAll('button').length,4);assert.equal(row.querySelectorAll('button')[3].disabled,true);}
+});
+
+test('同じ宛先へ5種類を連続移動し、宛先・スクロール・次のボタンへのフォーカスを維持する',async()=>{
+ const f=fixture(),items=['Tag',{type:'user',userId:'sample',displayName:'Author'},{type:'magazine',userId:'sample',magazineId:'m123',displayName:'Magazine'},{type:'membership',userId:'sample',displayName:'Membership'},article];
+ const raw=plain(f.core.defaultSettings());raw.tagGroups[0].tags=items;raw.tagSchemaVersion=6;
+ const h=homeFixture({state:raw}),n=h.nodes;await flush();n.get('favorite-destination').value='group4';n.get('favorite-destination').fire('change');n.get('favorite-list').scrollTop=180;
+ for(let i=0;i<items.length;i++){
+  n.get('edit-tags').children[0].querySelectorAll('button')[3].onclick();await flush();
+  assert.equal(n.get('favorite-destination').value,'group4');assert.equal(n.get('favorite-list').scrollTop,180);assert.match(n.get('favorite-operation-status').textContent,/④ グループ4へ移動しました/);
+  if(i<items.length-1)assert.equal(h.document.activeElement,n.get('edit-tags').children[0].querySelectorAll('button')[3]);else assert.equal(h.document.activeElement,n.get('favorite-list'));
+ }
+ assert.deepEqual(h.state.tagGroups[3].tags,items);assert.deepEqual(h.state.tagGroups[0].tags,[]);
+});
+
+test('移動先が移動元と同じになる切替・非表示化で未選択に戻し、残りの宛先は維持する',async()=>{
+ const f=fixture();await f.controller.save({favoriteGroupDisplay:'double'});const h=homeFixture({state:f.stored}),n=h.nodes;await flush();
+ const choose=value=>{n.get('favorite-destination').value=value;n.get('favorite-destination').fire('change');};
+ choose('group8');n.get('edit-groups').querySelector('[data-group-id="group2"]').onclick();await flush();assert.equal(n.get('favorite-destination').value,'group8');
+ n.get('edit-groups').querySelector('[data-group-id="group8"]').onclick();await flush();assert.equal(n.get('favorite-destination').value,'');
+ choose('group7');h.changed({favoriteGroupDisplay:'normal'});assert.equal(n.get('favorite-destination').value,'');assert.equal(n.get('favorite-destination').children.length,4);
+ h.changed({favoriteGroupDisplay:'double'});assert.equal(n.get('favorite-destination').value,'');
+});
+
+test('グループ別の一覧位置は切替と外部同期を経ても保持し、移動先はJSONに含めない',async()=>{
+ const h=homeFixture(),n=h.nodes;await flush();n.get('favorite-list').scrollTop=100;
+ n.get('edit-groups').querySelector('[data-group-id="group2"]').onclick();await flush();assert.equal(n.get('favorite-list').scrollTop,0);n.get('favorite-list').scrollTop=220;
+ n.get('edit-groups').querySelector('[data-group-id="group1"]').onclick();await flush();assert.equal(n.get('favorite-list').scrollTop,100);
+ n.get('favorite-destination').value='group3';n.get('favorite-destination').fire('change');h.changed({theme:'dark'});assert.equal(n.get('favorite-list').scrollTop,100);assert.equal(n.get('favorite-destination').value,'group3');
+ const exported=JSON.parse(h.c.OshaberiNote.exportSettings(h.state));assert.equal(Object.hasOwn(exported.settings,'favoriteDestination'),false);assert.equal(Object.hasOwn(exported.settings,'favoriteScrolls'),false);
+});
+
+test('移動先の重複・保存失敗では元項目を消さず、宛先を保持して成功表示しない',async()=>{
+ for(const saveError of [false,true]){
+  const raw=plain(fixture().core.defaultSettings());raw.tagGroups[0].tags=['A'];if(!saveError)raw.tagGroups[1].tags=['A'];
+  const h=homeFixture({state:raw,saveError}),n=h.nodes;await flush();n.get('favorite-destination').value='group2';n.get('favorite-destination').fire('change');n.get('favorite-list').scrollTop=75;
+  n.get('edit-tags').querySelectorAll('button')[3].onclick();await flush();assert.deepEqual(h.state.tagGroups[0].tags,['A']);assert.equal(n.get('favorite-destination').value,'group2');assert.equal(n.get('favorite-list').scrollTop,75);
+  assert.match(n.get('favorite-operation-status').textContent,/処理できませんでした/);assert.doesNotMatch(n.get('favorite-operation-status').textContent,/へ移動しました/);
+ }
+});
+
+test('お気に入りの移動中と成功時は右側だけ通知し、左メニューの状態文を変更しない',async()=>{
+ let release;const gate=new Promise(resolve=>{release=resolve;}),raw=plain(fixture().core.defaultSettings());raw.tagGroups[0].tags=['Sample'];
+ const h=homeFixture({state:raw,saveGate:gate}),n=h.nodes;await flush();const initial=n.get('status').textContent;
+ n.get('favorite-destination').value='group2';n.get('favorite-destination').fire('change');n.get('edit-tags').querySelectorAll('button')[3].onclick();
+ assert.equal(n.get('status').textContent,initial);assert.equal(n.get('favorite-operation-status').textContent,'保存しています…');
+ release();await flush();assert.equal(n.get('status').textContent,initial);assert.match(n.get('favorite-operation-status').textContent,/Sampleを② グループ2へ移動しました/);
 });

@@ -109,7 +109,7 @@ footer { font-size: 13px; color: var(--muted); margin-top: 24px; }
 .tag-form label { width: 100%; margin-bottom: 0; }
 .tag-form input { flex: 1 1 220px; min-width: 0; }
 .tag-editor { list-style: none; padding: 0 0 24px; min-height: 48px; }
-.tag-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--row-border); }
+.tag-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--row-border); }
 .tag-row[draggable="true"] { cursor: grab; }
 .tag-name { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; }
 .tag-row button { padding: 6px 10px; }
@@ -121,7 +121,22 @@ hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
 .tag-groups button { padding: 6px 12px; background: transparent; color: var(--accent); }
 .tag-groups button[aria-pressed="true"] { background: var(--button-bg); color: var(--button-text); }
 .tag-groups span { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.tag-row select { max-width: 140px; font: inherit; padding: 6px; border-radius: 6px; }
+#panel-tags { display: flex; flex-direction: column; height: max(480px, calc(100dvh - 64px)); }
+#panel-tags > :not(.favorites-scroll) { flex-shrink: 0; }
+.favorite-transfer-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; margin: 12px 0; }
+.favorite-transfer-toolbar label { margin: 0; }
+#favorite-destination { max-width: 100%; width: 240px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--field-border); border-radius: 6px; font: inherit; }
+#favorite-operation-status:empty { display: none; }
+.favorites-scroll { flex: 1; min-height: 100px; overflow: auto; scrollbar-gutter: stable; }
+.favorites-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.favorite-row-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.favorite-row-actions .favorite-transfer { margin-left: 8px; }
+@media(max-width: 520px) {
+  #panel-tags { height: max(480px, calc(100dvh - 48px)); }
+  .tag-row { flex-wrap: wrap; }
+  .tag-name { flex-basis: 100%; }
+  .favorite-row-actions { justify-content: flex-end; width: 100%; }
+}
 
 @media(max-width: 680px) { .home-layout { grid-template-columns: 1fr; gap: 20px; } .home-sidebar { position: static; } #panel-chat { min-height: 0; } .page-links { margin-top: 12px; padding-top: 12px; } }
 

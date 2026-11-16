@@ -84,33 +84,36 @@ test('未設定の自分のページから設定とユーザー名欄へ移り�
  }
 });
 
-test('別タブの更新は編集中タグと既存設定の未保存入力を消さない',async()=>{
+test('別タブの更新は移動先と既存設定の未保存入力を消さない',async()=>{
  const f=homeFixture();await flush();const n=f.nodes;
- n.get('tag-input').value='Comfy';n.get('note-user').value='draft_user';n.get('note-user').fire('input');
+ n.get('favorite-destination').value='group2';n.get('favorite-destination').fire('change');n.get('note-user').value='draft_user';n.get('note-user').fire('input');
  f.changed({...groups(['A']),noteUserId:'remote_user',dashboardDisabled:true});
- assert.equal(n.get('tag-input').value,'Comfy');assert.equal(n.get('note-user').value,'draft_user');assert.equal(n.get('dashboard-disabled').checked,true);
+ assert.equal(n.get('favorite-destination').value,'group2');assert.equal(n.get('note-user').value,'draft_user');assert.equal(n.get('dashboard-disabled').checked,true);
  n.get('settings').fire('submit');await flush();assert.deepEqual(f.patches,[{noteUserId:'draft_user'}]);assert.equal(f.state.dashboardDisabled,true);
 });
 test('背景処理からの破損データ診断を表示し、正常項目は残すがタグ編集は停止',async()=>{
  const f=homeFixture({state:{...groups(['A',null,'B'])}});await flush();const n=f.nodes;
  assert.equal(n.get('tag-warning').hidden,false);assert.match(n.get('tag-warning').textContent,/異常/);
- assert.equal(n.get('tag-input').disabled,true);assert.equal(n.get('add-tag').disabled,true);assert.equal(n.get('edit-tags').children.length,2);
- assert.equal(n.get('edit-tags').children[0].draggable,false);assert.equal(n.get('edit-tags').children[0].children.at(-1).disabled,true);
+ assert.equal(n.get('favorite-destination').disabled,true);assert.equal(n.get('edit-tags').children.length,2);
+ assert.equal(n.get('edit-tags').children[0].draggable,false);assert.equal(n.get('edit-tags').children[0].querySelector('button').disabled,true);
  n.get('dashboard-disabled').checked=true;n.get('dashboard-disabled').fire('change');n.get('settings').fire('submit');await flush();
  assert.deepEqual(f.state.tagGroups[0].tags,['A',null,'B']);assert.equal(n.get('tag-warning').hidden,false);
 });
-test('追加保存中に入力を変えても消さず、保存中の別タグ操作を受け付けない',async()=>{
- let resolve;const f=homeFixture({saveGate:new Promise(done=>{resolve=done;})});await flush();const n=f.nodes;
- n.get('tag-input').value='A';n.get('tag-form').fire('submit');n.get('tag-input').value='B';n.get('tag-form').fire('submit');
- assert.equal(n.get('add-tag').disabled,true);resolve();await flush();assert.deepEqual(f.state.tagGroups[0].tags,['A']);assert.equal(n.get('tag-input').value,'B');
+test('移動保存中は別操作を受け付けず、宛先を維持して成功した1件だけを移す',async()=>{
+ let resolve;const f=homeFixture({state:{...groups(['A','B'])},saveGate:new Promise(done=>{resolve=done;})});await flush();const n=f.nodes;
+ n.get('favorite-destination').value='group2';n.get('favorite-destination').fire('change');
+ const rows=n.get('edit-tags').children;rows[0].querySelectorAll('button')[3].onclick();rows[1].querySelectorAll('button')[3].onclick();
+ assert.equal(n.get('favorite-destination').disabled,true);resolve();await flush();assert.deepEqual(f.state.tagGroups[0].tags,['B']);assert.deepEqual(f.state.tagGroups[1].tags,['A']);assert.equal(n.get('favorite-destination').value,'group2');
 });
-test('結果未確認時はタグ操作を止め、再取得するまで自動再送も成功表示もしない',async()=>{
- const f=homeFixture({unconfirmed:true});await flush();const n=f.nodes;
- n.get('tag-input').value='A';n.get('tag-form').fire('submit');await flush();
- assert.equal(n.get('add-tag').disabled,true);assert.match(n.get('status').textContent,/未確認/);assert.equal(n.get('tag-input').value,'A');assert.deepEqual(f.state.tagGroups[0].tags,[]);
+
+test('結果未確認時は整理操作を止め、再取得するまで自動再送も成功表示もしない',async()=>{
+ const f=homeFixture({unconfirmed:true,state:{...groups(['A'])}});await flush();const n=f.nodes;
+ n.get('favorite-destination').value='group2';n.get('favorite-destination').fire('change');n.get('edit-tags').querySelectorAll('button')[3].onclick();await flush();
+ assert.equal(n.get('favorite-destination').disabled,true);assert.match(n.get('status').textContent,/未確認/);assert.deepEqual(f.state.tagGroups[0].tags,['A']);
  assert.equal(n.get('panel-settings').hidden,false);assert.equal(n.get('settings').contains(n.get('retry')),true);
- f.options.unconfirmed=false;n.get('retry').onclick();await flush();assert.equal(n.get('add-tag').disabled,false);assert.deepEqual(f.state.tagGroups[0].tags,[]);
+ f.options.unconfirmed=false;n.get('retry').onclick();await flush();assert.equal(n.get('favorite-destination').disabled,false);assert.deepEqual(f.state.tagGroups[0].tags,['A']);
 });
+
 test('初回の設定読込失敗でも設定タブに再確認を表示し、再試行で復旧できる',async()=>{
  const f=homeFixture({stateError:true});await flush();const n=f.nodes;
  assert.equal(n.get('panel-settings').hidden,false);assert.equal(n.get('home-menu').hidden,false);
@@ -122,7 +125,7 @@ test('初回の設定読込失敗でも設定タブに再確認を表示し、�
 });
 test('上下ボタンとドラッグの移動を保存し、キーボードで左メニューを選択できる',async()=>{
  const f=homeFixture({state:{...groups(['A','B','C'])}});await flush();const n=f.nodes;
- n.get('edit-tags').children[1].children[1].onclick();await flush();assert.deepEqual(f.state.tagGroups[0].tags,['B','A','C']);
+ n.get('edit-tags').children[1].querySelector('button').onclick();await flush();assert.deepEqual(f.state.tagGroups[0].tags,['B','A','C']);
  const rows=n.get('edit-tags').children;rows[2].fire('dragstart',{dataTransfer:{setData(){}}});rows[0].fire('drop');await flush();assert.deepEqual(f.state.tagGroups[0].tags,['C','B','A']);
  const moved=n.get('edit-tags').children;moved[0].fire('dragstart',{dataTransfer:{setData(){}}});moved[2].fire('drop',{clientY:39});await flush();assert.deepEqual(f.state.tagGroups[0].tags,['B','A','C']);
  n.get('home-menu').fire('keydown',{key:'End'});assert.equal(n.get('panel-transfer').hidden,false);assert.equal(f.document.activeElement,n.get('nav-transfer'));
@@ -1010,14 +1013,14 @@ test('選択①→②→①でもタグページの古い選択番号を拒否�
  await f.controller.tag({type:'ADD_TAG',groupId:'group1',tag:'X'},{requireEnabled:true,selectionRevision:2});assert.deepEqual(f.stored.tagGroups[0].tags,['X']);
 });
 
-test('ホームの4番号・改名・グループ別入力保持・移動操作を実ソースで検証',async()=>{
+test('ホームの4番号・改名・グループ別の名前下書き保持・共通宛先への移動を検証',async()=>{
  const f=homeFixture({state:{...groups(['A'])}});await flush();const n=f.nodes;
- assert.equal(n.get('edit-groups').querySelectorAll('button').length,4);n.get('tag-input').value='①の途中';
- n.get('edit-groups').querySelectorAll('button')[1].onclick();await flush();assert.equal(f.state.selectedTagGroupId,'group2');assert.equal(n.get('tag-input').value,'');
- n.get('tag-input').value='②の途中';n.get('group-name').value='技術系';n.get('group-name').fire('input');n.get('group-name-form').fire('submit');await flush();assert.equal(f.state.tagGroups[1].name,'技術系');
- n.get('edit-groups').querySelectorAll('button')[0].onclick();await flush();assert.equal(n.get('tag-input').value,'①の途中');
- const row=n.get('edit-tags').children[0];row.querySelector('select').value='group2';row.children.at(-1).onclick();await flush();assert.deepEqual(f.state.tagGroups[0].tags,[]);assert.deepEqual(f.state.tagGroups[1].tags,['A']);
- n.get('edit-groups').querySelectorAll('button')[1].onclick();await flush();assert.equal(n.get('tag-input').value,'②の途中');assert.equal(n.get('group-name').value,'技術系');assert.deepEqual(f.moves,[]);
+ assert.equal(n.get('edit-groups').querySelectorAll('button').length,4);n.get('group-name').value='①の途中';n.get('group-name').fire('input');
+ n.get('edit-groups').querySelectorAll('button')[1].onclick();await flush();assert.equal(f.state.selectedTagGroupId,'group2');assert.equal(n.get('group-name').value,'');
+ n.get('group-name').value='技術系';n.get('group-name').fire('input');n.get('group-name-form').fire('submit');await flush();assert.equal(f.state.tagGroups[1].name,'技術系');
+ n.get('edit-groups').querySelectorAll('button')[0].onclick();await flush();assert.equal(n.get('group-name').value,'①の途中');
+ n.get('favorite-destination').value='group2';n.get('favorite-destination').fire('change');n.get('edit-tags').querySelectorAll('button')[3].onclick();await flush();assert.deepEqual(f.state.tagGroups[0].tags,[]);assert.deepEqual(f.state.tagGroups[1].tags,['A']);
+ n.get('edit-groups').querySelectorAll('button')[1].onclick();await flush();assert.equal(n.get('favorite-destination').value,'');assert.equal(n.get('group-name').value,'技術系');assert.deepEqual(f.moves,[]);
 });
 
 test('サイドバーのグループ選択はページ遷移せず保存結果を反映し、追加に選択IDとrevisionを送る',async()=>{
@@ -1183,10 +1186,10 @@ test('JSON検証と確認後に全置換し、未保存入力を破棄するがJ
  n.get('nav-transfer').fire('click');n.get('settings-json').value='{}';n.get('settings-json').fire('input');assert.equal(n.get('import-settings').disabled,true);
  const target={...settingsData(),enabled:false,mode:'severe',noteUserId:'imported',...groups(['new'])},json=core.exportSettings(target);
  n.get('settings-json').value=json;n.get('settings-json').fire('input');assert.equal(n.get('import-settings').disabled,false);
- n.get('note-user').value='draft';n.get('note-user').fire('input');n.get('tag-input').value='draft tag';
+ n.get('note-user').value='draft';n.get('note-user').fire('input');n.get('favorite-destination').value='group2';n.get('favorite-destination').fire('change');
  f.options.confirm=()=>false;n.get('import-settings').fire('click');await flush();assert.equal(f.state.noteUserId,'ruminar');
  f.options.confirm=()=>true;n.get('import-settings').fire('click');await flush();
- assert.equal(f.state.noteUserId,'imported');assert.equal(f.state.enabled,false);assert.equal(n.get('note-user').value,'imported');assert.equal(n.get('tag-input').value,'');
+ assert.equal(f.state.noteUserId,'imported');assert.equal(f.state.enabled,false);assert.equal(n.get('note-user').value,'imported');assert.equal(n.get('favorite-destination').value,'');
  assert.equal(n.get('settings-json').value,json);assert.equal(n.get('panel-transfer').hidden,false);assert.deepEqual(f.moves,[]);assert.match(n.get('transfer-status').textContent,/読み込みました/);
 });
 
