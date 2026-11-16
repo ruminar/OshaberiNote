@@ -1,8 +1,8 @@
-# おしゃべりnote 0.1.2 開発中
+# おしゃべりnote 0.1.2
 
 noteのホームをOllamaチャットに置き換える、PC版Chrome・Edge・Firefox向けの非公式拡張です。ひきこもりnote v0.3.0のひとみしりモードを基にしています。
 
-0.1.2は未公開の開発版です。未ログイン時のTL帰還リンク、歯車の遷移先調整、記事のお気に入り登録に対応しています。有料記事非表示では「¥0〜」かつ「割引あり」の条件付き無料記事も対象にします。通知の作者アイコンには、先頭に全角スペースを置いた「表示名（@ユーザーID）」の標準ツールチップを表示し、非表示設定作者は名前の前に「！」を付けます。公開済みの配布物と変更点は[0.1.1 Release](https://github.com/ruminar/OshaberiNote/releases/tag/0.1.1)と[リリースノート](docs/release-notes-0.1.1.md)を参照してください。
+0.1.2のリリース準備版です。記事のお気に入り登録、最大8グループ、未ログイン時のTL帰還リンク、通知ツールチップなどに対応しました。変更点は[0.1.2リリースノート](docs/release-notes-0.1.2.md)を参照してください。ストアの反映状況は各ストアで確認してください。
 
 ## お気に入りグループの表示（0.1.2）
 
@@ -18,7 +18,7 @@ noteのホームをOllamaチャットに置き換える、PC版Chrome・Edge・F
 
 ## 導入
 
-1. [GitHub Release](https://github.com/ruminar/OshaberiNote/releases/tag/0.1.0)から対象ブラウザのZIPをダウンロードし、展開します。ソースから生成する場合は PowerShellから `.\scripts\package.ps1` で構文・自動テストと両ブラウザの配布生成を実行できます。
+1. [GitHub Release](https://github.com/ruminar/OshaberiNote/releases)から対象ブラウザのZIPをダウンロードし、展開します。ソースから生成する場合は PowerShellから `.\scripts\package.ps1` で構文・自動テストと両ブラウザの配布生成を実行できます。
 2. Chrome / Edgeの拡張管理画面で開発者モードを有効にし、ZIPの展開先（ソースから生成した場合は `dist/OshaberiNote-0.1.2-chromium`）を「パッケージ化されていない拡張機能」として読み込みます。
 3. Firefoxでは `about:debugging#/runtime/this-firefox` →「一時的なアドオンを読み込む」から ZIPの展開先の `manifest.json`（ソースから生成した場合は `dist/OshaberiNote-0.1.2-firefox/manifest.json`）を指定します。Firefox 140以上が必要です。Androidは対象外です。
 4. ひきこもりnoteは無効にして、Ollamaを起動します。拡張アイコンから専用ホームの「LLMの設定」を開き、「接続・再試行」で接続先へのアクセスを許可し、モデルを選択します。
