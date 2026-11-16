@@ -39,6 +39,17 @@
       delete result.legacyMode;
       delete result.noteLogoBrowserBack;
       result.mode = "normal";
+      if (!settings.tagWarning) {
+        if (settings.favoriteGroupDisplay === "double" && settings.tagGroups.length === 4) {
+          result.tagGroups = core.expandGroups(settings.tagGroups);
+          result.tagSchemaVersion = 7;
+          result.tagGroupsRevision = increment(settings.tagGroupsRevision);
+        }
+        if (raw?.selectedTagGroupId && raw.selectedTagGroupId !== settings.selectedTagGroupId && !settings.groupSelectionInvalid) {
+          result.selectedTagGroupId = settings.selectedTagGroupId;
+          result.groupSelectionRevision = increment(settings.groupSelectionRevision);
+        }
+      }
       return result;
     }
     function increment(value) {
@@ -53,7 +64,7 @@
       }),
       save: (patch, expectedToken) => run(async () => {
         if (!patch || typeof patch !== "object" || Array.isArray(patch) ||
-            Object.keys(patch).some(key => !["enabled", "theme", "noteUserId", "dashboardDisabled", "ollamaUrl", "ollamaModel", "ollamaSystemPrompt", "hideArticleRecommendations", "hidePaidArticles", "hideLikeCounts", "keepNoteHeaderVisible"].includes(key))) {
+            Object.keys(patch).some(key => !["enabled", "favoriteGroupDisplay", "theme", "noteUserId", "dashboardDisabled", "ollamaUrl", "ollamaModel", "ollamaSystemPrompt", "hideArticleRecommendations", "hidePaidArticles", "hideLikeCounts", "keepNoteHeaderVisible"].includes(key))) {
           throw new Error("設定の形式が正しくありません。");
         }
         if (Object.hasOwn(patch, "enabled") && typeof patch.enabled !== "boolean") {
@@ -71,6 +82,10 @@
         if (Object.hasOwn(patch, "hideArticleRecommendations") && typeof patch.hideArticleRecommendations !== "boolean") throw new Error("おすすめ表示設定の値が正しくありません。");
         if (Object.hasOwn(patch, "keepNoteHeaderVisible") && typeof patch.keepNoteHeaderVisible !== "boolean") throw new Error("ヘッダ表示設定の値が正しくありません。");
         const next = { ...previous, ...patch };
+        if (!["normal", "double"].includes(next.favoriteGroupDisplay)) throw new Error("お気に入りグループの表示設定を確認してください。");
+        if (next.favoriteGroupDisplay === "normal" && core.groupIds.indexOf(next.selectedTagGroupId) >= 4) {
+          next.selectedTagGroupId = "group1";
+        }
         if (!["system", "light", "dark"].includes(next.theme)) throw new Error("テーマの値が正しくありません。");
         next.ollamaUrl = core.normalizeOllamaUrl(next.ollamaUrl);
         next.ollamaModel = core.validateModel(next.ollamaModel);
@@ -145,6 +160,9 @@
         if (options.requireEnabled && !settings.enabled) throw failure("拡張OFFではタグを追加できません。", "DISABLED");
         if (!core.usesTags(settings)) throw failure("現在のモードではタグを編集できません。状態を再確認してください。", "MODE_RESTRICTED");
         if (settings.tagWarning) throw failure(settings.tagWarning, "INVALID_TAGS");
+        const available = core.availableGroups(settings);
+        if (!available.some(group => group.id === operation.groupId) ||
+            (operation.type === "TRANSFER_TAG" && !available.some(group => group.id === operation.targetGroupId))) throw failure("非表示のグループは操作できません。表示設定を確認してください。", "MODE_RESTRICTED");
         if (settings.groupSelectionInvalid && operation.type !== "SELECT_TAG_GROUP") throw failure("グループを選び直してください。", "CONFLICT");
         if (options.selectionRevision !== undefined && (settings.groupSelectionRevision !== options.selectionRevision || settings.selectedTagGroupId !== operation.groupId)) throw failure("選択グループが変わりました。状態を再確認してください。", "CONFLICT");
         const groups = settings.tagGroups.map(group => ({ ...group, tags: [...group.tags] }));

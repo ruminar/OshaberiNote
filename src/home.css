@@ -42,7 +42,7 @@ h1 { font-size: 24px; margin: 0; } h2 { font-size: 20px; margin-top: 0; }
 p { margin: 12px 0; } .muted { color: var(--muted); font-size: 14px; }
 section { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px; margin: 24px 0; }
 label { display: block; font-weight: 600; margin-bottom: 8px; }
-input, #operation-mode, #theme { width: 100%; max-width: 520px; padding: 12px; border: 1px solid var(--field-border); border-radius: 6px; font: inherit; }
+input, #operation-mode, #theme, #favorite-group-display { width: 100%; max-width: 520px; padding: 12px; border: 1px solid var(--field-border); border-radius: 6px; font: inherit; }
 input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
 .check-option { display: flex; align-items: center; gap: 10px; margin: 20px 0 8px; }
 .settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }

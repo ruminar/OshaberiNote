@@ -49,13 +49,15 @@
     const byId = id => doc.getElementById(id), dialog = byId("chat-tag-dialog");
     let selected, saving = false, uncertain = false;
     const buttons = [];
-    const signs = ["①", "②", "③", "④"];
+    const signs = core.groupSymbols;
     function refresh() {
       if (!dialog.open || !selected) return;
       const settings = getSettings();
+      const visible = core.availableGroups(settings);
+      if (buttons.length !== visible.length) buildButtons(visible);
       const blocked = saving || uncertain || !settings?.enabled || Boolean(settings?.tagWarning) || !selected.valid();
       for (let index = 0; index < buttons.length; index++) {
-        const group = settings?.tagGroups.find(item => item.id === core.groupIds[index]);
+        const group = visible[index];
         const registered = group?.tags.includes(selected.tag);
         buttons[index].textContent = `${signs[index]}${group ? core.groupName(group) : `グループ${index + 1}`}${registered ? "（登録済み）" : "に登録"}`;
         buttons[index].disabled = blocked || !group || registered;
@@ -64,7 +66,7 @@
     async function register(groupId) {
       if (!selected || saving || uncertain) return;
       const settings = getSettings(), tag = selected.tag;
-      const group = settings?.tagGroups.find(item => item.id === groupId);
+      const group = settings && core.availableGroups(settings).find(item => item.id === groupId);
       if (!settings?.enabled || settings.tagWarning || !selected.valid() || !group || group.tags.includes(tag)) { refresh(); return; }
       saving = true; refresh();
       byId("chat-tag-status").textContent = "登録しています…";
@@ -79,13 +81,17 @@
           : error.message;
       } finally { saving = false; refresh(); }
     }
-    for (const [index, groupId] of core.groupIds.entries()) {
-      const button = doc.createElement("button"); button.type = "button";
-      button.setAttribute("data-chat-tag-group", groupId);
-      button.textContent = `${signs[index]}グループ${index + 1}に登録`;
-      button.onclick = () => { void register(groupId); };
-      byId("chat-tag-groups").append(button); buttons.push(button);
+    function buildButtons(groups) {
+      byId("chat-tag-groups").replaceChildren(); buttons.length = 0;
+      for (const [index, group] of groups.entries()) {
+        const groupId = group.id, button = doc.createElement("button"); button.type = "button";
+        button.setAttribute("data-chat-tag-group", groupId);
+        button.textContent = `${signs[index]}グループ${index + 1}に登録`;
+        button.onclick = () => { void register(groupId); };
+        byId("chat-tag-groups").append(button); buttons.push(button);
+      }
     }
+    buildButtons(core.availableGroups(getSettings() ?? core.defaultSettings()));
     byId("chat-tag-close").onclick = () => dialog.close();
     dialog.addEventListener("close", () => { selected?.trigger.setAttribute("aria-expanded", "false"); selected = undefined; });
     function render(node, content, valid) {

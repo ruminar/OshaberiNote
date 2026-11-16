@@ -4,7 +4,7 @@
   const platform = globalThis.OshaberiNotePlatform;
   const byId = id => document.getElementById(id);
   const views = ["chat", "tags", "authors", "llm", "settings", "transfer"];
-  const fields = { theme: "theme", hideLikeCounts: "hide-like-counts", hidePaidArticles: "hide-paid-articles", noteUserId: "note-user", dashboardDisabled: "dashboard-disabled", hideArticleRecommendations: "hide-article-recommendations", keepNoteHeaderVisible: "keep-note-header-visible" };
+  const fields = { favoriteGroupDisplay: "favorite-group-display", theme: "theme", hideLikeCounts: "hide-like-counts", hidePaidArticles: "hide-paid-articles", noteUserId: "note-user", dashboardDisabled: "dashboard-disabled", hideArticleRecommendations: "hide-article-recommendations", keepNoteHeaderVisible: "keep-note-header-visible" };
   const drafts = new Map();
   function draft(id) { if (!drafts.has(id)) drafts.set(id, { tag: "", name: "", nameDirty: false, expectedName: "" }); return drafts.get(id); }
   const dirty = new Set();
@@ -81,8 +81,8 @@
     for (const id of ["edit-groups"]) {
       const container = byId(id), focused = container.contains(document.activeElement) ? document.activeElement?.getAttribute("data-group-id") : null;
       container.replaceChildren(); container.setAttribute("role", "group"); container.setAttribute("aria-label", "お気に入りのグループ");
-      state.tagGroups.forEach((item, index) => {
-        const button = document.createElement("button"); button.type = "button"; button.textContent = ["①", "②", "③", "④"][index];
+      core.availableGroups(state).forEach((item, index) => {
+        const button = document.createElement("button"); button.type = "button"; button.textContent = core.groupSymbols[index];
         button.setAttribute("data-group-id", item.id); button.setAttribute("aria-label", `${button.textContent} ${core.groupName(item)}`);
         button.setAttribute("aria-pressed", String(item.id === group.id)); button.setAttribute("title", core.groupName(item));
         button.onclick = () => { void perform(() => platform.tag({ type: "SELECT_TAG_GROUP", groupId: item.id }), { focusGroup: [id, item.id] }); };
@@ -115,10 +115,10 @@
       action("↓", "下へ移動", { type: "MOVE_TAG", tag, beforeTag: tags[index + 2] ?? null }, index === tags.length - 1);
       action("削除", "削除", { type: "REMOVE_TAG", tag });
       const destination = document.createElement("select"); destination.setAttribute("aria-label", `${core.favoriteLabel(tag)}の移動先`);
-      for (const item of state.tagGroups.filter(item => item.id !== group.id)) {
+      for (const item of core.availableGroups(state).filter(item => item.id !== group.id)) {
         const option = document.createElement("option"); option.value = item.id; option.textContent = `${core.groupIds.indexOf(item.id) + 1} ${core.groupName(item)}`; destination.append(option);
       }
-      destination.value = state.tagGroups.find(item => item.id !== group.id).id; row.append(destination);
+      destination.value = core.availableGroups(state).find(item => item.id !== group.id).id; row.append(destination);
       const transfer = document.createElement("button"); transfer.type = "button"; transfer.textContent = "移動";
       transfer.setAttribute("aria-label", `${core.favoriteLabel(tag)}を別グループへ移動`);
       transfer.onclick = () => { void mutateTag({ type: "TRANSFER_TAG", groupId: group.id, targetGroupId: destination.value, tag }); }; row.append(transfer);
@@ -195,7 +195,7 @@
     if (core.usesTags(state) && selected === "intro") selected = "tags";
     for (const [field, id] of Object.entries(fields)) {
       if (dirty.has(field)) continue;
-      if (["noteUserId", "mode", "theme"].includes(field)) byId(id).value = state[field];
+      if (["noteUserId", "mode", "theme", "favoriteGroupDisplay"].includes(field)) byId(id).value = state[field];
       else byId(id).checked = state[field];
     }
     byId("home-menu").hidden = false;
@@ -276,7 +276,7 @@
   byId("settings").onsubmit = event => {
     event.preventDefault();
     const patch = {};
-    for (const field of dirty) patch[field] = ["noteUserId", "mode", "theme"].includes(field) ? byId(fields[field]).value : byId(fields[field]).checked;
+    for (const field of dirty) patch[field] = ["noteUserId", "mode", "theme", "favoriteGroupDisplay"].includes(field) ? byId(fields[field]).value : byId(fields[field]).checked;
     try { if (Object.hasOwn(patch, "noteUserId")) patch.noteUserId = core.normalizeUserId(patch.noteUserId); }
     catch (error) { byId("status").textContent = error.message; byId("note-user").focus(); return; }
     void perform(() => platform.save(patch), { kind: "settings" });

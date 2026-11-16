@@ -2,11 +2,14 @@
 (() => {
   "use strict";
   const settingsKey = "oshaberiNote.settings.v2";
-  const groupIds = ["group1", "group2", "group3", "group4"];
+  const groupIds = Object.freeze(Array.from({ length: 8 }, (_, index) => `group${index + 1}`));
+  const groupSymbols = Object.freeze(["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧"]);
+  function expandGroups(groups) { return groupIds.map(id => groups.find(group => group.id === id) || { id, name: "", tags: [] }); }
+  function availableGroups(settings) { return usesTags(settings) ? settings.tagGroups.slice(0, settings.favoriteGroupDisplay === "double" ? 8 : 4) : []; }
   function defaultSettings() {
-    return { enabled: true, theme: "system", noteUserId: "", dashboardDisabled: false, mode: "normal", ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "",
+    return { enabled: true, favoriteGroupDisplay: "normal", theme: "system", noteUserId: "", dashboardDisabled: false, mode: "normal", ollamaUrl: "http://127.0.0.1:11434", ollamaModel: "", ollamaSystemPrompt: "",
       hideArticleRecommendations: false, hidePaidArticles: false, hideLikeCounts: false, keepNoteHeaderVisible: false, tagSchemaVersion: 2,
-      tagGroups: groupIds.map(id => ({ id, name: "", tags: [] })), selectedTagGroupId: "group1",
+      tagGroups: groupIds.slice(0, 4).map(id => ({ id, name: "", tags: [] })), selectedTagGroupId: "group1",
       groupSelectionRevision: 0, tagGroupsRevision: 0, authorDisplayRules: [], authorDisplayRevision: 0 };
   }
   function groupName(group) { return group.name || `グループ${groupIds.indexOf(group.id) + 1}`; }
@@ -20,8 +23,8 @@
   function inspectGroups(value) {
     let warning = !value || typeof value !== "object" || Array.isArray(value) ? "設定の保存形式に異常があります。タグ編集を停止しました。" : "";
     const source = Array.isArray(value?.tagGroups) ? value.tagGroups : [];
-    if (![2, 3, 4, 5, 6].includes(value?.tagSchemaVersion) || source.length !== 4) warning = "お気に入りの保存形式に異常があります。元データを保持し、編集を停止しました。";
-    const groups = groupIds.map((id, index) => {
+    if (![2, 3, 4, 5, 6, 7].includes(value?.tagSchemaVersion) || source.length !== (value?.tagSchemaVersion === 7 ? 8 : 4)) warning = "お気に入りの保存形式に異常があります。元データを保持し、編集を停止しました。";
+    const groups = groupIds.slice(0, value?.tagSchemaVersion === 7 ? 8 : 4).map((id, index) => {
       const matches = source.filter(group => group?.id === id), item = matches.length === 1 ? matches[0] : undefined;
       const tags = inspectTags(item?.tags, value?.tagSchemaVersion >= 3, value?.tagSchemaVersion >= 4, value?.tagSchemaVersion >= 5, value?.tagSchemaVersion >= 6); let name = "";
       try { name = normalizeGroupName(item?.name); if (name !== item.name) warning ||= "グループ名の保存値に異常があります。"; }
@@ -37,14 +40,14 @@
     for (const key of ["groupSelectionRevision", "tagGroupsRevision"]) {
       if (!Number.isSafeInteger(value?.[key]) || value[key] < 0) warning ||= "グループの更新番号に異常があります。";
     }
-    const selectionInvalid = !groupIds.includes(value?.selectedTagGroupId);
+    const selectionInvalid = !groups.some(group => group.id === value?.selectedTagGroupId);
     return { tagSchemaVersion: value?.tagSchemaVersion, tagGroups: groups,
-      selectedTagGroupId: !selectionInvalid ? value.selectedTagGroupId : "group1",
+      selectedTagGroupId: !selectionInvalid && (value?.favoriteGroupDisplay === "double" || groupIds.indexOf(value.selectedTagGroupId) < 4) ? value.selectedTagGroupId : "group1",
       groupSelectionRevision: value?.groupSelectionRevision,
       tagGroupsRevision: value?.tagGroupsRevision,
       ...(warning ? { tagWarning: warning } : {}), ...(selectionInvalid ? { groupSelectionInvalid: true } : {}) };
   }
-  function selectedGroup(settings) { return settings.tagGroups.find(group => group.id === settings.selectedTagGroupId); }
+  function selectedGroup(settings) { return availableGroups(settings).find(group => group.id === settings.selectedTagGroupId) || availableGroups(settings)[0]; }
   function isHome(url) {
     try {
       const parsed = new URL(url);
@@ -85,7 +88,7 @@
     let noteUserId = "";
     try { noteUserId = normalizeUserId(value?.noteUserId); } catch { /* 破損値は空欄へ */ }
     const groups = inspectGroups(value);
-    return { enabled: value?.enabled !== false, theme: ["system", "light", "dark"].includes(value?.theme) ? value.theme : "system", noteUserId, dashboardDisabled: value?.dashboardDisabled === true,
+    return { enabled: value?.enabled !== false, favoriteGroupDisplay: value?.favoriteGroupDisplay === "double" ? "double" : "normal", theme: ["system", "light", "dark"].includes(value?.theme) ? value.theme : "system", noteUserId, dashboardDisabled: value?.dashboardDisabled === true,
       mode: "normal", ollamaUrl: value?.ollamaUrl ?? "http://127.0.0.1:11434", ollamaModel: value?.ollamaModel ?? "", ollamaSystemPrompt: value && Object.hasOwn(value, "ollamaSystemPrompt") ? value.ollamaSystemPrompt : "", hideArticleRecommendations: value?.hideArticleRecommendations === true, hidePaidArticles: value?.hidePaidArticles === true, hideLikeCounts: value?.hideLikeCounts === true,
       keepNoteHeaderVisible: value?.keepNoteHeaderVisible === true, ...groups, ...inspectAuthors(value) };
   }
@@ -153,7 +156,7 @@
       return match ? authorId(match[1]) : null;
     } catch { return null; }
   }
-  function favoriteSchema(groups, minimum = 2) { return Math.max(minimum, groups.some(g => g.tags.some(t => t?.type === "article")) ? 6 : groups.some(g => g.tags.some(t => t?.type === "membership")) ? 5 : groups.some(g => g.tags.some(t => t?.type === "magazine")) ? 4 : groups.some(g => g.tags.some(t => t?.type === "user")) ? 3 : 2); }
+  function favoriteSchema(groups, minimum = 2) { return Math.max(minimum, groups.length === 8 ? 7 : groups.some(g => g.tags.some(t => t?.type === "article")) ? 6 : groups.some(g => g.tags.some(t => t?.type === "membership")) ? 5 : groups.some(g => g.tags.some(t => t?.type === "magazine")) ? 4 : groups.some(g => g.tags.some(t => t?.type === "user")) ? 3 : 2); }
   // 自前の輪郭SVG。絵文字の字体や外部アイコン配信には依存しない。
   const bookIconPath = "M12 5.5C9 3.5 5 3.5 2 4.5v14c3-1 7-1 10 1 3-2 7-2 10-1v-14c-3-1-7-1-10 1Zm0 0v14";
   const membershipIconPath = "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM17 4a4 4 0 0 1 0 8M2 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2M18 15a4 4 0 0 1 4 4v2";
@@ -292,7 +295,7 @@
       mode = value.mode;
     }
     if (typeof value.noteUserId !== "string" || normalizeUserId(value.noteUserId) !== value.noteUserId) throw new Error("ユーザー名の保存値が正しくありません。");
-    if (!Array.isArray(value.tagGroups) || value.tagGroups.length !== 4 || !groupIds.includes(value.selectedTagGroupId)) throw new Error("4グループと選択グループを確認してください。");
+    if (!Array.isArray(value.tagGroups) || ![4, ...(version >= 9 ? [8] : [])].includes(value.tagGroups.length) || !groupIds.slice(0, value.tagGroups.length).includes(value.selectedTagGroupId)) throw new Error("グループ数と選択グループを確認してください。");
     const groups = value.tagGroups.map((group, index) => {
       const items = version >= 5 ? group?.items : group?.tags;
       if (!exactKeys(group, ["id", "name", version >= 5 ? "items" : "tags"]) || group.id !== groupIds[index] ||
@@ -320,12 +323,13 @@
     if (settings.tagWarning || settings.groupSelectionInvalid || settings.authorWarning) throw new Error("保存データに異常があります。状態を再確認してください。");
     const value = Object.fromEntries([...transferFlags.filter(key => key !== "legacyMode"), "keepNoteHeaderVisible", "hideLikeCounts", "mode", "noteUserId", "tagGroups", "selectedTagGroupId", "authorDisplayRules"].map(key => [key, key === "mode" ? modeOf(settings) : ["keepNoteHeaderVisible", "hideLikeCounts"].includes(key) ? settings[key] ?? false : key === "authorDisplayRules" ? settings[key] ?? [] : settings[key]]));
     value.tagGroups = value.tagGroups.map(group => ({ id: group.id, name: group.name, items: group.tags.map(item => typeof item === "string" ? { type: "tag", tag: item } : item) }));
-    return validateTransferSettings(value, 8);
+    return validateTransferSettings(value, 9);
   }
   function exportSettings(settings) {
     const value = transferSettings(settings);
     value.tagGroups = value.tagGroups.map(group => ({ id: group.id, name: group.name, items: group.tags.map(item => typeof item === "string" ? { type: "tag", tag: item } : item) }));
     delete value.mode;
+    value.favoriteGroupDisplay = settings.favoriteGroupDisplay === "double" ? "double" : "normal";
     value.theme = ["system", "light", "dark"].includes(settings.theme) ? settings.theme : "system";
     value.ollamaUrl = normalizeOllamaUrl(settings.ollamaUrl);
     value.ollamaModel = validateModel(settings.ollamaModel);
@@ -354,10 +358,10 @@
     let document;
     try { document = JSON.parse(text); } catch { throw new Error("JSONの書式が正しくありません。"); }
     const own = document?.format === "oshaberi-note-settings";
-    if (!exactKeys(document, ["format", "schemaVersion", "settings"]) || !(own ? document.schemaVersion === 1 : document.format === "hikikomori-note-settings" && [1, 2, 3, 4, 5, 6, 7, 8].includes(document.schemaVersion)) || !document.settings || typeof document.settings !== "object" || Array.isArray(document.settings)) {
+    if (!exactKeys(document, ["format", "schemaVersion", "settings"]) || !(own ? document.schemaVersion === 1 : document.format === "hikikomori-note-settings" && [1, 2, 3, 4, 5, 6, 7, 8, 9].includes(document.schemaVersion)) || !document.settings || typeof document.settings !== "object" || Array.isArray(document.settings)) {
       throw new Error("対応するおしゃべりnoteまたはひきこもりnoteの設定JSONを入力してください。");
     }
-    const source = document.settings, version = own ? 8 : document.schemaVersion;
+    const source = document.settings, version = own ? 9 : document.schemaVersion;
     const defaults = transferSettings(current);
     defaults.tagGroups = defaults.tagGroups.map(group => ({ id: group.id, name: group.name, items: group.tags.map(item => typeof item === "string" ? { type: "tag", tag: item } : item) }));
     const allowed = ["enabled", "noteUserId", "dashboardDisabled", "hideArticleRecommendations", "hidePaidArticles", "tagGroups", "selectedTagGroupId", ...(version >= 2 ? ["authorDisplayRules"] : []), ...(version >= 4 ? ["keepNoteHeaderVisible"] : []), ...(version >= 7 ? ["hideLikeCounts"] : [])];
@@ -373,7 +377,26 @@
     }
     if (Object.hasOwn(source, "tagGroups") && version >= 5 && version < 6 && source.tagGroups?.some(group => group?.items?.some(item => item?.type === "membership"))) throw new Error("この形式ではメンバーシップに対応していません。");
     if (Object.hasOwn(source, "tagGroups") && version < 8 && source.tagGroups?.some(group => group?.items?.some(item => item?.type === "article"))) throw new Error("この形式では記事に対応していません。");
-    const result = validateTransferSettings(merged, 8);
+    let display = current.favoriteGroupDisplay ?? "normal";
+    if (Object.hasOwn(source, "favoriteGroupDisplay")) {
+      if (!["normal", "double"].includes(source.favoriteGroupDisplay)) throw new Error("お気に入りグループの表示設定を確認してください。");
+      display = source.favoriteGroupDisplay;
+    } else if (!own && ["normal", "normal-double"].includes(source.mode)) display = source.mode === "normal-double" ? "double" : "normal";
+    if (Object.hasOwn(source, "tagGroups")) {
+      if (!Array.isArray(merged.tagGroups) || merged.tagGroups.length === 0) throw new Error("お気に入りの形式が正しくありません。");
+      const seen = new Set();
+      for (const group of merged.tagGroups) {
+        if (!groupIds.includes(group?.id) || seen.has(group.id)) throw new Error("グループIDの不正または重複があります。");
+        seen.add(group.id);
+      }
+      const count = current.tagGroups.length === 8 || display === "double" || merged.tagGroups.some(g => groupIds.indexOf(g.id) >= 4) ? 8 : 4;
+      merged.tagGroups = groupIds.slice(0, count).map(id => merged.tagGroups.find(g => g.id === id) || defaults.tagGroups.find(g => g.id === id) || { id, name: "", items: [] });
+    } else if (display === "double" && merged.tagGroups.length === 4) {
+      merged.tagGroups = [...merged.tagGroups, ...groupIds.slice(4).map(id => ({ id, name: "", items: [] }))];
+    }
+    const result = validateTransferSettings(merged, 9);
+    result.favoriteGroupDisplay = display;
+    if (display === "normal" && groupIds.indexOf(result.selectedTagGroupId) >= 4) result.selectedTagGroupId = "group1";
     result.theme = ["system", "light", "dark"].includes(source.theme) ? source.theme : current.theme ?? "system";
     result.ollamaUrl = own && Object.hasOwn(source, "ollamaUrl") ? normalizeOllamaUrl(source.ollamaUrl) : current.ollamaUrl;
     result.ollamaModel = own && Object.hasOwn(source, "ollamaModel") ? validateModel(source.ollamaModel) : current.ollamaModel;
@@ -381,10 +404,10 @@
     return result;
   }
   function settingsToken(settings) {
-    return JSON.stringify([transferSettings(settings), settings.theme ?? "system", settings.ollamaUrl, settings.ollamaModel, settings.ollamaSystemPrompt ?? "", settings.groupSelectionRevision, settings.tagGroupsRevision, settings.authorDisplayRevision ?? 0]);
+    return JSON.stringify([transferSettings(settings), settings.favoriteGroupDisplay ?? "normal", settings.theme ?? "system", settings.ollamaUrl, settings.ollamaModel, settings.ollamaSystemPrompt ?? "", settings.groupSelectionRevision, settings.tagGroupsRevision, settings.authorDisplayRevision ?? 0]);
   }
   globalThis.OshaberiNote = Object.freeze({ settingsKey, isHome, isDashboard, shouldRedirect, normalizeUserId, readSettings, profileUrl,
-    modeOf, usesTags, usesFollowing,
+    modeOf, usesTags, usesFollowing, availableGroups, expandGroups, groupSymbols,
     exportSettings, parseSettingsExport, settingsToken, normalizeOllamaUrl, validateModel, validateSystemPrompt, authorId, authorName, isSelf, authorRule, authorLabel, sortAuthors,
     favorite, favoriteKey, favoriteLabel, favoriteUrl, authorSearchUrl, searchedAuthor, favoriteUser, favoriteMagazine, favoriteMembership, favoriteArticle, articleAddress, favoriteSchema, bookIconPath, membershipIconPath, membershipPage, questionPage,
     normalizeTag, inspectTags, tagUrl, articleSearchTabUrl, pageKind, isArticle, isPreviewArticle, groupIds, groupName, normalizeGroupName, selectedGroup, defaultSettings });

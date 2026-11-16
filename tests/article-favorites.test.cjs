@@ -54,6 +54,14 @@ test('記事ページの&はTLの前、4グループから登録して本文を�
  f.select.value='group3';f.select.onchange();assert.equal(f.add.disabled,false);await f.add.onclick();assert.deepEqual(f.backend.state.tagGroups[2].tags,[item]);assert.ok(!JSON.stringify(f.backend.state).includes('ARTICLE_BODY_MUST_NOT_BE_STORED'));assert.equal(f.add.disabled,true);assert.match(f.add.textContent,/登録済み/);assert.equal(f.calls.length,1);
  f.block.fire('keydown',{key:'Escape'});assert.equal(f.block.hidden,true);
 });
+
+test('記事登録フォームは8グループへ追加でき、通常へ戻すと後半の登録先選択を解除する',async()=>{
+ const f=articleUi();await f.backend.controller.save({favoriteGroupDisplay:'double'});f.update();
+ f.toggle.onclick();assert.equal(f.select.children.length,9);f.select.value='group8';f.select.onchange();assert.equal(f.add.disabled,false);
+ await f.backend.controller.save({favoriteGroupDisplay:'normal'});f.update();assert.equal(f.select.children.length,5);assert.equal(f.select.value,'');assert.equal(f.add.disabled,true);
+ await f.backend.controller.save({favoriteGroupDisplay:'double'});f.update();f.select.value='group8';f.select.onchange();await f.add.onclick();assert.deepEqual(f.backend.state.tagGroups[7].tags,[item]);
+ await f.backend.controller.save({favoriteGroupDisplay:'normal'});f.update();assert.match(f.add.textContent,/グループ8に登録済み/);assert.equal(f.add.disabled,true);
+});
 test('記事登録フォームは狭幅でも&＋TLの先頭行に置き、幅変更で選択・開閉を維持する',()=>{
  const options={wide:false},f=articleUi(options),toggle=f.toggle,block=f.block;f.doc.querySelector('[class="oshaberi-note-mobile-toggle"]').onclick();toggle.onclick();f.select.value='group2';f.select.onchange();assert.equal(f.toggle,toggle);assert.equal(block.parentElement.className,'oshaberi-note-article-menu');assert.equal(block.parentElement.children[0],toggle.parentElement);
  options.wide=true;f.update();assert.equal(f.toggle,toggle);assert.equal(f.block,block);assert.equal(f.select.value,'group2');assert.equal(block.hidden,false);assert.equal(block.parentElement,f.doc.body);options.wide=false;f.update();assert.equal(f.block,block);assert.equal(block.hidden,false);

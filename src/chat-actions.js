@@ -94,7 +94,7 @@
     const action = find(id);
     if (!action) throw new Error("未対応の会話の種類です。");
     if (id === "article") return action.template;
-    if (settings.tagWarning || settings.tagGroups.length !== 4) throw Object.assign(new Error("登録済みタグに異常があります。お気に入りを確認してください。"), { code: "INVALID_INPUT" });
+    if (settings.tagWarning || ![4, 8].includes(settings.tagGroups.length)) throw Object.assign(new Error("登録済みタグに異常があります。お気に入りを確認してください。"), { code: "INVALID_INPUT" });
     const tags = [...new Set(settings.tagGroups.flatMap(group => group.tags.filter(item => typeof item === "string")))];
     return action.template.replace("{{REGISTERED_TAGS_JSON}}", () => JSON.stringify(tags));
   }
