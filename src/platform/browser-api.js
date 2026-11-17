@@ -202,6 +202,7 @@
     author: operation => request("author-operation", operation),
     currentAuthor: (operation, source) => request("current-author-operation", { operation, source, pageUrl: globalThis.location.href }),
     addCurrentUser: (groupId, userId, displayName) => request("add-current-user", { groupId, userId, displayName, pageUrl: globalThis.location.href }),
+    addSearchedUser: (groupId, selectionRevision, userId, displayName) => request("add-searched-user", { groupId, selectionRevision, userId, displayName, pageUrl: globalThis.location.href }),
     addCurrentMagazine: (groupId, userId, magazineId, displayName) => request("add-current-magazine", { groupId, userId, magazineId, displayName, pageUrl: globalThis.location.href }),
     addCurrentArticle: (groupId, articleId, url, title) => request("add-current-article", { groupId, articleId, url, title, pageUrl: globalThis.location.href }),
     addCurrentMembership: (groupId, userId, displayName) => request("add-current-membership", { groupId, userId, displayName, pageUrl: globalThis.location.href }),
@@ -210,6 +211,7 @@
     importArticle: article => request("import-article", { article, pageUrl: globalThis.location.href }),
     addCurrentTag: (groupId, selectionRevision) => request("add-current-tag", { groupId, selectionRevision, pageUrl: globalThis.location.href }),
     selectGroup: groupId => request("select-tag-group", { groupId, pageUrl: globalThis.location.href }),
+    menuFavoriteDrop: (operation, selectionRevision, pageUrl = globalThis.location.href) => request("menu-favorite-drop", { operation, selectionRevision, pageUrl }),
     subscribe(listener) {
       const onChange = (changes, area) => {
         if (area === "local" && Object.hasOwn(changes, key)) listener(changes[key].newValue);
@@ -310,7 +312,7 @@
         if (current.origin !== "https://note.com" || new URL(pageUrl).href !== current.href) return null;
         if (tab.pendingUrl && new URL(tab.pendingUrl).href !== current.href) return null;
         const page = globalThis.OshaberiNote.pageKind(current.href);
-        return ["following", "tag", "search", "topic"].includes(page?.type) ? page : null;
+        return globalThis.OshaberiNote.hasFavoriteMenu(current.href) ? page : null;
       } catch { return null; }
     },
     isHomeSender: sender => sender?.id === api.runtime.id &&

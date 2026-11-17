@@ -46,8 +46,33 @@ port.onMessage((message, sender, respond) => {
       port.articleOperation("import", message.patch, sender).then(settings => respond({ ok: true, settings }), error => respond({ ok: false, error: error.message, code: error.code || "OPERATION_FAILED" }));
       return true;
     }
-    if (!["select-tag-group", "add-current-tag", "add-current-user", "add-current-magazine", "add-current-membership", "add-current-article", "current-author-operation"].includes(message?.type) || !port.isNoteSender?.(sender)) return false;
+    if (!["menu-favorite-drop", "add-searched-user", "select-tag-group", "add-current-tag", "add-current-user", "add-current-magazine", "add-current-membership", "add-current-article", "current-author-operation"].includes(message?.type) || !port.isNoteSender?.(sender)) return false;
     operation = (async () => {
+      if (message.type === "menu-favorite-drop") {
+        const patch = message.patch, change = patch?.operation;
+        const keys = ["type", "groupId", "tag", ...(change?.type === "MOVE_TAG" ? ["beforeTag"] : change?.type === "TRANSFER_TAG" ? ["targetGroupId"] : [])];
+        if (!patch || Object.keys(patch).some(key => !["operation", "selectionRevision", "pageUrl"].includes(key)) ||
+            !change || !["REMOVE_TAG", "TRANSFER_TAG", "MOVE_TAG"].includes(change.type) || Object.keys(change).some(key => !keys.includes(key)) ||
+            !Number.isSafeInteger(patch.selectionRevision) || patch.selectionRevision < 0) throw Object.assign(new Error("お気に入りの操作を確認できません。"), { code: "CONFLICT" });
+        const page = await port.currentMenuPage(sender, patch.pageUrl);
+        if (!page || !globalThis.OshaberiNote.hasFavoriteMenu(patch.pageUrl)) throw Object.assign(new Error("お気に入りのあるメニューで操作してください。"), { code: "CONFLICT" });
+        return controller.tag(change, { requireEnabled: true, selectionRevision: patch.selectionRevision, validateCurrent: async () => {
+          const current = await port.currentMenuPage(sender, patch.pageUrl);
+          return Boolean(current && globalThis.OshaberiNote.hasFavoriteMenu(patch.pageUrl));
+        } });
+      }
+      if (message.type === "add-searched-user") {
+        const patch = message.patch, page = await port.currentMenuPage(sender, patch?.pageUrl);
+        const userId = globalThis.OshaberiNote.searchedAuthor(patch?.pageUrl);
+        if (page?.type !== "search" || !userId || typeof patch?.userId !== "string" || userId.toLowerCase() !== patch.userId.toLowerCase() ||
+            !Number.isSafeInteger(patch.selectionRevision) || patch.selectionRevision < 0) throw Object.assign(new Error("検索中の作者と選択グループを確認できません。"), { code: "CONFLICT" });
+        return controller.tag({ type: "ADD_USER", groupId: patch.groupId, userId, displayName: patch.displayName }, {
+          requireEnabled: true, currentUser: userId, selectionRevision: patch.selectionRevision, validateCurrent: async () => {
+            const current = await port.currentMenuPage(sender, patch.pageUrl);
+            return current?.type === "search" && globalThis.OshaberiNote.searchedAuthor(patch.pageUrl)?.toLowerCase() === userId.toLowerCase();
+          }
+        });
+      }
       if (message.type === "add-current-article") {
         const patch = message.patch, page = await port.currentArticlePage(sender, patch?.pageUrl);
         if (!page || page.articleId !== patch?.articleId || page.url !== patch?.url) throw Object.assign(new Error("現在の記事を確認できません。"), { code: "CONFLICT" });
