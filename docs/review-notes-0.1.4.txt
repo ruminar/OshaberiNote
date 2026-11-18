@@ -1,0 +1,11 @@
+This extension is intended for desktop browsers and provides favorites, navigation tools, and Ollama-based chat for note.com.
+
+Version 0.1.4 adds bulk tag registration from pasted suggestions, article tags, and individual AI replies. All candidates start unselected; users choose tags and a destination group before saving. It also improves tag registration dialogs, single-keyword search registration, favorites scrolling, search topic controls, paid-content filtering controls, and paid-article alerts.
+
+Favorites, settings, and navigation can be tested without Ollama or a paid account.
+
+To test AI features, install Ollama separately and download a model. Open the extension home, select “LLMの設定”, and click “接続・再試行” to grant connection permissions and select a model. The default endpoint is http://127.0.0.1:11434. Ollama may require OLLAMA_ORIGINS to allow the extension page's actual origin. Setup instructions are included in INSTALL.md.
+
+User messages and explicitly imported article content are sent only to the user-configured Ollama endpoint. Tag suggestions also include saved tag names. No data is sent to developer-operated servers. Ollama cloud models may communicate with external services through Ollama. The prompt-copy feature only copies text to the clipboard; it does not contact an external AI service.
+
+The extension uses readable JavaScript and CSS without minification or obfuscation. No new permissions or settings storage formats were added in this update.
