@@ -1,8 +1,8 @@
-# おしゃべりnote 0.1.3
+# おしゃべりnote 0.1.4 開発中
 
 noteのホームをOllamaチャットに置き換える、PC版Chrome・Edge・Firefox向けの非公式拡張です。ひきこもりnote v0.3.0のひとみしりモードを基にしています。
 
-0.1.3では、お気に入りの連続移動とドラッグ整理、作者検索からの登録、note公式DOM変更への対応を追加しました。変更点は[0.1.3リリースノート](docs/release-notes-0.1.3.md)を参照してください。ストアへの反映状況は各ストアで確認してください。
+0.1.4は開発中です。2段設定時のタグ登録ダイアログを2列×4行に変更します。公開済み0.1.3の変更点は[リリースノート](docs/release-notes-0.1.3.md)を参照してください。
 
 ## 0.1.3の追加対応
 
@@ -31,8 +31,8 @@ noteのホームをOllamaチャットに置き換える、PC版Chrome・Edge・F
 ## 導入
 
 1. [GitHub Release](https://github.com/ruminar/OshaberiNote/releases)から対象ブラウザのZIPをダウンロードし、展開します。ソースから生成する場合は PowerShellから `.\scripts\package.ps1` で構文・自動テストと両ブラウザの配布生成を実行できます。
-2. Chrome / Edgeの拡張管理画面で開発者モードを有効にし、ZIPの展開先（ソースから生成した場合は `dist/OshaberiNote-0.1.3-chromium`）を「パッケージ化されていない拡張機能」として読み込みます。
-3. Firefoxでは `about:debugging#/runtime/this-firefox` →「一時的なアドオンを読み込む」から ZIPの展開先の `manifest.json`（ソースから生成した場合は `dist/OshaberiNote-0.1.3-firefox/manifest.json`）を指定します。Firefox 140以上が必要です。Androidは対象外です。
+2. Chrome / Edgeの拡張管理画面で開発者モードを有効にし、ZIPの展開先（ソースから生成した場合は `dist/OshaberiNote-0.1.4-chromium`）を「パッケージ化されていない拡張機能」として読み込みます。
+3. Firefoxでは `about:debugging#/runtime/this-firefox` →「一時的なアドオンを読み込む」から ZIPの展開先の `manifest.json`（ソースから生成した場合は `dist/OshaberiNote-0.1.4-firefox/manifest.json`）を指定します。Firefox 140以上が必要です。Androidは対象外です。
 4. ひきこもりnoteは無効にして、Ollamaを起動します。拡張アイコンから専用ホームの「LLMの設定」を開き、「接続・再試行」で接続先へのアクセスを許可し、モデルを選択します。
 5. メッセージを入力して「送信」を押します。Ctrl+Enterで送信、Enterで改行します。IME変換中はショートカットで送信しません。送信後は入力欄へフォーカスを戻し、応答を待ちながら次のメッセージを書けます。次の送信は生成終了後に可能です。中止・新しい会話・再読み込み・接続先変更も確認してください。
 

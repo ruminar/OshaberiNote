@@ -119,8 +119,8 @@ test('AIタグ登録ダイアログは設定変更に追従し、旧⑧ボタン
  const doc=documentFromHtml(source('home.html'));vm.runInContext(source('src/chat-tags.js'),f.c);
  const ui=f.c.OshaberiNoteChatTags.create({document:doc,getSettings:()=>state,platform:{tag:op=>f.controller.tag(op)},onSaved:value=>{state=value;}});
  const output=doc.createElement('div');doc.root.append(output);ui.render(output,'[#Sample]',()=>true);output.querySelector('button').onclick();
- const buttons=doc.getElementById('chat-tag-groups');assert.equal(buttons.children.length,8);const stale=buttons.children[7];stale.onclick();await flush();assert.deepEqual(f.stored.tagGroups[7].tags,['Sample']);
- state=await f.controller.save({favoriteGroupDisplay:'normal'});ui.refresh();assert.equal(buttons.children.length,4);const writes=f.writes;stale.onclick();await flush();assert.equal(f.writes,writes);
+ const buttons=doc.getElementById('chat-tag-groups');assert.equal(buttons.children.length,8);assert.equal(buttons.getAttribute('data-group-count'),'8');const stale=buttons.children[7];stale.onclick();await flush();assert.deepEqual(f.stored.tagGroups[7].tags,['Sample']);
+ state=await f.controller.save({favoriteGroupDisplay:'normal'});ui.refresh();assert.equal(buttons.children.length,4);assert.equal(buttons.getAttribute('data-group-count'),'4');const writes=f.writes;stale.onclick();await flush();assert.equal(f.writes,writes);
 });
 
 test('タグ提案は通常表示でも保存した後半グループのタグを最新参考データに含める',async()=>{

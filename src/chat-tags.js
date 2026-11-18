@@ -83,6 +83,7 @@
     }
     function buildButtons(groups) {
       byId("chat-tag-groups").replaceChildren(); buttons.length = 0;
+      byId("chat-tag-groups").setAttribute("data-group-count", String(groups.length));
       for (const [index, group] of groups.entries()) {
         const groupId = group.id, button = doc.createElement("button"); button.type = "button";
         button.setAttribute("data-chat-tag-group", groupId);
