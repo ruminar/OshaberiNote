@@ -5,9 +5,10 @@
   const byId = id => document.getElementById(id);
   const views = ["chat", "tags", "discovery", "authors", "llm", "settings", "transfer"];
   const discovery = globalThis.OshaberiNoteTagDiscovery;
+  let chatTagSelection = false, registrationValid = () => true;
   const tagDialog = discovery?.createDialog(document, {
     async save(groupId, tags) {
-      if (busy || uncertain) throw new Error("状態を再確認してから登録してください。");
+      if (busy || uncertain || !registrationValid()) throw new Error("状態を再確認してから登録してください。");
       busy = true; controls(); const before = revision;
       try {
         const result = await platform.bulkAddTags(groupId, tags);
@@ -458,12 +459,25 @@
     if (!confirm(`入力JSONに存在する対応項目を適用します。未保存の設定入力は破棄します。${warning}読み込みますか？`)) return;
     void perform(() => platform.importSettings({ json, expectedToken }), { kind: "import" });
   };
+  // 同じホーム内の貼り付け入口とAI回答入口で、ダイアログ実体と保存経路を共用する。
+  globalThis.OshaberiNoteTagRegistration = Object.freeze({
+    openChatText(text, valid) {
+      if (!tagDialog || busy || uncertain || !state?.enabled || !valid()) throw new Error("状態を再確認してから登録してください。");
+      const tags = discovery.extract(text);
+      if (!tags.length) throw new Error(discovery.emptyMessage);
+      if (!tagDialog.open(tags, state)) return false;
+      chatTagSelection = true; registrationValid = valid; return true;
+    },
+    closeChat() {
+      if (chatTagSelection) { tagDialog.close(); chatTagSelection = false; registrationValid = () => true; }
+    }
+  });
   byId("tag-discovery-check").onclick = () => {
     if (byId("tag-discovery-check").disabled) return;
     try {
       const tags = discovery.extract(byId("tag-discovery-text").value);
       byId("tag-discovery-status").textContent = tags.length ? "" : discovery.emptyMessage;
-      if (tags.length) tagDialog.open(tags, state);
+      if (tags.length && tagDialog.open(tags, state)) { chatTagSelection = false; registrationValid = () => true; }
     } catch (error) { byId("tag-discovery-status").textContent = error.message; }
   };
   byId("tag-discovery-clear").onclick = () => {

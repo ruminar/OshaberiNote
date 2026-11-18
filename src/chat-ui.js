@@ -244,7 +244,7 @@
     const completed = sameConversation && state.active && !next.active && next.turns.at(-1)?.status === "complete";
     if (state && (state.actionId !== next.actionId || state.epoch !== next.epoch)) {
       if (state.actionId === next.actionId && generation?.actionId === next.actionId) abort();
-      tagUI.close(); closeArticleDialog();
+      tagUI.close(); globalThis.OshaberiNoteTagRegistration?.closeChat(); closeArticleDialog();
       if (state.actionId !== next.actionId) {
         drafts.set(state.actionId, { epoch: state.epoch, text: byId("chat-input").value, articleRequest: pendingArticleRequest, articleDraftContext });
         const draft = drafts.get(next.actionId);
@@ -288,7 +288,21 @@
             if (copy.isConnected) feedback.textContent = "コピーできませんでした。本文を選択してコピーしてください。";
           } finally { copy.disabled = false; }
         };
-        header.append(heading, copy, feedback);
+        header.append(heading);
+        if (label === "AI") {
+          const bulk = document.createElement("button"), epoch = state.epoch, actionId = state.actionId;
+          const valid = () => state?.epoch === epoch && state.actionId === actionId && state.turns.some(item => item.id === turn.id && item.status === "complete" && item.assistant === content);
+          bulk.type = "button"; bulk.className = "secondary chat-copy"; bulk.textContent = "まとめて確認";
+          bulk.setAttribute("aria-label", "このAI回答のタグをまとめて確認"); bulk.disabled = !content;
+          bulk.onclick = () => {
+            if (bulk.disabled || !bulk.isConnected || !valid()) return;
+            feedback.textContent = "";
+            try { globalThis.OshaberiNoteTagRegistration.openChatText(content, valid); }
+            catch (error) { feedback.textContent = error.message || "タグ候補を確認できませんでした。"; }
+          };
+          header.append(bulk);
+        }
+        header.append(copy, feedback);
         if (label === "あなた" && turn.articleId && articles.actions[turn.articleAction]) articleReferenceNode(text, turn);
         else if (label === "AI" && content) {
           const epoch = state.epoch, user = turn.user;
@@ -585,7 +599,7 @@
     visible = value; llmVisible = llm;
     if (visible) setTimeout(refreshMessageNavigation, 0);
     if (leavingChat || leavingBoth) {
-      tagUI.close(); closeArticleDialog();
+      tagUI.close(); globalThis.OshaberiNoteTagRegistration?.closeChat(); closeArticleDialog();
       if (!generation) abort();
     }
   } });
