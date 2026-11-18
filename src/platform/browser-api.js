@@ -207,6 +207,7 @@
     addCurrentArticle: (groupId, articleId, url, title) => request("add-current-article", { groupId, articleId, url, title, pageUrl: globalThis.location.href }),
     addCurrentMembership: (groupId, userId, displayName) => request("add-current-membership", { groupId, userId, displayName, pageUrl: globalThis.location.href }),
     tag: operation => request("tag-operation", operation),
+    bulkAddTags: (groupId, tags, pageUrl) => request("bulk-add-tags", { groupId, tags, ...(pageUrl ? { pageUrl } : {}) }),
     article: (operation, patch) => request("article-operation", { operation, ...patch }),
     importArticle: article => request("import-article", { article, pageUrl: globalThis.location.href }),
     addCurrentTag: (groupId, selectionRevision) => request("add-current-tag", { groupId, selectionRevision, pageUrl: globalThis.location.href }),

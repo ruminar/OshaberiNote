@@ -3,14 +3,27 @@
   const core = globalThis.OshaberiNote;
   const platform = globalThis.OshaberiNotePlatform;
   const byId = id => document.getElementById(id);
-  const views = ["chat", "tags", "authors", "llm", "settings", "transfer"];
+  const views = ["chat", "tags", "discovery", "authors", "llm", "settings", "transfer"];
+  const discovery = globalThis.OshaberiNoteTagDiscovery;
+  const tagDialog = discovery?.createDialog(document, {
+    async save(groupId, tags) {
+      if (busy || uncertain) throw new Error("状態を再確認してから登録してください。");
+      busy = true; controls(); const before = revision;
+      try {
+        const result = await platform.bulkAddTags(groupId, tags);
+        if (before === revision) show(result);
+        return { ...state, bulkTagReport: result.bulkTagReport };
+      } finally { busy = false; controls(); }
+    },
+    async refresh() { const value = await platform.getState(); uncertain = false; show(value); return state; }
+  });
   const fields = { favoriteGroupDisplay: "favorite-group-display", theme: "theme", hideLikeCounts: "hide-like-counts", hidePaidArticles: "hide-paid-articles", noteUserId: "note-user", dashboardDisabled: "dashboard-disabled", hideArticleRecommendations: "hide-article-recommendations", keepNoteHeaderVisible: "keep-note-header-visible" };
   const drafts = new Map();
   function draft(id) { if (!drafts.has(id)) drafts.set(id, { name: "", nameDirty: false, expectedName: "" }); return drafts.get(id); }
   const dirty = new Set();
   let favoriteDestination = "", renderedGroupId;
   const favoriteScrolls = new Map();
-  let copying = false, validatedText, parsedImport;
+  let copying = false, copyingPrompt = false, validatedText, parsedImport;
   function transferControls() {
     const text = byId("settings-json").value;
     if (text !== validatedText) {
@@ -102,6 +115,10 @@
     byId("retry").disabled = busy;
     byId("nav-llm").disabled = !state;
     byId("nav-transfer").disabled = !state;
+    byId("nav-discovery").disabled = !state;
+    byId("tag-discovery-check").disabled = blocked || !discovery;
+    byId("tag-discovery-clear").disabled = blocked || copyingPrompt;
+    byId("tag-discovery-copy").disabled = blocked || copyingPrompt || !discovery || Boolean(state?.tagWarning);
     byId("nav-authors").disabled = !state;
     const authorBlocked = blocked || !state?.noteUserId || Boolean(state?.authorWarning);
     for (const id of ["authors-hidden", "authors-allowed"]) for (const button of byId(id).querySelectorAll("button")) {
@@ -287,7 +304,7 @@
     const warning = state.tagWarning || (state.groupSelectionInvalid ? "保存済みの選択に異常があります。グループを選び直してください。" : "");
     byId("tag-warning").hidden = !warning; byId("tag-warning").textContent = warning;
     selectView(selected, hiddenFocus);
-    renderTags(); renderAuthors(); controls();
+    renderTags(); renderAuthors(); controls(); tagDialog?.update(state);
   }
   async function refresh() {
     if (busy) return;
@@ -440,6 +457,27 @@
     const warning = incoming.ollamaUrl !== state.ollamaUrl ? " 接続先が変わるため会話履歴と未送信入力を削除し、モデル選択・システムプロンプトも初期化します。" : incoming.ollamaSystemPrompt !== state.ollamaSystemPrompt ? " システムプロンプトが変わるため、会話履歴と未送信入力を削除します。" : "";
     if (!confirm(`入力JSONに存在する対応項目を適用します。未保存の設定入力は破棄します。${warning}読み込みますか？`)) return;
     void perform(() => platform.importSettings({ json, expectedToken }), { kind: "import" });
+  };
+  byId("tag-discovery-check").onclick = () => {
+    if (byId("tag-discovery-check").disabled) return;
+    try {
+      const tags = discovery.extract(byId("tag-discovery-text").value);
+      byId("tag-discovery-status").textContent = tags.length ? "" : discovery.emptyMessage;
+      if (tags.length) tagDialog.open(tags, state);
+    } catch (error) { byId("tag-discovery-status").textContent = error.message; }
+  };
+  byId("tag-discovery-clear").onclick = () => {
+    if (byId("tag-discovery-clear").disabled) return;
+    byId("tag-discovery-text").value = "";
+    byId("tag-discovery-status").textContent = "";
+    byId("tag-discovery-text").focus();
+  };
+  byId("tag-discovery-copy").onclick = async () => {
+    if (byId("tag-discovery-copy").disabled) return;
+    copyingPrompt = true; controls();
+    try { await navigator.clipboard.writeText(discovery.prompt(state)); byId("tag-discovery-status").textContent = "タグ提案用プロンプトをコピーしました。"; }
+    catch { byId("tag-discovery-status").textContent = "プロンプトをコピーできませんでした。もう一度お試しください。"; }
+    finally { copyingPrompt = false; controls(); }
   };
   platform.subscribe(value => { revision++; validatedText = undefined; show(value); });
   void refresh();

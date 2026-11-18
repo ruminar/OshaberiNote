@@ -184,6 +184,12 @@
   }
   function create(doc, win, actions = {}) {
     const likeVisibility = createLikeVisibility(doc);
+    const discovery = globalThis.OshaberiNoteTagDiscovery;
+    let discoveryUrl;
+    const tagDialog = discovery && actions.bulkAddTags ? discovery.createDialog(doc, {
+      save: (groupId, tags) => actions.bulkAddTags(groupId, tags, discoveryUrl),
+      refresh: actions.refreshTagDiscovery
+    }) : null;
     let profileLayout;
     // 見た目だけでなくTab移動・読み上げも同じ順序にする。各機能は自分の領域だけを更新する。
     function profileSlot(owner, name) {
@@ -205,7 +211,97 @@
       }
     }
     const authorControls = createAuthorControls(doc, win, actions, profileSlot);
-    let host, menu, signature;
+    let host, menu, signature, favoriteScrollHost;
+    const favoriteScroll = "data-oshaberi-note-favorite-scroll", favoriteScrollList = "data-oshaberi-note-favorite-scroll-list";
+    const favoriteScrollContainer = "data-oshaberi-note-favorite-scroll-host";
+    function syncFavoriteScroll() {
+      const list = menu?.querySelector(`[${favoriteScrollList}]`);
+      const next = list ? host : undefined;
+      if (favoriteScrollHost && favoriteScrollHost !== next) favoriteScrollHost.removeAttribute(favoriteScrollContainer);
+      favoriteScrollHost = next;
+      if (next) {
+        if (!next.hasAttribute(favoriteScrollContainer)) {
+          next.setAttribute(favoriteScrollContainer, ""); next.scrollTop = 0;
+        }
+        if (!menu.hasAttribute(favoriteScroll)) menu.setAttribute(favoriteScroll, "");
+      } else menu?.removeAttribute(favoriteScroll);
+    }
+    let relatedTopics, relatedSearchKey, relatedOpen = false, relatedId = 0, relatedEarlyRoot;
+    const relatedHidden = "data-oshaberi-note-related-hidden", relatedRow = "data-oshaberi-note-related-row";
+    const relatedState = "data-oshaberi-note-search-related-state";
+    function syncRelatedRoot(active) {
+      const root = doc.documentElement || doc.root;
+      if (relatedEarlyRoot && (!active || relatedEarlyRoot !== root)) {
+        relatedEarlyRoot.removeAttribute(relatedState); relatedEarlyRoot = undefined;
+      }
+      if (active && root) {
+        const value = relatedOpen ? "open" : "closed";
+        if (root.getAttribute(relatedState) !== value) root.setAttribute(relatedState, value);
+        relatedEarlyRoot = root;
+      }
+    }
+    function clearRelatedTopics() {
+      if (!relatedTopics) return;
+      const { region, button, row, generatedId } = relatedTopics;
+      region.removeAttribute(relatedHidden); row.removeAttribute(relatedRow); button.remove();
+      if (generatedId && region.getAttribute("id") === generatedId) region.removeAttribute("id");
+      relatedTopics = undefined;
+    }
+    function paintRelatedTopics() {
+      syncRelatedRoot(relatedSearchKey !== undefined);
+      if (!relatedTopics) return;
+      const { region, button } = relatedTopics;
+      if (relatedOpen) region.removeAttribute(relatedHidden);
+      else if (!region.hasAttribute(relatedHidden)) region.setAttribute(relatedHidden, "");
+      const expanded = String(relatedOpen);
+      if (button.getAttribute("aria-expanded") !== expanded) button.setAttribute("aria-expanded", expanded);
+      if (button.getAttribute("aria-pressed") !== expanded) button.setAttribute("aria-pressed", expanded);
+      button.setAttribute("title", relatedOpen ? "関連する話題を非表示にする" : "関連する話題を表示する");
+    }
+    function syncRelatedTopics(settings, url) {
+      let key;
+      if (settings.enabled && core.pageKind(url)?.type === "search") {
+        const params = new URL(url).searchParams;
+        key = JSON.stringify([params.get("q") || "", params.get("context") || "note"]);
+      }
+      if (key !== relatedSearchKey || key === undefined) relatedOpen = false;
+      relatedSearchKey = key;
+      // sectionや並び順UIの完成より先に、後挿入DOMへ効く子孫CSSを有効にする。
+      syncRelatedRoot(key !== undefined);
+      if (key === undefined) { clearRelatedTopics(); return; }
+      const mains = [...doc.querySelectorAll('main[id="main-content"]')];
+      const main = mains.length === 1 ? mains[0] : null;
+      const regions = main ? [...main.querySelectorAll('section[aria-labelledby="aicn-banner-title"]')].filter(region =>
+        !region.closest("article") && !region.closest(`[${owned}]`) && [...region.children].some(heading =>
+          heading.tagName === "H2" && heading.getAttribute("id") === "aicn-banner-title" && heading.textContent.trim() === "関連する話題")) : [];
+      const groups = main ? [...main.querySelectorAll('[aria-label="検索結果の並び順"]')].filter(group =>
+        group.getAttribute("data-name") === "ButtonGroup" && group.getAttribute("role") === "group" && !group.closest("article") && !group.closest(`[${owned}]`) &&
+        [...group.children].some(button => button.tagName === "BUTTON" && button.getAttribute("data-name") === "ButtonGroupItem" && button.getAttribute("data-key") === "new" && button.textContent.trim() === "新着")) : [];
+      if (regions.length !== 1 || groups.length !== 1) { clearRelatedTopics(); return; }
+      const region = regions[0], group = groups[0], row = group.parentElement;
+      if (!row || row === main || region.contains(row)) { clearRelatedTopics(); return; }
+      if (relatedTopics && (relatedTopics.region !== region || relatedTopics.group !== group || relatedTopics.button.parentElement !== row)) clearRelatedTopics();
+      if (!relatedTopics) {
+        const button = doc.createElement("button"); button.type = "button"; button.textContent = "関連";
+        button.className = "oshaberi-note-related-toggle"; button.setAttribute(owned, "");
+        button.setAttribute("aria-label", "関連する話題の表示切り替え");
+        let generatedId;
+        if (!region.getAttribute("id")) {
+          do { generatedId = `oshaberi-note-related-topics-${++relatedId}`; } while (doc.getElementById(generatedId));
+          region.setAttribute("id", generatedId);
+        }
+        button.setAttribute("aria-controls", region.getAttribute("id"));
+        button.onclick = () => {
+          if (!relatedTopics || relatedTopics.button !== button || !currentSettings?.enabled || !button.isConnected) return;
+          syncRelatedTopics(currentSettings, win.location?.href || currentUrl);
+          if (relatedTopics?.button !== button) return;
+          relatedOpen = !relatedOpen; paintRelatedTopics();
+        };
+        group.after(button); row.setAttribute(relatedRow, "");
+        relatedTopics = { region, group, row, button, generatedId };
+      }
+      paintRelatedTopics();
+    }
     const searchMembershipTabs = new Set();
     const searchMembershipTabHidden = "data-oshaberi-note-search-membership-tab-hidden";
     function syncSearchMembershipTab(settings, url) {
@@ -1427,7 +1523,24 @@
         };
         wrapper.append(link);
       }
-      wrapper.append(button, copy, status); doc.body.append(wrapper); articleSummary = wrapper;
+      wrapper.append(button);
+      wrapper.append(copy);
+      if (tagDialog) {
+        const tags = doc.createElement("button"); tags.type = "button"; tags.textContent = "記事タグを確認";
+        tags.setAttribute("data-oshaberi-note-article-tags", "");
+        tags.onclick = () => {
+          if (disposed || !currentSettings?.enabled || !wrapper.isConnected) return;
+          try {
+            const url = win.location?.href || currentUrl;
+            if (globalThis.OshaberiNoteArticles.page(url).url !== globalThis.OshaberiNoteArticles.page(currentUrl).url) throw new Error("現在の記事を確認してください。");
+            const candidates = discovery.articleTags(doc, url);
+            status.textContent = candidates.length ? "" : "この記事のタグはありません。";
+            if (candidates.length) { discoveryUrl = url; tagDialog.open(candidates, currentSettings); }
+          } catch (error) { status.textContent = error.message || "記事タグを取得できませんでした。"; }
+        };
+        wrapper.append(tags);
+      }
+      wrapper.append(status); doc.body.append(wrapper); articleSummary = wrapper;
       syncArticleAdjacent(wrapper, url);
     }
     function syncArticleFollowing(settings, url) {
@@ -1712,6 +1825,7 @@
     }
     function restore() {
       clearMenuFavoriteDrag();
+      favoriteScrollHost?.removeAttribute(favoriteScrollContainer); favoriteScrollHost = undefined;
       menu?.remove(); menu = undefined; host = undefined; signature = undefined;
       for (const element of originals) element.removeAttribute(hidden);
       originals.clear();
@@ -1944,7 +2058,9 @@
       prepareSidebar(url, settings);
       if ((core.addableTag(currentUrl) !== core.addableTag(url) || core.searchedAuthor(currentUrl) !== core.searchedAuthor(url)) && !uncertain && !adding) actionMessage = "";
       if (currentUrl !== url || Boolean(currentSettings?.enabled) !== Boolean(settings.enabled)) followingLinksDirty = true;
+      if (currentUrl !== url || !settings.enabled) tagDialog?.close();
       currentSettings = settings; currentUrl = url;
+      tagDialog?.update(settings);
       if (menuFavoriteDrag && !menuFavoriteDragValid()) clearMenuFavoriteDrag();
       syncFollowingLinks();
       prepareProfilePaidAllowance(settings, url);
@@ -1961,6 +2077,7 @@
       syncRecommendations(settings.enabled && settings.hideArticleRecommendations === true && core.isArticle(url));
       syncNotesPromotions(settings, url);
       syncSearchMembershipTab(settings, url);
+      syncRelatedTopics(settings, url);
       syncMembershipExamples(settings, url);
       syncMagazinePromotions(settings, url);
       syncHomeBanners(settings, url);
@@ -2079,7 +2196,7 @@
             });
             menu.append(selector);
             const name = doc.createElement("div"); name.className = "oshaberi-note-group-name"; name.textContent = core.groupName(group); name.setAttribute("title", name.textContent); menu.append(name);
-            const list = doc.createElement("ul"); menu.append(list);
+            const list = doc.createElement("ul"); list.setAttribute(favoriteScrollList, ""); menu.append(list);
             if (menuFavoriteDropEnabled) bindMenuFavoriteListDrop(list);
             for (const tag of group.tags) {
               const item = doc.createElement("li"), link = doc.createElement("a");
@@ -2101,6 +2218,7 @@
         }
         signature = nextSignature;
       }
+      syncFavoriteScroll();
       if (page.type === "profile" && favoriteProfile) {
         let row = menu.querySelector('[class="oshaberi-note-profile-actions"]');
         if (!row) {
@@ -2137,6 +2255,9 @@
         profilePromotionsDirty = true;
       },
       stop() {
+        clearRelatedTopics(); relatedSearchKey = undefined; relatedOpen = false;
+        syncRelatedRoot(false);
+        tagDialog?.dispose();
         for (const target of accountMenuTargets) target.removeAttribute(accountMenuHidden);
         accountMenuTargets.clear();
         for (const [button, state] of notificationTitles) restoreNotificationTitle(button, state);

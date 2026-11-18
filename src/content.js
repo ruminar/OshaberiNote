@@ -15,6 +15,16 @@
     summarizeArticle: article => platform.importArticle(article),
     loadArticleAdjacent: url => globalThis.OshaberiNoteArticles.adjacent(url, fetch, AbortSignal.timeout(10000)),
     copyArticle: (article, publishedAt) => navigator.clipboard.writeText(`タイトル：${article.title}\n著者名：${article.author}\n投稿日：${publishedAt || "不明"}\nURL：${article.url}\n\n本文：\n${article.body}`),
+    async bulkAddTags(groupId, tags, pageUrl) {
+      const before = revision, result = await platform.bulkAddTags(groupId, tags, pageUrl);
+      if (!stopped && revision === before) { settings = readView(result); checkHome(); }
+      return { ...settings, bulkTagReport: result.bulkTagReport };
+    },
+    async refreshTagDiscovery() {
+      const value = await platform.load();
+      if (!stopped) { settings = readView(value); checkHome(); }
+      return settings;
+    },
     async addCurrentArticle(groupId, articleId, url, title) {
       const before = revision;
       const value = await platform.addCurrentArticle(groupId, articleId, url, title);

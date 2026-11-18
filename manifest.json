@@ -48,11 +48,13 @@
         "src/common.js",
         "src/articles.js",
         "src/platform/browser-api.js",
+        "src/tag-discovery.js",
         "src/note-ui.js",
         "src/content.js"
       ],
       "css": [
-        "src/content.css"
+        "src/content.css",
+        "src/tag-discovery.css"
       ],
       "run_at": "document_start"
     },
