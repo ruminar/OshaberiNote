@@ -175,7 +175,7 @@ test('お気に入りの#検索は全検索対象でハイライトを維持し�
   f.ui.update(settings,`https://note.com/search?context=${context}&q=${encodeURIComponent('#るみなー先生')}`);assert.equal(current().textContent,'# るみなー先生');assert.equal(f.doc.querySelector('[data-tag-add]'),null);
  }
  for(const url of ['https://note.com/search?q=ComfyUI&context=note','https://note.com/search?q=ComfyUI&context=user','https://note.com/search?q=%23ComfyUI%20%23AI&context=note','https://note.com/search?q=%23Other&context=note']){
-  f.ui.update(settings,url);assert.equal(current(),null);assert.equal(f.doc.querySelector('[data-tag-add]'),null);
+  f.ui.update(settings,url);assert.equal(current(),null);assert.equal(Boolean(f.doc.querySelector('[data-tag-add]')),url.includes('q=%23Other'));
  }
  f.ui.update(settings,'https://note.com/tag/ComfyUI');assert.equal(current().textContent,'# ComfyUI');
 });
@@ -609,13 +609,13 @@ test('検索URLは検索語・対象・並び順・末尾スラッシュに関�
  for(const url of ['https://note.com/search/other','https://note.com/searching/child','https://other.test/search?q=AI'])assert.equal(core.pageKind(url),null);
 });
 
-test('検索の左メニューだけを差し替え、検索フォーム・結果タブを維持。タグ追加なし、OFFと社会復帰で復帰',()=>{
+test('検索の左メニューだけを差し替え、検索フォーム・結果タブを維持。単一語だけタグ追加、OFFと社会復帰で復帰',()=>{
  const f=uiFixture(sidebarHtml+'<form id="search-form"><input></form><nav id="search-tabs"><a href="/search?context=user"></a></nav>'),settings=f.core.readSettings({...groups(),...groups(['AI'])});
  const aside=f.doc.querySelector('aside'),original=aside.children[0],form=f.doc.getElementById('search-form'),tabs=f.doc.getElementById('search-tabs'),article=f.doc.querySelector('article');
  for(const url of ['https://note.com/search','https://note.com/search?q=きのころ&context=note&mode=search']){
   f.ui.update(settings,url);assert.equal(aside.children.length,2);assert.equal(original.hasAttribute('data-oshaberi-note-menu-hidden'),true);
   const links=aside.children[0].querySelectorAll('a');assert.equal(links[0].textContent,'フォロー中のTL');assert.equal(links[1].href,'https://note.com/search?q=%23AI&context=note&mode=search&sort=new');
-  assert.equal(aside.querySelector('[data-tag-add]'),null);assert.equal(form.isConnected,true);assert.equal(tabs.isConnected,true);assert.equal(article.isConnected,true);
+  assert.equal(Boolean(aside.querySelector('[data-tag-add]')),url.includes('q='));assert.equal(form.isConnected,true);assert.equal(tabs.isConnected,true);assert.equal(article.isConnected,true);
   assert.equal(tabs.hasAttribute('data-oshaberi-note-menu-hidden'),false);
   for(const patch of [{enabled:false},{mode:'social'}]){f.ui.update({...settings,...patch},url);assert.equal(aside.children.length,1);assert.equal(original.hasAttribute('data-oshaberi-note-menu-hidden'),false);}
  }
@@ -951,6 +951,9 @@ test('表示中の日本語タグを左メニューで追加し、二重クリ�
  const f=uiFixture(sidebarHtml,{async addCurrentTag(){calls++;await new Promise(resolve=>{complete=resolve;});settings=f.core.readSettings({...groups(),...groups(['みじんこ123'])});f.ui.update(settings,url);}});
  let settings=f.core.readSettings({...groups(),});f.ui.update(settings,url);
  const button=f.doc.querySelector('[data-tag-add]');assert.match(button.getAttribute('aria-label'),/みじんこ123/);assert.equal(button.disabled,false);
+ assert.equal(button.textContent,'＃');assert.equal(button.getAttribute('title'),button.getAttribute('aria-label'));
+ const row=button.parentElement;assert.equal(row.className,'oshaberi-note-profile-actions');
+ assert.equal(row.children[0],button);assert.equal(row.children[1].className,'oshaberi-note-navigation-following');
  button.onclick();button.onclick();assert.equal(calls,1);assert.equal(f.doc.querySelector('[data-tag-add]').disabled,true);
  complete();await flush();assert.equal(f.doc.querySelector('[data-tag-add]'),null);
  assert.equal(f.doc.querySelector('[aria-current="page"]').href,'https://note.com/search?q=%23%E3%81%BF%E3%81%98%E3%82%93%E3%81%93123&context=note&mode=search&sort=new');
@@ -2544,4 +2547,60 @@ test('検索作者追加はブラウザAPIで現在URLと選択リビジョン�
  vm.runInContext(source('src/platform/browser-api.js'),c);await c.OshaberiNotePlatform.addSearchedUser('group3',8,'sample_author','Sample');
  assert.deepEqual(requests,[{type:'add-searched-user',patch:{groupId:'group3',selectionRevision:8,userId:'sample_author',displayName:'Sample',pageUrl:page}}]);
  await c.OshaberiNotePlatform.addCurrentUser('group1','sample_author','Sample');assert.equal(requests[1].type,'add-current-user');assert.equal(Object.hasOwn(requests[1].patch,'selectionRevision'),false);
+});
+
+test('単一語検索ではタグ追加を表示し、複合条件は登録せずタグとして再訪する',async()=>{
+ let calls=0;const f=uiFixture(sidebarHtml,{async addCurrentTag(){calls++;}}),settings=f.core.readSettings({...groups()});
+ for(const q of ['恋愛小説','#恋愛小説',' 恋愛小説 ']){
+  const url='https://note.com/search?context=note&q='+encodeURIComponent(q);f.ui.update(settings,url);
+  assert.equal(f.core.addableTag(url),'恋愛小説');const add=f.doc.querySelector('[data-tag-add]');assert.equal(add.textContent,'＃');
+  assert.match(add.getAttribute('title'),/恋愛小説/);await add.onclick();await flush();
+ }
+ assert.equal(calls,3);assert.match(f.core.tagUrl('恋愛小説'),/q=%23/);
+ for(const q of ['', '恋愛 小説','恋愛　小説','from:@ruminar','-恋愛小説','"恋愛小説"','#恋愛 #小説','##恋愛小説']){
+  const url='https://note.com/search?q='+encodeURIComponent(q);f.ui.update(settings,url);assert.equal(f.core.addableTag(url),null);assert.equal(f.doc.querySelector('[data-tag-add]'),null);
+ }
+ f.ui.update(f.core.readSettings({...groups(['恋愛小説'])}),'https://note.com/search?q='+encodeURIComponent('恋愛小説'));assert.equal(f.doc.querySelector('[data-tag-add]'),null);
+});
+
+test('単一語から別の単一語へのSPA遷移でも＃の表示と登録対象を更新する',async()=>{
+ const calls=[],f=uiFixture(sidebarHtml,{async addCurrentTag(){calls.push(f.core.addableTag(current));}}),settings=f.core.readSettings(groups());let current='https://note.com/search?q=First';
+ f.ui.update(settings,current);assert.match(f.doc.querySelector('[data-tag-add]').getAttribute('title'),/First/);
+ current='https://note.com/search?q=Second';f.ui.update(settings,current);const button=f.doc.querySelector('[data-tag-add]');assert.match(button.getAttribute('title'),/Second/);await button.onclick();await flush();assert.deepEqual(calls,['Second']);
+ current='https://note.com/search?q=Third';f.ui.update(settings,current);assert.match(f.doc.querySelector('[data-tag-add]').getAttribute('title'),/Third/);
+});
+
+test('背景処理は確認済み検索URLの単一語だけをタグとして登録する',async()=>{
+ const f=fixture();let handler,current='https://note.com/search?q='+encodeURIComponent('恋愛小説');
+ const port={onInstalled(){},onStartup(){},onAction(){},onMessage(fn){handler=fn;},isHomeSender:()=>false,isNoteSender:()=>true,currentMenuPage:async(sender,url)=>url===current?{type:'search'}:null};
+ const context=vm.createContext({console,OshaberiNote:f.core,OshaberiNoteBackgroundPlatform:port,OshaberiNoteRouting:{createController:()=>f.controller}});require('./helpers/background.cjs')(context);vm.runInContext(source('src/background.js'),context);await flush();
+ let answer;const send=async(url)=>{handler({type:'add-current-tag',patch:{pageUrl:url,groupId:'group1',selectionRevision:0,tag:'偽タグ'}},{},value=>{answer=value;});await flush();return answer;};
+ assert.equal((await send(current)).ok,true);assert.deepEqual(f.stored.tagGroups[0].tags,['恋愛小説']);
+ for(const q of ['from:@ruminar','恋愛 小説','']){current='https://note.com/search?q='+encodeURIComponent(q);assert.equal((await send(current)).code,'CONFLICT');}
+ assert.equal((await send('https://note.com/search?q=other')).code,'CONFLICT');assert.deepEqual(f.stored.tagGroups[0].tags,['恋愛小説']);
+});
+
+
+const searchMembershipTabsHtml='<main id="main-content"><ul id="search-types"><li id="search-note"><a data-id="NavigationItem" href="/search?context=note&q=AI">記事</a></li><li id="search-magazine"><a data-id="NavigationItem" href="/search?context=magazine&q=AI">マガジン</a></li><li id="search-user"><a data-id="NavigationItem" href="/search?context=user&q=AI">クリエイター</a></li><li id="search-circle"><a data-id="NavigationItem" href="/search?context=circle&q=AI">メンバーシップ</a></li></ul><section id="membership-result"><a href="/author/membership">メンバーシップ結果</a><a href="/search?context=circle&q=AI">メンバーシップ検索リンク</a></section></main>';
+const searchTabHidden='data-oshaberi-note-search-membership-tab-hidden';
+test('有料非表示は検索メンバーシップタブだけ隠し、直接URLの結果と他タブを維持',()=>{
+ for(const mode of ['normal','normal-double','social','severe']){
+  const f=uiFixture(searchMembershipTabsHtml),settings=f.core.readSettings({...groups(),mode,hidePaidArticles:true});
+  const url='https://note.com/search?context=circle&q=AI';f.ui.update(settings,url);
+  assert.equal(f.doc.getElementById('search-circle').hasAttribute(searchTabHidden),true);
+  for(const id of ['search-note','search-magazine','search-user','membership-result'])assert.equal(f.doc.getElementById(id).hasAttribute(searchTabHidden),false);
+  assert.equal(f.doc.getElementById('membership-result').isConnected,true);assert.equal(f.doc.querySelectorAll(`[${searchTabHidden}]`).length,1);
+  for(const patch of [{enabled:false},{hidePaidArticles:false}]){f.ui.update({...settings,...patch},url);assert.equal(f.doc.querySelectorAll(`[${searchTabHidden}]`).length,0);f.ui.update(settings,url);}
+  f.ui.update(settings,'https://note.com/author');assert.equal(f.doc.querySelectorAll(`[${searchTabHidden}]`).length,0);
+  f.ui.update(settings,url);f.ui.stop();assert.equal(f.doc.querySelectorAll(`[${searchTabHidden}]`).length,0);
+ }
+});
+test('検索タブの遅延追加と再描画を反映し、本文リンク・外部リンク・未知構造は隠さない',()=>{
+ const f=uiFixture(searchMembershipTabsHtml),settings=f.core.readSettings({...groups(),hidePaidArticles:true}),url='https://note.com/search?q=AI';
+ const late=f.doc.querySelector('main');late.remove();f.ui.update(settings,url);f.doc.root.append(late);f.ui.update(settings,url);
+ const old=f.doc.getElementById('search-circle');assert.equal(old.hasAttribute(searchTabHidden),true);old.remove();
+ const item=f.doc.createElement('li'),link=f.doc.createElement('a');link.setAttribute('data-id','NavigationItem');link.setAttribute('href','https://other.test/search?context=circle');item.append(link);f.doc.getElementById('search-types').append(item);f.ui.update(settings,url);
+ assert.equal(old.hasAttribute(searchTabHidden),false);assert.equal(item.hasAttribute(searchTabHidden),false);
+ link.setAttribute('href','/search?context=circle');f.ui.update(settings,url);assert.equal(item.hasAttribute(searchTabHidden),true);
+ f.doc.getElementById('search-note').remove();f.ui.update(settings,url);assert.equal(item.hasAttribute(searchTabHidden),false);
 });

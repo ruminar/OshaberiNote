@@ -279,3 +279,5 @@ form[data-oshaberi-note-search-clear-layout] > [data-name="Field"] { flex: 1; mi
 .oshaberi-note-article-menu > .oshaberi-note-article-following-row { position: static; display: flex; grid-column: 1 / -1; width: 100%; }
 .oshaberi-note-article-menu > .oshaberi-note-article-favorite-profile { position: static; display: block; grid-column: 1 / -1; width: 100%; max-height: none; }
 .oshaberi-note-article-following-row .oshaberi-note-favorite-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+
+[data-oshaberi-note-search-membership-tab-hidden] { display: none !important; }

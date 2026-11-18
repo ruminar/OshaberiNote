@@ -9,6 +9,39 @@ const { pathToFileURL } = require("node:url");
 const root = path.resolve(__dirname, "..");
 const packager = () => import(pathToFileURL(path.join(root, "scripts/package.mjs")).href);
 const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test('画面のタイトル下とフッターの版番号はmanifestと一致し、説明中の旧版番号は許可する',async()=>{
+ const {createManifest,validateHomeVersion}=await packager(),html=await fs.readFile(path.join(root,'home.html'),'utf8');
+ for(const browser of ['chromium','firefox']){
+  const manifest=await createManifest(browser);assert.doesNotThrow(()=>validateHomeVersion(html,manifest.version));
+  assert.doesNotThrow(()=>validateHomeVersion(html+'<p>0.1.3以前の互換説明</p>',manifest.version));
+ }
+});
+
+test('画面の片方・両方の旧版表示や欠落を配布生成前の検証で拒否する',async()=>{
+ const {createManifest,validateHomeVersion}=await packager(),version=(await createManifest('firefox')).version,html=await fs.readFile(path.join(root,'home.html'),'utf8');
+ for(const bad of [html.replace(/(id="version"[^>]*>)[^<]+/,'$10.0.1'),html.replace(/(<footer>[^<]*?)\d+\.\d+\.\d+/,'$10.0.1'),html.replaceAll(version,'0.0.1'),html.replace('id="version"','id="missing-version"'),html.replace('<footer>','<div>')])assert.throws(()=>validateHomeVersion(bad,version),/版番号がmanifestと一致しません/);
+});
+
+test('両配布物の全ランタイムは現在のソースと一致し、共通メニューのドラッグ処理も含む',async t=>{
+ const {buildPackage,runtimeFiles}=await packager(),temp=await fs.mkdtemp(path.join(os.tmpdir(),'oshaberi-runtime-check-'));
+ assert.equal(path.dirname(temp),path.resolve(os.tmpdir()));t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+ for(const browser of ['chromium','firefox']){
+  const output=await buildPackage(browser,temp);
+  for(const file of runtimeFiles)assert.deepEqual(await fs.readFile(path.join(output,file)),await fs.readFile(path.join(root,file)),file);
+  for(const file of ['src/content.js','src/note-ui.js','src/platform/browser-api.js'])assert.match(await fs.readFile(path.join(output,file),'utf8'),/menuFavoriteDrop/);
+ }
+});
+
+test('画面の版番号が不一致なら既存の配布フォルダを削除せずに生成を拒否する',async t=>{
+ const temp=await fs.mkdtemp(path.join(os.tmpdir(),'oshaberi-version-guard-'));assert.equal(path.dirname(temp),path.resolve(os.tmpdir()));t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+ await fs.mkdir(path.join(temp,'scripts'));await fs.copyFile(path.join(root,'scripts/package.mjs'),path.join(temp,'scripts/package.mjs'));await fs.copyFile(path.join(root,'manifest.json'),path.join(temp,'manifest.json'));
+ const manifest=JSON.parse(await fs.readFile(path.join(root,'manifest.json'),'utf8')),output=path.join(temp,'dist',`OshaberiNote-${manifest.version}-chromium`);
+ await fs.mkdir(output,{recursive:true});await fs.writeFile(path.join(output,'preserve.txt'),'existing artifact');
+ const html=await fs.readFile(path.join(root,'home.html'),'utf8');await fs.writeFile(path.join(temp,'home.html'),html.replace('id="version"','id="missing-version"'));
+ const isolated=await import(pathToFileURL(path.join(temp,'scripts/package.mjs')).href);await assert.rejects(isolated.buildPackage('chromium'),/版番号がmanifestと一致しません/);
+ assert.equal(await fs.readFile(path.join(output,'preserve.txt'),'utf8'),'existing artifact');
+});
 test("両ブラウザの日本語メタデータが既存表示のまま解決でき、配布物にも含まれる", async t => {
   const { createManifest, buildPackage } = await packager();
   const temp = await fs.mkdtemp(path.join(os.tmpdir(), "oshaberi-note-locale-test-"));

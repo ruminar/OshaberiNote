@@ -216,6 +216,15 @@
     } catch { /* 壊れたURLは対象外 */ }
     return null;
   }
+  function addableTag(url) {
+    const page = pageKind(url);
+    if (page?.type === "tag") return page.tag;
+    if (page?.type !== "search") return null;
+    const query = (new URL(url).searchParams.get("q") || "").trim();
+    const tag = query.replace(/^#/, "");
+    if (!tag || /^[+-]/.test(tag) || /[\s#:"'「」『』“”‘’]/u.test(tag)) return null;
+    try { return normalizeTag(tag); } catch { return null; }
+  }
   // お気に入りグループを描画する共通メニューの画面。記事等の専用ナビは含めない。
   function hasFavoriteMenu(url) {
     return ["following", "tag", "search", "topic", "help"].includes(pageKind(url)?.type);
@@ -415,5 +424,5 @@
     modeOf, usesTags, usesFollowing, availableGroups, expandGroups, groupSymbols,
     exportSettings, parseSettingsExport, settingsToken, normalizeOllamaUrl, validateModel, validateSystemPrompt, authorId, authorName, isSelf, authorRule, authorLabel, sortAuthors,
     favorite, favoriteKey, favoriteLabel, favoriteUrl, authorSearchUrl, searchedAuthor, favoriteUser, favoriteMagazine, favoriteMembership, favoriteArticle, articleAddress, favoriteSchema, bookIconPath, membershipIconPath, membershipPage, questionPage,
-    normalizeTag, inspectTags, tagUrl, articleSearchTabUrl, pageKind, hasFavoriteMenu, isArticle, isPreviewArticle, groupIds, groupName, normalizeGroupName, selectedGroup, defaultSettings });
+    normalizeTag, addableTag, inspectTags, tagUrl, articleSearchTabUrl, pageKind, hasFavoriteMenu, isArticle, isPreviewArticle, groupIds, groupName, normalizeGroupName, selectedGroup, defaultSettings });
 })();

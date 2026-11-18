@@ -206,6 +206,34 @@
     }
     const authorControls = createAuthorControls(doc, win, actions, profileSlot);
     let host, menu, signature;
+    const searchMembershipTabs = new Set();
+    const searchMembershipTabHidden = "data-oshaberi-note-search-membership-tab-hidden";
+    function syncSearchMembershipTab(settings, url) {
+      const targets = new Set();
+      if (settings.enabled && settings.hidePaidArticles === true && core.pageKind(url)?.type === "search") {
+        const contextOf = link => {
+          try {
+            const target = new URL(link.getAttribute("href"), url);
+            return target.origin === "https://note.com" && /^\/search\/?$/.test(target.pathname) ? target.searchParams.get("context") : null;
+          } catch { return null; }
+        };
+        for (const link of doc.querySelectorAll('a[data-id="NavigationItem"]')) {
+          if (link.closest(`[${owned}]`) || contextOf(link) !== "circle") continue;
+          const item = link.parentElement, list = item?.parentElement;
+          if (item?.tagName !== "LI" || list?.tagName !== "UL") continue;
+          const hasArticles = [...list.querySelectorAll('a[data-id="NavigationItem"]')].some(sibling =>
+            sibling.parentElement?.parentElement === list && contextOf(sibling) === "note");
+          if (hasArticles) targets.add(item);
+        }
+      }
+      for (const item of searchMembershipTabs) if (!targets.has(item)) item.removeAttribute(searchMembershipTabHidden);
+      searchMembershipTabs.clear();
+      for (const item of targets) {
+        if (!item.hasAttribute(searchMembershipTabHidden)) item.setAttribute(searchMembershipTabHidden, "");
+        searchMembershipTabs.add(item);
+      }
+    }
+
     let articleFollowing, articleSummary, articleSummaryBusy = false;
     let articleMenu, articleRow;
     function clearArticleMenu() {
@@ -654,7 +682,7 @@
     function repaint() { if (!disposed && currentSettings) update(currentSettings, currentUrl); }
     async function addTag(tag) {
       if (adding || uncertain || !currentSettings?.enabled || !core.usesTags(currentSettings) ||
-          currentSettings.tagWarning || core.pageKind(currentUrl)?.tag !== tag) return;
+          currentSettings.tagWarning || core.addableTag(currentUrl) !== tag) return;
       adding = true; actionMessage = "保存中…"; repaint();
       const groupId = currentSettings.selectedTagGroupId, selectionRevision = currentSettings.groupSelectionRevision;
       try { await actions.addCurrentTag(groupId, selectionRevision); actionMessage = `# ${tag}を${core.groupName(currentSettings.tagGroups.find(group => group.id === groupId))}に追加しました。`; }
@@ -1914,7 +1942,7 @@
         profileLayout.root.remove(); profileLayout = undefined; authorControls.invalidate();
       }
       prepareSidebar(url, settings);
-      if ((core.pageKind(currentUrl)?.tag !== core.pageKind(url)?.tag || core.searchedAuthor(currentUrl) !== core.searchedAuthor(url)) && !uncertain && !adding) actionMessage = "";
+      if ((core.addableTag(currentUrl) !== core.addableTag(url) || core.searchedAuthor(currentUrl) !== core.searchedAuthor(url)) && !uncertain && !adding) actionMessage = "";
       if (currentUrl !== url || Boolean(currentSettings?.enabled) !== Boolean(settings.enabled)) followingLinksDirty = true;
       currentSettings = settings; currentUrl = url;
       if (menuFavoriteDrag && !menuFavoriteDragValid()) clearMenuFavoriteDrag();
@@ -1932,6 +1960,7 @@
       syncProducts(settings.enabled && core.usesFollowing(settings) && page?.type === "tag");
       syncRecommendations(settings.enabled && settings.hideArticleRecommendations === true && core.isArticle(url));
       syncNotesPromotions(settings, url);
+      syncSearchMembershipTab(settings, url);
       syncMembershipExamples(settings, url);
       syncMagazinePromotions(settings, url);
       syncHomeBanners(settings, url);
@@ -1959,7 +1988,7 @@
       const authorCard = !severe && activeAuthor ? searchAuthor(activeAuthor, settings) : null;
       const registeredAuthor = activeAuthor && group?.tags.some(item => core.favoriteKey(item) === `user:${activeAuthor.toLowerCase()}`);
       const menuFavoriteDropEnabled = common && Boolean(actions.menuFavoriteDrop);
-      const nextSignature = JSON.stringify([page, activeTag, activeAuthor, authorCard, core.modeOf(settings), settings.noteUserId, settings.tagGroups, settings.tagGroupsRevision, settings.favoriteGroupDisplay, settings.selectedTagGroupId, settings.groupSelectionRevision, settings.groupSelectionInvalid, settings.tagWarning, adding, uncertain, actionMessage]);
+      const nextSignature = JSON.stringify([page, activeTag, core.addableTag(url), activeAuthor, authorCard, core.modeOf(settings), settings.noteUserId, settings.tagGroups, settings.tagGroupsRevision, settings.favoriteGroupDisplay, settings.selectedTagGroupId, settings.groupSelectionRevision, settings.groupSelectionInvalid, settings.tagWarning, adding, uncertain, actionMessage]);
       if (!menu) {
         menu = doc.createElement(page.type === "profile" ? "div" : "nav");
         menu.setAttribute(owned, "");
@@ -2009,17 +2038,22 @@
           }
           if (page.type !== "profile") {
             let registered = Boolean(registeredAuthor);
-            if (page.type === "tag") {
+            const addableTag = core.addableTag(url);
+            if (addableTag !== null) {
               let normalized;
-              try { normalized = core.normalizeTag(page.tag); } catch { /* 空タグ等は登録不可 */ }
+              try { normalized = core.normalizeTag(addableTag); } catch { /* 空タグ等は登録不可 */ }
               registered = group.tags.includes(normalized);
               if (!registered) {
                 const button = doc.createElement("button"); button.type = "button";
-                button.textContent = adding ? "保存中…" : "タグをお気に入りに追加";
-                button.setAttribute("aria-label", `# ${page.tag}：${button.textContent}`);
+                button.textContent = "＃";
+                button.className = "oshaberi-note-favorite-toggle";
+                const label = `# ${addableTag}：${adding ? "保存中…" : "タグをお気に入りに追加"}`;
+                button.setAttribute("aria-label", label); button.setAttribute("title", label);
                 button.disabled = !normalized || adding || uncertain || Boolean(settings.tagWarning) || settings.groupSelectionInvalid || !actions.addCurrentTag;
                 button.setAttribute("data-tag-add", "");
-                button.onclick = () => { void addTag(page.tag); }; menu.append(button);
+                button.onclick = () => { void addTag(addableTag); };
+                const row = doc.createElement("div"); row.className = "oshaberi-note-profile-actions";
+                row.append(button, following); menu.prepend(row);
               }
             }
             const status = doc.createElement("span"); status.className = "oshaberi-note-tag-status";
@@ -2134,6 +2168,8 @@
         syncRecommendations(false);
         for (const root of notesPromotionRoots) root.removeAttribute(notesPromotionRoot);
         notesPromotionRoots.clear();
+        for (const item of searchMembershipTabs) item.removeAttribute(searchMembershipTabHidden);
+        searchMembershipTabs.clear();
         for (const target of membershipExamples) target.removeAttribute(membershipExamplesHidden);
         membershipExamples.clear();
         for (const target of magazinePromotions) target.removeAttribute(magazinePromotionHidden);
