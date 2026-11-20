@@ -259,6 +259,7 @@ test('8タブで2種類の送信プロンプトを確認でき、感想戦では
         assert.match(byId('progress-detail').textContent, /5文字を受信/);
         if (data.reviews) {
           assert.match(messages[0].content, /最終段階の試験用方針/);
+          assert.match(messages[0].content, /同じ理由が5記事に当てはまれば、5件とも同じ分類/);
           assert.equal(messages[0].content, byId('classification-prompt').value);
           assert.deepEqual(Array.from(options.format.properties.ratings.required), ['impact', 'reach', 'precision', 'originality']);
           assert.deepEqual(Array.from(options.format.properties.representatives.items.enum), ['n123', 'n234', 'n345']);
@@ -461,7 +462,7 @@ test('根拠から再集計してランクを出し、不明な根拠IDや分類
   const context = vm.createContext({});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/site-evaluation-ratings.js'), 'utf8'), context);
   const rating = context.OshaberiNoteEvaluationRatings;
-  const reviews = ['n123', 'n234', 'n345'].map(id => ({
+  const reviews = ['n123', 'n234', 'n345', 'n456', 'n567'].map(id => ({
     id, title: id, evidence: rating.readEvidence(JSON.stringify({
       impact: evidenceEntry({ strength: '構成の具体例' }),
       reach: evidenceEntry({ weakness: '情報の不足箇所' }),
@@ -479,10 +480,12 @@ test('根拠から再集計してランクを出し、不明な根拠IDや分類
   assert.equal(parse(a).ratings.impact.rank, 'A');
   assert.equal(parse(a).ratings.reach.rank, 'E');
   assert.equal(parse(a).ratings.precision.rank, '判定不能');
-  assert.equal(parse(testRank(classification([...strengths.slice(0, 2), { ...strengths[2], category: 'supporting' }]))).ratings.impact.rank, 'B');
+  const twoDecisive = testRank(classification([...strengths.slice(0, 2), { category: 'supporting', refs: strengths.slice(2).flatMap(item => item.refs) }]));
+  assert.equal(parse(twoDecisive).ratings.impact.rank, 'B');
   const oneDecisive = testRank(classification([strengths[0], { category: 'supporting', refs: strengths.slice(1).flatMap(item => item.refs) }]));
   assert.equal(parse(oneDecisive).ratings.impact.rank, 'C');
-  assert.match(parse(a).ratings.impact.reason, /決め手 3件[\s\S]*決め手 · n123[\s\S]*決め手 · n234[\s\S]*決め手 · n345/);
+  assert.match(parse(a).ratings.impact.reason, /決め手 5件/);
+  assert.equal(parse(a).ratings.impact.reason.match(/決め手 · n\d+ · 構成の具体例/g).length, 5);
   const miscounted = parse(testRank({ ...a.ratings.impact, counts: { ...a.ratings.impact.counts, decisive: 2 } }));
   assert.equal(miscounted.ratings.impact.rank, 'A');
   assert.match(miscounted.ratings.impact.reason, /再集計しました/);
