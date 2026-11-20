@@ -110,7 +110,8 @@
     const busy = Boolean(controller || evaluationAbort);
     byId("target").disabled = byId("profile").disabled = busy;
     byId("collect").disabled = busy || !target || !collector;
-    byId("candidate").disabled = byId("add").disabled = busy || !target?.candidates.length;
+    byId("candidate").disabled = busy || !byId("candidate").value;
+    byId("add").disabled = byId("candidate").disabled || slots.every(slot => slot.value.trim());
     byId("cancel").disabled = !busy;
     for (const slot of slots) slot.disabled = busy || !target;
     for (const id of ["notes", "prompt", "reset-prompt"]) byId(id).disabled = busy;
@@ -125,6 +126,28 @@
       byId("result").textContent = `${current ? "" : "現在の条件では未評価です。以下は前回の評価です。\n\n"}${result.summary}`;
       byId("detail").textContent = `${current ? "" : "現在の条件では未評価です。以下は前回の詳細です。\n\n"}${result.detail}`;
     }
+  }
+
+  function refreshCandidates(advance = false) {
+    const select = byId("candidate"), previous = select.value;
+    const selectedIndex = [...select.children].findIndex(option => option.value === previous);
+    const selectedIds = new Set();
+    for (const slot of slots) {
+      const url = slot.value.trim();
+      if (!url) continue;
+      try { selectedIds.add(source.articleFor(url, target.authorUrl).articleId); }
+      catch { /* 入力途中のURLは候補の除外に使わない。 */ }
+    }
+    const candidates = target.candidates.filter(candidate => !selectedIds.has(candidate.articleId));
+    select.replaceChildren();
+    for (const candidate of candidates) {
+      const option = document.createElement("option");
+      option.value = candidate.url;
+      option.textContent = `${candidate.pinned ? "固定 · " : ""}${candidate.title}`;
+      select.append(option);
+    }
+    const next = advance ? candidates[selectedIndex] : candidates.find(candidate => candidate.url === previous);
+    select.value = (next ?? candidates[0])?.url ?? "";
   }
 
   async function run(task) {
@@ -147,19 +170,16 @@
     }
     target = next;
     byId("profile-name").textContent = `${next.name}（${next.authorUrl}）`;
-    byId("candidate").replaceChildren();
-    for (const candidate of next.candidates) {
-      const option = document.createElement("option");
-      option.value = candidate.url;
-      option.textContent = `${candidate.pinned ? "固定 · " : ""}${candidate.title}`;
-      byId("candidate").append(option);
-    }
+    refreshCandidates();
     byId("status").textContent = `初回表示で${next.candidates.length}件の候補を確認しました。`;
   });
   byId("add").onclick = () => {
+    if (byId("add").disabled) return;
     const url = byId("candidate").value;
     const empty = slots.find(slot => !slot.value.trim());
-    if (empty && url && !slots.some(slot => slot.value === url)) empty.value = url;
+    if (!empty || !url) return;
+    empty.value = url;
+    refreshCandidates(true);
     controls();
   };
   byId("collect").onclick = () => run(async signal => {
@@ -422,7 +442,8 @@
     platform.subscribe(value => { changed = true; updateSettings(value); });
     void platform.load().then(value => { if (!changed) updateSettings(value); }).catch(() => {});
   }
-  for (const input of [...slots, byId("target"), byId("notes"), byId("question")]) input.oninput = controls;
+  for (const slot of slots) slot.oninput = () => { if (target) refreshCandidates(); controls(); };
+  for (const input of [byId("target"), byId("notes"), byId("question")]) input.oninput = controls;
   byId("cancel").onclick = () => controller?.abort();
   byId("stop").onclick = () => evaluationAbort?.abort();
   api.permissions?.onRemoved?.addListener(() => evaluationAbort?.abort());

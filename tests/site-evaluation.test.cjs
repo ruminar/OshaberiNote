@@ -133,6 +133,7 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   const document = documentFromHtml(fs.readFileSync(path.join(__dirname, '../home.html'), 'utf8'));
   const byId = id => document.getElementById(`evaluation-${id}`);
   const authorUrl = 'https://note.com/creator', endpoint = 'http://127.0.0.1:11434';
+  const candidates = ['n123', 'n234', 'n345', 'n456', 'n567', 'n678'].map(articleId => ({ articleId, url: `${authorUrl}/n/${articleId}`, title: `題 ${articleId}` }));
   const calls = [], copies = [];
   let tab, available = false, allowArticle = false, articleGranted = false, connectionChecks = 0;
   let tick, now = 0;
@@ -146,7 +147,7 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
       sendMessage: async (id, { kind, url }) => {
         assert.equal(id, 8); assert.equal(tab.url, url);
         const articleId = url.split('/').at(-1);
-        return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates: [] }
+        return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates }
           : { url, articleId, title: `題 ${articleId}`, author: '作者', body: `本文 ${articleId}` } };
       }
     },
@@ -200,7 +201,21 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   byId('target').value = authorUrl;
   await byId('profile').onclick();
   const slots = byId('articles').querySelectorAll('input');
-  for (const [i, articleId] of ['n123', 'n234', 'n345'].entries()) slots[i].value = `${authorUrl}/n/${articleId}`;
+  const dropdown = byId('candidate');
+  assert.equal(dropdown.value, candidates[0].url);
+  byId('add').onclick();
+  assert.equal(dropdown.value, candidates[1].url);
+  assert.ok(!dropdown.children.some(option => option.value === candidates[0].url));
+  byId('add').onclick();
+  slots[2].value = candidates[2].url + '/'; slots[2].oninput();
+  assert.deepEqual(dropdown.children.map(option => option.value), candidates.slice(3).map(item => item.url));
+  byId('add').onclick(); byId('add').onclick();
+  assert.deepEqual(slots.slice(0, 5).map(slot => slot.value.replace(/\/$/, '')), candidates.slice(0, 5).map(item => item.url));
+  assert.equal(byId('add').disabled, true);
+  slots[4].value = ''; slots[4].oninput();
+  slots[3].value = ''; slots[3].oninput();
+  assert.deepEqual(dropdown.children.map(option => option.value), candidates.slice(3).map(item => item.url));
+  assert.equal(byId('add').disabled, false);
   await byId('collect').onclick();
   byId('tab-notes').onclick();
   byId('notes').value = '記事外の実績は未確認'; byId('notes').oninput();
