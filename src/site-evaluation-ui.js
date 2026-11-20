@@ -11,23 +11,27 @@
   const rating = globalThis.OshaberiNoteEvaluationRatings;
   const links = globalThis.OshaberiNoteChatTags.links;
   const promptKey = "oshaberiNote.evaluation.creatorPrompt.v1";
+  const extractionPromptKey = "oshaberiNote.evaluation.extractionPrompt.v1";
+  const axisGuidance = [
+    "破壊力（impact）は面白さ・意外性・印象の強さ。読者が読み進める動機と、読書に見合う楽しさ・発見・感動を考える。",
+    "射程距離（reach）は想定読者が得る情報・文学的体験・文化的価値。読者層の広さ、専門性の高さ、読みやすさだけで判断しない。",
+    "精密動作性（precision）は明瞭さ・構成・読みやすさ。専門性や意図的な難解さ自体は弱みとしない。",
+    "成長性（originality）は現在の記事の着眼点・構成・表現の独自性。本人の体験であることや、よくある情報を明瞭に説明したことだけで強みとせず、将来の成長を予測しない。"
+  ].join("\n");
   const defaultPrompt = [
     "作品群から、その作者に共通する作家性・強み・表現の傾向を鑑定してください。根拠は今回参照した記事に求めてください。",
-    "破壊力は面白さ・意外性・印象の強さです。技術記事の知的な面白さも含みます。",
-    "射程距離は読者が得る情報・文学的体験・文化的価値です。専門性が高く読者が少ない作品でも、有用性や希少性を評価してください。読みやすさはこの軸に含めません。",
-    "精密動作性は明瞭さ・構成・読みやすさです。専門性や意図的な難解さを、それだけで減点しないでください。",
-    "成長性は現在の作品に見える着想・発想・表現の独自性です。将来は予測しません。",
+    axisGuidance,
     "各軸を独立に見て、同じ特徴を重複して加減点しないでください。風刺や批判の存在自体を減点せず、事実の真偽を確認できないことを面白さや独創性の低さと結び付けないでください。",
-    "Aは非常に高い、Bは高い、Cは標準的、Dは低め、Eは非常に低いとします。根拠が足りない軸は判定不能としてください。",
     "代表記事は作者の特徴をよく表しているものを選んでください。創作者の人格の推測、記事の添削、総合点、記事ごとの採点は不要です。"
   ].join("\n");
   const tabNames = [
     ["info", "取得情報"], ["articles", "記事選択"], ["notes", "補足情報入力"],
-    ["result", "サイト評価結果"], ["detail", "サイト評価詳細"], ["discussion", "感想戦"], ["prompt", "評価プロンプト"]
+    ["result", "サイト評価結果"], ["detail", "サイト評価詳細"], ["discussion", "感想戦"],
+    ["extraction-prompt", "根拠抽出プロンプト"], ["prompt", "鑑定プロンプト"]
   ];
   let tabIndex = 0;
   let target, collector, controller, evaluationAbort, settings, result, preparedReviews;
-  let collected = new Map(), discussion = [], promptRevision = 0, promptWrites = Promise.resolve();
+  let collected = new Map(), discussion = [], promptWrites = Promise.resolve();
   const matches = (value, url) => value?.replace(/\/$/, "") === url;
 
   async function openLink(event, url) {
@@ -138,7 +142,7 @@
     byId("add").disabled = byId("candidate").disabled || slots.every(slot => slot.value.trim());
     byId("cancel").disabled = !busy;
     for (const slot of slots) slot.disabled = busy || !target;
-    for (const id of ["notes", "prompt", "reset-prompt"]) byId(id).disabled = busy;
+    for (const id of ["notes", "prompt", "reset-prompt", "extraction-prompt", "reset-extraction-prompt"]) byId(id).disabled = busy;
     const snapshot = currentInput();
     const current = result && sameInput(snapshot, result.input);
     byId("run").disabled = busy || !snapshot || Boolean(current);
@@ -266,7 +270,8 @@
   }
 
   function currentInput() {
-    if (!target || !settings?.enabled || !settings.ollamaModel || !byId("prompt").value.trim()) return null;
+    const prompt = byId("prompt").value.trim(), extraction = byId("extraction-prompt").value.trim();
+    if (!target || !settings?.enabled || !settings.ollamaModel || !prompt || !extraction) return null;
     try {
       if (source.profile(byId("target").value) !== target.authorUrl) return null;
       const urls = slots.filter(slot => slot.value.trim()).map(slot => source.articleFor(slot.value.trim(), target.authorUrl).url);
@@ -274,15 +279,15 @@
       const articles = urls.map(url => collected.get(url));
       const author = { name: target.name, url: target.authorUrl };
       const endpoint = settings.ollamaUrl, model = settings.ollamaModel;
-      const notes = byId("notes").value.trim(), prompt = byId("prompt").value.trim();
+      const notes = byId("notes").value.trim();
       const postDates = target.postDates ?? [], pinnedDates = target.pinnedDates ?? [];
       const profileLikes = target.candidates.map(({ articleId, likeCount }) => ({ articleId, likeCount }));
-      return { author, articles, endpoint, model, notes, prompt, postDates, pinnedDates, profileLikes };
+      return { author, articles, endpoint, model, notes, prompt, extraction, postDates, pinnedDates, profileLikes };
     } catch { return null; }
   }
 
   function sameInput(input, previous) {
-    return Boolean(input && ["endpoint", "model", "notes", "prompt"].every(key => input[key] === previous[key]) &&
+    return Boolean(input && ["endpoint", "model", "notes", "prompt", "extraction"].every(key => input[key] === previous[key]) &&
       input.author.url === previous.author.url && input.author.name === previous.author.name && input.articles.length === previous.articles.length &&
       JSON.stringify([input.postDates, input.pinnedDates]) === JSON.stringify([previous.postDates, previous.pinnedDates]) &&
       JSON.stringify(input.profileLikes) === JSON.stringify(previous.profileLikes) &&
@@ -389,6 +394,27 @@
     "未取得の内容は推測しないでください。資料が足りず判断できない点があれば、何を判断できないのかを具体的に示してください。",
     "画像やリンク先の内容は未解析です。利用者の補足は未検証の申告として扱い、空欄の場合は通常の評価を進めてください。"
   ].join("\n");
+  const defaultExtractionPrompt = [
+    "この記事1本から、各評価軸の観察事実を抽出してください。",
+    axisGuidance,
+    "同じジャンル・目的の記事と比べ、strength（強み）、standard（標準的な点）、weakness（弱み）ごとに最大1件を記録してください。",
+    "各欄には何が書かれているかと、それがなぜその軸の根拠になるかを、短い引用または具体例を使い日本語240文字以内で記録してください。",
+    "弱みは、何が読者の理解や体験を妨げるかを具体的に説明できるときだけ記録してください。その軸と無関係な長所や、単に標準的である点は弱みに入れません。",
+    "根拠があるときだけ埋め、該当なし・資料不足は空文字としてください。標準的な点を弱みに含めず、ランク、採点、総評、添削、代表選定は行いません。"
+  ].join("\n");
+  const extractionFormat = "impact、reach、precision、originalityをキーとし、各値にstrength、standard、weaknessを持つJSONだけを返してください。";
+  const buildExtractionPrompt = instructions => [dataRule, instructions, extractionFormat].join("\n");
+  const classificationPrompt = [
+    "原文はなく、reviewsの根拠メモだけを使います。根拠が欠けていること自体を弱みとしないでください。",
+    "軸ごとに根拠を分類してください。同じ記事内の別軸の根拠を持ち込まないでください。",
+    "strengthはdecisive（同ジャンルの標準を明確に上回る決め手）かsupporting（補助的な強み）、standardはstandard（標準的）、weaknessはcritical（作品群としてその軸の価値を損なう致命的な弱み）、material（実際に影響する弱み）、minor（無視できる弱み）です。単発の軽微な問題をcriticalにしないでください。",
+    "weaknessの欄にあっても、具体的な悪影響が書かれていない、または実際には標準的な点や長所を記述している根拠はminorにしてください。",
+    "assignmentsには元の根拠IDをすべてキーとして記載し、各値には分類名の文字列を入れてください。別の記事に同じ特徴や言い換えがあっても、それぞれの根拠を分類し、countsには分類ごとの根拠IDの数を入れてください。該当しない分類は0です。",
+    "type、summary、features（文字列の配列、最大3件）、representatives（参照記事IDの配列、最大3件）、ratingsのJSONを返してください。ratingsはimpact、reach、precision、originalityを持ち、各値はassignmentsとcountsです。",
+    "ランク、点数、添削は出しません。編集された評価方針にランクや採点の指示があっても、この出力仕様を優先してください。"
+  ].join("\n");
+  const buildClassificationPrompt = policy => `${policy}\n\n${dataRule}\n${classificationPrompt}`;
+
   byId("run").onclick = () => {
     const input = currentInput();
     if (!input || byId("run").disabled) return;
@@ -398,22 +424,23 @@
         const reviews = [];
         for (const { articleId, title, body, url } of input.articles) {
           showLinks(byId("status"), `記事の特徴を抽出中（${reviews.length + 1} / ${input.articles.length}） ${title}`);
-          const review = await ask(`${input.prompt}\n\n${dataRule}\nこの段階ではこの記事1本から、作者の特徴を裏付ける具体例を日本語で短く抽出してください。ランク、採点、添削、代表選定は行いません。`,
-            { author: input.author, notes: input.notes, article: { articleId, title, body, url } });
-          if (!review.trim()) throw new Error("記事の特徴を抽出できませんでした。");
-          reviews.push({ id: articleId, title, review });
+          const raw = await ask(buildExtractionPrompt(input.extraction),
+            { author: input.author, notes: input.notes, article: { articleId, title, body, url } }, rating.evidenceFormat());
+          try {
+            reviews.push({ id: articleId, title, evidence: rating.readEvidence(raw, articleId) });
+          } catch {
+            throw new Error(`「${title}」の根拠メモを読み取れませんでした。もう一度評価できます。`);
+          }
         }
         preparedReviews = { input, reviews };
       }
       const { reviews } = preparedReviews;
       byId("status").textContent = "作品群の能力を鑑定しています…";
-      const keys = rating.modelAxes.map(([key, label]) => `${key}（${label}）`).join("、");
-      const articleIds = reviews.map(review => review.id);
-      const raw = await ask(`${input.prompt}\n\n${dataRule}\n根拠メモを総合して、今回の作品群に共通する作者の特徴を鑑定してください。スピードと持続力は集計するため出力しません。総合点・記事点数・添削は出しません。JSONのみを返してください。キーは type（短いタイプ名）、summary（総評）、features（主要な特徴を最大3件、文字列配列）、representatives（参照記事IDを最大3件）、ratings（${keys}の4キー。各値は rank［A/B/C/D/E/判定不能］と reason［具体的な根拠］を持つオブジェクト）です。`,
-        { author: input.author, notes: input.notes, reviews }, rating.outputFormat(articleIds));
+      const raw = await ask(buildClassificationPrompt(input.prompt),
+        { author: input.author, notes: input.notes, reviews }, rating.outputFormat(reviews));
       let assessment;
       try {
-        assessment = rating.parse(raw, articleIds);
+        assessment = rating.parse(raw, reviews);
       } catch {
         throw new Error("能力鑑定の応答を読み取れませんでした。「評価する」を押すと、今回の記事メモを使って最後の鑑定からやり直せます。");
       }
@@ -427,8 +454,7 @@
       ].join("\n\n");
       const table = ["| 能力 | ランク | 評価内容 |", "| --- | --- | --- |", ...rating.axes.map(([key, label, meaning]) => `| ${label} | ${ratings[key].rank} | ${meaning} |`)].join("\n");
       const meta = `${input.author.name} · ${input.author.url}\n評価日時 ${new Date(now).toLocaleString("ja-JP")} · モデル ${input.model}\n参照記事 ${input.articles.length}本（今回読んだ記事に基づく鑑定）`;
-      const detail = ["能力値の根拠", ...rating.axes.map(([key, label]) => `### ${label} · ${ratings[key].rank}\n${ratings[key].reason}`),
-        "記事から得た根拠メモ", ...reviews.map(item => `### ${item.title}\n${item.review}`)].join("\n\n");
+      const detail = ["能力値の根拠", ...rating.axes.map(([key, label]) => `### ${label} · ${ratings[key].rank}\n${ratings[key].reason}`)].join("\n\n");
       result = { input, evaluatedAt, ratings, meta, summary: `${table}\n\n${overview}`, detail };
       preparedReviews = undefined;
       showLinks(byId("result"), overview);
@@ -480,13 +506,31 @@
     catch { byId("status").textContent = "コピーできませんでした。"; }
   };
 
-  function savePrompt() {
-    promptRevision++;
-    const value = byId("prompt").value;
-    promptWrites = promptWrites.then(() => api.storage.local.set({ [promptKey]: value })).catch(() => {
-      byId("status").textContent = "評価方針を保存できませんでした。";
-    });
-    controls();
+  function initializePrompt(id, key, defaultValue, previewId, buildPrompt, label) {
+    const field = byId(id);
+    let edited = false;
+    const refreshPreview = () => { byId(previewId).value = buildPrompt(field.value.trim()); };
+    const save = () => {
+      edited = true;
+      const value = field.value;
+      promptWrites = promptWrites.then(() => api.storage.local.set({ [key]: value })).catch(() => {
+        byId("status").textContent = `${label}を保存できませんでした。`;
+      });
+      refreshPreview();
+      controls();
+    };
+    field.value = defaultValue;
+    refreshPreview();
+    field.oninput = save;
+    byId(`reset-${id}`).onclick = () => { field.value = defaultValue; save(); };
+    if (api.storage?.local) void api.storage.local.get(key).then(values => {
+      const saved = values[key];
+      if (!edited && typeof saved === "string" && saved.length <= Number(field.getAttribute("maxlength"))) {
+        field.value = saved;
+        refreshPreview();
+      }
+      controls();
+    }).catch(() => { byId("status").textContent = `保存済みの${label}を読み込めませんでした。`; });
   }
 
   for (const [index, [id, label]] of tabNames.entries()) {
@@ -503,14 +547,8 @@
   selectTab(0);
   byId("back").onclick = () => { if (tabIndex > 0) selectTab(tabIndex - 1, true); };
   byId("next").onclick = () => { if (tabIndex + 1 < tabNames.length) selectTab(tabIndex + 1, true); };
-  byId("prompt").value = defaultPrompt;
-  byId("prompt").oninput = savePrompt;
-  byId("reset-prompt").onclick = () => { byId("prompt").value = defaultPrompt; savePrompt(); };
-  if (api.storage?.local) void api.storage.local.get(promptKey).then(value => {
-    const saved = value[promptKey];
-    if (!promptRevision && typeof saved === "string" && saved.length <= 16000) byId("prompt").value = saved;
-    controls();
-  }).catch(() => { byId("status").textContent = "保存済みの評価方針を読み込めませんでした。"; });
+  initializePrompt("extraction-prompt", extractionPromptKey, defaultExtractionPrompt, "extraction-prompt-preview", buildExtractionPrompt, "根拠抽出プロンプト");
+  initializePrompt("prompt", promptKey, defaultPrompt, "classification-prompt", buildClassificationPrompt, "評価方針");
   function updateSettings(value) {
     const next = core.readSettings(value);
     if (settings && (!next.enabled || next.ollamaUrl !== settings.ollamaUrl || next.ollamaModel !== settings.ollamaModel)) evaluationAbort?.abort();

@@ -102,8 +102,9 @@
     api.runtime.onMessage.addListener((message, sender, respond) => {
       if (message?.type !== "site-evaluation-read" || sender.id !== api.runtime.id || sender.url?.split(/[?#]/)[0] !== api.runtime.getURL("home.html")) return false;
       if (document.readyState !== "complete" || location.href.replace(/\/$/, "") !== message.url) { respond({ waiting: true }); return false; }
-      if (message.kind === "article" && ![...document.querySelectorAll("header a[href]")].some(anchor => globalThis.OshaberiNoteUi?.isOfficialHeaderLogo(anchor, message.url))) {
-        respond({ waiting: true, error: "記事ページのヘッダーの読み込みを確認できませんでした。" });
+      if (!Array.from(document.querySelectorAll("header a[href]")).some(anchor => globalThis.OshaberiNoteUi?.isOfficialHeaderLogo(anchor, message.url))) {
+        const page = message.kind === "profile" ? "公開プロフィール" : "記事ページ";
+        respond({ waiting: true, error: `${page}のヘッダーの読み込みを確認できませんでした。` });
         return false;
       }
       try {

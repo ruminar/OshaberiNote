@@ -130,10 +130,23 @@
             <textarea id="evaluation-question" rows="4" maxlength="8000" placeholder="Ctrl+Enterで送信、Enterで改行" disabled></textarea>
             <button type="button" id="evaluation-discuss" disabled>送信</button>
           </div>
+          <div id="evaluation-panel-extraction-prompt" role="tabpanel" aria-labelledby="evaluation-tab-extraction-prompt" hidden>
+            <label for="evaluation-extraction-prompt">根拠抽出の指示（デバッグ用）</label>
+            <textarea id="evaluation-extraction-prompt" rows="12" maxlength="16000"></textarea>
+            <button type="button" id="evaluation-reset-extraction-prompt" class="secondary">デフォルトに戻す</button>
+            <details>
+              <summary>Ollamaへ送る根拠抽出プロンプト全文</summary>
+              <textarea id="evaluation-extraction-prompt-preview" rows="12" aria-label="Ollamaへ送る根拠抽出プロンプト全文" readonly></textarea>
+            </details>
+          </div>
           <div id="evaluation-panel-prompt" role="tabpanel" aria-labelledby="evaluation-tab-prompt" hidden>
-            <label for="evaluation-prompt">評価方針</label>
+            <label for="evaluation-prompt">根拠メモを総合する評価方針</label>
             <textarea id="evaluation-prompt" rows="12" maxlength="16000"></textarea>
             <button type="button" id="evaluation-reset-prompt" class="secondary">デフォルトに戻す</button>
+            <details>
+              <summary>Ollamaへ送る鑑定プロンプト全文</summary>
+              <textarea id="evaluation-classification-prompt" rows="12" aria-label="Ollamaへ送る鑑定プロンプト全文" readonly></textarea>
+            </details>
           </div>
           <div class="settings-actions evaluation-navigation">
             <button type="button" id="evaluation-back" class="secondary">戻る</button>
