@@ -60,6 +60,10 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
 .evaluation-progress progress { width: min(180px, 100%); accent-color: var(--accent); }
 #panel-evaluation textarea { display: block; width: 100%; padding: 12px; border: 1px solid var(--field-border); border-radius: 6px; font: inherit; resize: vertical; }
 #evaluation-result, #evaluation-detail, #evaluation-discussion { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 12px; }
+#evaluation-profile-name, #evaluation-result-meta { white-space: pre-wrap; overflow-wrap: anywhere; }
+#evaluation-ratings { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+#evaluation-ratings caption { text-align: start; font-weight: 700; margin-bottom: 6px; }
+#evaluation-ratings th, #evaluation-ratings td { border-bottom: 1px solid var(--border); padding: 6px 10px; text-align: start; }
 .chat-tabs { gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--divider); }
 .chat-tabs [role="tab"] { background: transparent; color: var(--accent); border-color: transparent; border-radius: 8px 8px 0 0; }
 .chat-tabs [aria-selected="true"] { background: var(--button-bg); color: var(--button-text); border-color: var(--accent); }

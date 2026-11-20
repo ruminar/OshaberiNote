@@ -12,6 +12,55 @@
     return address;
   }
 
+  function publicationDate(elements) {
+    const dates = new Set([...elements].map(item => item.getAttribute("datetime")).filter(value =>
+      /^\d{4}-\d{2}-\d{2}(?:T|$)/.test(value ?? "") && Number.isFinite(Date.parse(value))));
+    return dates.size === 1 ? [...dates][0] : null;
+  }
+
+  function articleCard(node) {
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+      if (parent.tagName === "ARTICLE" || parent.classList.contains("grid-rows-subgrid") ||
+          (parent.tagName === "DIV" && ["bg-surface-normal", "w-full", "flex-col"].every(name => parent.classList.contains(name)))) return parent;
+    }
+    return null;
+  }
+
+  function cardLikeCounts(card, articleUrl) {
+    if (!card || [...card.querySelectorAll("a[href]")].some(link => {
+      try { return articles.page(link.href).url !== articleUrl; } catch { return false; }
+    })) return [];
+    const counts = [];
+    for (const icon of card.querySelectorAll('svg[aria-label="スキの数"]')) {
+      if (icon.getAttribute("role") !== "img" || icon.getAttribute("data-id") !== "Icon" || articleCard(icon) !== card) continue;
+      const group = icon.parentElement;
+      if (group?.children.length !== 2 || group.children[0] !== icon || !group.classList.contains("text-text-like")) continue;
+      const label = group.children[1];
+      if (label.tagName !== "SPAN" || label.children.length) continue;
+      const value = label.textContent.trim();
+      if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(value)) continue;
+      const count = Number(value.replaceAll(",", ""));
+      if (Number.isSafeInteger(count)) counts.push(count);
+    }
+    return counts;
+  }
+
+  function readArticle(doc, win, url) {
+    const entry = articles.extract(doc, win, url);
+    const article = doc.querySelector('article[id="note-article"]');
+    const publishedAt = publicationDate([...(article?.querySelectorAll("time[datetime]") ?? [])].filter(node =>
+      node.closest("article") === article && !node.closest('[id="note-body"]') && !node.closest('[id="note-paywall"]')));
+    const counts = new Set();
+    for (const button of article?.querySelectorAll("button[aria-label]") ?? []) {
+      if (button.closest("article") !== article || button.closest('[id="note-body"]') || button.closest('[data-oshaberi-note-owned]')) continue;
+      const match = /^(\d+|\d{1,3}(?:,\d{3})+)スキ この記事にスキをつけたユーザーを見る$/.exec(button.getAttribute("aria-label"));
+      if (!match) continue;
+      const count = Number(match[1].replaceAll(",", ""));
+      if (Number.isSafeInteger(count)) counts.add(count);
+    }
+    return { ...entry, publishedAt, likeCount: counts.size === 1 ? [...counts][0] : null };
+  }
+
   function readProfile(doc, win, url) {
     const authorUrl = profile(url);
     const canonicals = [...doc.querySelectorAll('link[rel="canonical"]')];
@@ -21,19 +70,32 @@
     if (headings.length !== 1 || !headings[0].textContent.trim()) throw new Error("公開プロフィールの表示名を確認できません。");
     const name = core.authorName(headings[0].textContent.trim());
     const main = doc.getElementById("main-content");
-    const candidates = new Map();
+    const hasArticleList = [...(main?.querySelectorAll("h2") ?? [])].some(node => visible(node) && node.textContent.trim() === "記事一覧") &&
+      !main.querySelector('[data-oshaberi-note-paid-hidden], [data-oshaberi-note-author-hidden]');
+    const candidates = new Map(), countsById = new Map();
     for (const link of main?.querySelectorAll("a[href]") ?? []) {
       if (!visible(link)) continue;
       let address;
       try { address = articleFor(link.href, authorUrl); } catch { continue; }
-      const card = link.closest("article");
+      const card = articleCard(link);
       const title = (link.getAttribute("title") || link.getAttribute("aria-label") || link.textContent).trim();
       if (!title || title.length > 500) continue;
       const pinned = Boolean(card && [...card.querySelectorAll("span, p")].some(node => visible(node) && node.textContent.trim() === "固定された記事"));
-      if (!candidates.has(address.articleId) || pinned) candidates.set(address.articleId, { ...address, title, pinned });
+      const publishedAt = card ? publicationDate(card.querySelectorAll("time[datetime]")) : null;
+      const counts = countsById.get(address.articleId) ?? new Set();
+      for (const count of cardLikeCounts(card, address.url)) counts.add(count);
+      countsById.set(address.articleId, counts);
+      const previous = candidates.get(address.articleId);
+      if (!previous || pinned || (!previous.pinned && publishedAt && !previous.publishedAt)) candidates.set(address.articleId, { ...address, title, pinned, publishedAt });
       if (candidates.size === 60) break;
     }
-    return { authorUrl, name, candidates: [...candidates.values()].sort((a, b) => Number(b.pinned) - Number(a.pinned)) };
+    const entries = [...candidates.values()].map(item => {
+      const counts = countsById.get(item.articleId);
+      return { ...item, likeCount: counts?.size === 1 ? [...counts][0] : null };
+    });
+    return { authorUrl, name, candidates: entries.sort((a, b) => Number(b.pinned) - Number(a.pinned)),
+      postDates: hasArticleList ? entries.filter(item => !item.pinned).map(item => item.publishedAt) : [],
+      pinnedDates: hasArticleList ? entries.filter(item => item.pinned).map(item => item.publishedAt) : [] };
   }
 
   if (api?.runtime?.id && globalThis.location?.origin === "https://note.com" && window === window.top) {
@@ -45,7 +107,7 @@
         return false;
       }
       try {
-        const value = message.kind === "profile" ? readProfile(document, window, message.url) : articles.extract(document, window, message.url);
+        const value = message.kind === "profile" ? readProfile(document, window, message.url) : readArticle(document, window, message.url);
         respond({ value });
       } catch (error) { respond({ error: error.message }); }
       return false;

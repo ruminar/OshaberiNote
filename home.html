@@ -18,6 +18,7 @@
   <script defer src="src/chat-tags.js"></script>
   <script defer src="src/chat-ui.js"></script>
   <script defer src="src/site-evaluation-source.js"></script>
+  <script defer src="src/site-evaluation-ratings.js"></script>
   <script defer src="src/site-evaluation-ui.js"></script>
 </head>
 <body>
@@ -104,6 +105,12 @@
             <p class="muted">記事本文を3本以上取得し、「LLMの設定」で接続・モデル選択を済ませてから「評価する」を押してください。</p>
           </div>
           <div id="evaluation-panel-result" role="tabpanel" aria-labelledby="evaluation-tab-result" hidden>
+            <p id="evaluation-result-meta" hidden></p>
+            <table id="evaluation-ratings" hidden>
+              <caption>クリエイター能力鑑定</caption>
+              <thead><tr><th scope="col">能力</th><th scope="col">ランク</th><th scope="col">評価内容</th></tr></thead>
+              <tbody id="evaluation-rating-rows"></tbody>
+            </table>
             <div id="evaluation-result">まだ評価していません。</div>
             <button type="button" id="evaluation-copy-result" class="secondary" disabled>結果をコピー</button>
           </div>

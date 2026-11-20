@@ -339,6 +339,13 @@ test('NDJSONと日本語のUTF-8が任意のバイト位置で分割されても
   assert.equal(f.request.credentials, 'omit'); assert.equal(f.request.redirect, 'error'); assert.equal(f.request.referrerPolicy, 'no-referrer');
   assert.deepEqual(JSON.parse(f.request.body).messages, [{ role: 'user', content: 'hi' }]);
   assert.equal(JSON.parse(f.request.body).truncate,true); assert.equal(JSON.parse(f.request.body).shift,true);
+  assert.equal(Object.hasOwn(JSON.parse(f.request.body), 'format'), false);
+});
+test('構造化出力を指定したときだけOllamaへJSON Schemaを送る', async () => {
+  const format = { type: 'object', properties: { rank: { type: 'string', enum: ['A', 'B'] } }, required: ['rank'] };
+  const f = client([encoded(line('{"rank":"A"}', true))]);
+  await f.api.chat('http://localhost:11434', 'local', [], new AbortController().signal, () => {}, { format });
+  assert.deepEqual(JSON.parse(f.request.body).format, format);
 });
 test('途中切断・不正JSON・HTTP異常・完了後の余分な行は成功扱いにしない', async () => {
   for (const data of [line('partial', false), '{bad}\n', line('ok', true) + line('late', true), JSON.stringify({ error: 'server error' }) + '\n']) {

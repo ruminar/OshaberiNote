@@ -59,7 +59,7 @@ async function verifyArticleCollection(interruption) {
     },
     clearTimeout(id) { clearedDelay = id; }
   });
-  for (const file of ['common', 'articles', 'site-evaluation-source', 'site-evaluation-ui']) {
+  for (const file of ['common', 'articles', 'site-evaluation-source', 'site-evaluation-ratings', 'site-evaluation-ui']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
   }
   byId('target').value = 'creator';
@@ -108,10 +108,14 @@ test('公式ヘッダーのnoteロゴが揃うまで本文抽出を保留する'
   const url = 'https://note.com/creator/n/n123', homeUrl = 'chrome-extension://test/home.html';
   const window = {}; window.top = window;
   const anchor = {};
+  const document = documentFromHtml('<article id="note-article"><time datetime="2026-11-19T12:00:00+09:00"></time><div id="note-body"><button aria-label="999スキ この記事にスキをつけたユーザーを見る"></button><time datetime="2000-01-01"></time></div><button aria-label="1,234スキ この記事にスキをつけたユーザーを見る"></button></article>');
+  const selectAll = document.querySelectorAll.bind(document);
+  document.readyState = 'complete';
+  document.querySelectorAll = selector => selector === 'header a[href]' ? [anchor] : selectAll(selector);
   let listener, extracted = 0, headerReady = false;
   const context = vm.createContext({
     window, URL, location: new URL(url),
-    document: { readyState: 'complete', querySelectorAll: selector => selector === 'header a[href]' ? [anchor] : [] },
+    document,
     chrome: { runtime: { id: 'test', getURL: () => homeUrl, onMessage: { addListener: fn => { listener = fn; } } } },
     OshaberiNote: {}, OshaberiNoteArticles: { extract: () => { extracted++; return { title: '記事' }; } },
     OshaberiNoteUi: { isOfficialHeaderLogo: node => node === anchor && headerReady }
@@ -125,7 +129,10 @@ test('公式ヘッダーのnoteロゴが揃うまで本文抽出を保留する'
   assert.equal(read().waiting, true);
   assert.equal(extracted, 0);
   headerReady = true;
-  assert.equal(read().value.title, '記事');
+  const { value } = read();
+  assert.equal(value.title, '記事');
+  assert.equal(value.likeCount, 1234);
+  assert.equal(value.publishedAt, '2026-11-19T12:00:00+09:00');
   assert.equal(extracted, 1);
 });
 
@@ -133,9 +140,9 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   const document = documentFromHtml(fs.readFileSync(path.join(__dirname, '../home.html'), 'utf8'));
   const byId = id => document.getElementById(`evaluation-${id}`);
   const authorUrl = 'https://note.com/creator', endpoint = 'http://127.0.0.1:11434';
-  const candidates = ['n123', 'n234', 'n345', 'n456', 'n567', 'n678'].map(articleId => ({ articleId, url: `${authorUrl}/n/${articleId}`, title: `題 ${articleId}` }));
+  const candidates = ['n123', 'n234', 'n345', 'n456', 'n567', 'n678'].map((articleId, i) => ({ articleId, url: `${authorUrl}/n/${articleId}`, title: `題 ${articleId}`, likeCount: [0, 10, 20, 30, 40, 50][i] }));
   const calls = [], copies = [];
-  let tab, available = false, allowArticle = false, articleGranted = false, connectionChecks = 0;
+  let tab, available = false, allowArticle = false, articleGranted = false, connectionChecks = 0, invalidAssessment = true;
   let tick, now = 0;
   const permissionRequests = [];
   const chrome = {
@@ -148,7 +155,7 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
         assert.equal(id, 8); assert.equal(tab.url, url);
         const articleId = url.split('/').at(-1);
         return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates }
-          : { url, articleId, title: `題 ${articleId}`, author: '作者', body: `本文 ${articleId}` } };
+          : { url, articleId, title: `題 ${articleId}`, author: '作者', body: `本文 ${articleId}`, likeCount: articleId === 'n123' ? 1000 : 22 } };
       }
     },
     runtime: {
@@ -187,13 +194,20 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
         }
         onText('応答の途中');
         assert.match(byId('progress-detail').textContent, /5文字を受信/);
-        if (data.reviews) return JSON.stringify({ summary: '総評の本文', detail: '選定理由', representatives: ['n234'] });
+        if (data.reviews) {
+          assert.deepEqual(Array.from(options.format.properties.ratings.required), ['impact', 'reach', 'precision', 'originality']);
+          assert.deepEqual(Array.from(options.format.properties.representatives.items.enum), ['n123', 'n234', 'n345']);
+          if (invalidAssessment) return 'JSONではない応答';
+          return JSON.stringify({ type: '実験型', summary: '総評の本文', features: ['作風'], representatives: ['n234'],
+            ratings: { impact: { rank: 'A', reason: '面白い' }, reach: { rank: 'B', reason: '有用' }, precision: { rank: 'C', reason: '読みやすい' }, originality: { rank: '判定不能', reason: '資料不足' } } });
+        }
+        assert.equal(options.format, undefined);
         if (data.question) return '補足文案を提案します。';
         return '個別所見';
       });
     } }
   });
-  for (const file of ['common', 'articles', 'site-evaluation-source', 'site-evaluation-ui']) {
+  for (const file of ['common', 'articles', 'site-evaluation-source', 'site-evaluation-ratings', 'site-evaluation-ui']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
   }
   assert.deepEqual(byId('tabs').children.map(button => button.textContent), ['取得情報', '記事選択', '補足情報入力', 'サイト評価結果', 'サイト評価詳細', '感想戦', '評価プロンプト']);
@@ -241,6 +255,12 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   available = true;
   await byId('run').onclick();
   assert.equal(calls.length, 4);
+  assert.match(byId('status').textContent, /最後の鑑定からやり直せます/);
+  assert.equal(byId('ratings').hidden, true);
+  invalidAssessment = false;
+  await byId('run').onclick();
+  assert.equal(calls.length, 5);
+  assert.deepEqual(calls[4], calls[3]);
   assert.equal(byId('progress').hidden, true);
   assert.equal(tick, undefined);
   assert.deepEqual(calls.slice(0, 3).map(call => call.article.body), ['本文 n123', '本文 n234', '本文 n345']);
@@ -248,12 +268,15 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   assert.ok(calls.every(call => call.notes === '記事外の実績は未確認'));
   assert.ok(!JSON.stringify(calls[3]).includes('本文 n123'));
   assert.match(byId('result').textContent, /総評の本文[\s\S]*題 n234/);
+  assert.match(byId('result').textContent, /実験型/);
+  assert.deepEqual(byId('rating-rows').children.map(row => row.children[1].textContent), ['A', 'D', 'B', '判定不能', 'C', '判定不能']);
+  assert.match(byId('detail').textContent, /一覧 6本のスキ合計150件 ÷ 6本で、平均25件/);
   assert.equal(byId('run').disabled, true);
   byId('tab-discussion').onclick();
   byId('question').value = '着眼点の見落としは？'; byId('question').oninput();
   byId('reference').value = `${authorUrl}/n/n123`;
   await byId('discuss').onclick();
-  assert.equal(calls[4].article.body, '本文 n123');
+  assert.equal(calls[5].article.body, '本文 n123');
   assert.equal(byId('reference').value, '');
   await byId('copy-all').onclick();
   assert.doesNotMatch(copies[0], /補足文案/);
@@ -263,5 +286,43 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   assert.match(byId('result').textContent, /総評の本文/);
   byId('notes').value = '新しい観点'; byId('notes').oninput();
   assert.equal(byId('run').disabled, false);
-  assert.match(byId('result').textContent, /現在の条件では未評価/);
+  assert.match(byId('result-meta').textContent, /現在の条件では未評価/);
+});
+
+test('能力鑑定は投稿頻度の境界と資料不足を区別し、LLMの不正なランクやIDを拒否する', () => {
+  const context = vm.createContext({});
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/site-evaluation-ratings.js'), 'utf8'), context);
+  const rating = context.OshaberiNoteEvaluationRatings;
+  const now = Date.parse('2026-11-20T00:00:00Z');
+  const date = days => new Date(now - days * 86400000).toISOString();
+  const posts = count => [...Array.from({ length: count }, (_, i) => date(i)), date(57)];
+  for (const [count, rank] of [[56, 'A'], [16, 'B'], [8, 'C'], [7, 'D']]) assert.equal(rating.stamina(posts(count), now).rank, rank);
+  assert.equal(rating.stamina([date(60), date(61)], now).rank, 'E');
+  assert.equal(rating.stamina([date(1), date(2)], now).rank, '判定不能');
+  assert.equal(rating.stamina([date(2), date(1), date(60)], now).rank, '判定不能');
+  assert.equal(rating.speed([{ likeCount: 0 }]).rank, 'E');
+  assert.equal(rating.speed([{ likeCount: 0 }, { likeCount: null }]).rank, '判定不能');
+  assert.equal(rating.speed([{ likeCount: null }]).rank, '判定不能');
+  const a = { rank: 'A', reason: '記事に根拠あり' }, result = { type: '作家', summary: '総評', features: [], representatives: ['n123'], ratings: { impact: a, reach: a, precision: a, originality: a } };
+  assert.equal(rating.parse(JSON.stringify(result), ['n123']).type, '作家');
+  assert.throws(() => rating.parse(JSON.stringify({ ...result, representatives: ['n999'] }), ['n123']));
+  assert.throws(() => rating.parse(JSON.stringify({ ...result, ratings: { ...result.ratings, speed: a } }), ['n123']));
+  assert.throws(() => rating.parse(JSON.stringify({ ...result, ratings: { ...result.ratings, impact: { rank: 'S', reason: '不正' } } }), ['n123']));
+});
+
+test('スキ数はプロフィール一覧の対応する記事カードから取得し、重複記事を1件として扱う', () => {
+  const authorUrl = 'https://note.com/creator';
+  const card = (id, count) => `<div class="flex w-full bg-surface-normal flex-col"><a href="${authorUrl}/n/${id}" title="記事"></a><div class="text-text-like"><svg role="img" data-id="Icon" aria-label="スキの数"></svg><span id="count-${id}-${count}"></span></div></div>`;
+  const document = documentFromHtml(`<link rel="canonical" href="${authorUrl}"><h1></h1><main id="main-content"><h2></h2>${card('n123', '0')}${card('n123', '0')}${card('n234', '1234')}${card('n345', 'rounded')}</main>`);
+  document.querySelector('h1').textContent = '作者';
+  document.querySelector('h2').textContent = '記事一覧';
+  for (const node of document.querySelectorAll('h1, h2, a[href], span')) node.getClientRects = () => [{}];
+  for (const node of document.querySelectorAll('span')) {
+    const id = node.getAttribute('id');
+    node.textContent = id.endsWith('-0') ? '0' : id.endsWith('-1234') ? '1,234' : '1.2万';
+  }
+  const context = vm.createContext({ URL });
+  for (const file of ['common', 'articles', 'site-evaluation-source']) vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
+  const result = context.OshaberiNoteEvaluationSource.readProfile(document, { getComputedStyle: () => ({ visibility: 'visible' }) }, authorUrl);
+  assert.deepEqual(Array.from(result.candidates, item => [item.articleId, item.likeCount]), [['n123', 0], ['n234', 1234], ['n345', null]]);
 });

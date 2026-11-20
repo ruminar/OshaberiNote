@@ -8,34 +8,24 @@
   const platform = globalThis.OshaberiNotePlatform;
   const core = globalThis.OshaberiNote;
   const ollama = globalThis.OshaberiNoteOllama;
-  const promptKey = "oshaberiNote.evaluation.prompt.v1";
+  const rating = globalThis.OshaberiNoteEvaluationRatings;
+  const promptKey = "oshaberiNote.evaluation.creatorPrompt.v1";
   const defaultPrompt = [
-    "あなたはnoteクリエイターの公開コンテンツを評価する審査員です。",
-    "",
-    "目的は、読者が記事や作品からどのような価値を得られるかを具体的に評価することです。",
-    "記事のジャンルや目的を理解し、情報の有用性、独自の知見、創意工夫、表現による体験、実践・制作の成果など、その記事に適した観点で判断してください。",
-    "",
-    "プロフィールの文字数、投稿数、スキ数、フォロワー数、一般的なSEO上の整い方を、記事自体の価値と混同しないでください。",
-    "一般的な内容を丁寧に説明する価値と、新しい発見・独自の制作物がもたらす価値は区別してください。",
-    "",
-    "候補記事をそれぞれ実際に与えられた本文・メタ情報の範囲で評価し、根拠となる具体的な箇所を示してください。",
-    "記事5本から価値が高いと判断する上位3本を選び、その理由を説明してください。採用できない場合は理由を説明してください。",
-    "",
-    "有料記事の未取得部分、画像・動画・音声、外部成果物など、見えていない内容を想像して採点しないでください。",
-    "表現の中心が画像等にある可能性が高いのに解析できない場合は、「評価不十分」と明示してください。評価不十分を低評価に置き換えないでください。",
-    "",
-    "利用者からの補足情報は審査資料として考慮してください。ただし、利用者の申告と実際に取得・検証した事実を区別してください。",
-    "記事外の活動・成果物について言及する場合も、記事本文の価値と区別して説明してください。",
-    "",
-    "総合評価では、読者が得られる価値、作者の特徴と強み、限界や不確かな点、代表3記事の選定理由を説明してください。",
-    "根拠がない情報は作らず、評価できないことは評価できないと報告してください。",
+    "作品群から、その作者に共通する作家性・強み・表現の傾向を鑑定してください。根拠は今回参照した記事に求めてください。",
+    "破壊力は面白さ・意外性・印象の強さです。技術記事の知的な面白さも含みます。",
+    "射程距離は読者が得る情報・文学的体験・文化的価値です。専門性が高く読者が少ない作品でも、有用性や希少性を評価してください。読みやすさはこの軸に含めません。",
+    "精密動作性は明瞭さ・構成・読みやすさです。専門性や意図的な難解さを、それだけで減点しないでください。",
+    "成長性は現在の作品に見える着想・発想・表現の独自性です。将来は予測しません。",
+    "各軸を独立に見て、同じ特徴を重複して加減点しないでください。風刺や批判の存在自体を減点せず、事実の真偽を確認できないことを面白さや独創性の低さと結び付けないでください。",
+    "Aは非常に高い、Bは高い、Cは標準的、Dは低め、Eは非常に低いとします。根拠が足りない軸は判定不能としてください。",
+    "代表記事は作者の特徴をよく表しているものを選んでください。創作者の人格の推測、記事の添削、総合点、記事ごとの採点は不要です。"
   ].join("\n");
   const tabNames = [
     ["info", "取得情報"], ["articles", "記事選択"], ["notes", "補足情報入力"],
     ["result", "サイト評価結果"], ["detail", "サイト評価詳細"], ["discussion", "感想戦"], ["prompt", "評価プロンプト"]
   ];
   let tabIndex = 0;
-  let target, collector, controller, evaluationAbort, settings, result;
+  let target, collector, controller, evaluationAbort, settings, result, preparedReviews;
   let collected = new Map(), discussion = [], promptRevision = 0, promptWrites = Promise.resolve();
   const matches = (value, url) => value?.replace(/\/$/, "") === url;
 
@@ -123,7 +113,7 @@
     byId("discuss").disabled = byId("question").disabled || !byId("question").value.trim();
     for (const id of ["copy-result", "copy-detail", "copy-all"]) byId(id).disabled = !result;
     if (result) {
-      byId("result").textContent = `${current ? "" : "現在の条件では未評価です。以下は前回の評価です。\n\n"}${result.summary}`;
+      byId("result-meta").textContent = `${current ? "" : "現在の条件では未評価です。以下は前回の鑑定です。\n\n"}${result.meta}`;
       byId("detail").textContent = `${current ? "" : "現在の条件では未評価です。以下は前回の詳細です。\n\n"}${result.detail}`;
     }
   }
@@ -173,10 +163,11 @@
       for (const slot of slots) slot.value = "";
       byId("results").replaceChildren();
       byId("notes").value = "";
+      preparedReviews = undefined;
       collected.clear(); clearEvaluation();
     }
     target = next;
-    byId("profile-name").textContent = `${next.name}（${next.authorUrl}）`;
+    byId("profile-name").textContent = `${next.name}（${next.authorUrl}）\n公開一覧の初回表示 ${next.candidates.length}本\n${rating.stamina(next.postDates ?? [], Date.now(), next.pinnedDates ?? []).reason}`;
     refreshCandidates();
     byId("status").textContent = `初回表示で${next.candidates.length}件の候補を確認しました。`;
   });
@@ -209,7 +200,8 @@
       try {
         const article = await read(url, "article", signal);
         collected.set(url, article);
-        title.textContent = `${article.title}（本文テキスト ${article.body.length.toLocaleString()}文字）`;
+        const likes = Number.isSafeInteger(article.likeCount) ? `スキ ${article.likeCount}` : "スキ数不明";
+        title.textContent = `${article.title}（本文 ${article.body.length.toLocaleString()}文字 · ${likes} · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`;
         body.textContent = article.body; captured++;
       } catch (error) {
         signal.throwIfAborted();
@@ -245,14 +237,18 @@
       const author = { name: target.name, url: target.authorUrl };
       const endpoint = settings.ollamaUrl, model = settings.ollamaModel;
       const notes = byId("notes").value.trim(), prompt = byId("prompt").value.trim();
-      return { author, articles, endpoint, model, notes, prompt };
+      const postDates = target.postDates ?? [], pinnedDates = target.pinnedDates ?? [];
+      const profileLikes = target.candidates.map(({ articleId, likeCount }) => ({ articleId, likeCount }));
+      return { author, articles, endpoint, model, notes, prompt, postDates, pinnedDates, profileLikes };
     } catch { return null; }
   }
 
   function sameInput(input, previous) {
     return Boolean(input && ["endpoint", "model", "notes", "prompt"].every(key => input[key] === previous[key]) &&
       input.author.url === previous.author.url && input.author.name === previous.author.name && input.articles.length === previous.articles.length &&
-      input.articles.every((article, i) => ["url", "title", "author", "body"].every(key => article[key] === previous.articles[i][key])));
+      JSON.stringify([input.postDates, input.pinnedDates]) === JSON.stringify([previous.postDates, previous.pinnedDates]) &&
+      JSON.stringify(input.profileLikes) === JSON.stringify(previous.profileLikes) &&
+      input.articles.every((article, i) => ["url", "title", "author", "body", "likeCount", "publishedAt"].every(key => article[key] === previous.articles[i][key])));
   }
 
   function clearEvaluation() {
@@ -261,6 +257,20 @@
     byId("question").value = "";
     byId("copy-discussion").checked = false;
     byId("reference").replaceChildren();
+    byId("rating-rows").replaceChildren();
+    byId("result-meta").hidden = byId("ratings").hidden = true;
+  }
+
+  function showRatings(ratings) {
+    const rows = byId("rating-rows");
+    for (const [key, label, meaning] of rating.axes) {
+      const row = document.createElement("tr");
+      const heading = document.createElement("th"); heading.setAttribute("scope", "row"); heading.textContent = label;
+      const rank = document.createElement("td"); rank.textContent = ratings[key].rank;
+      const meaningCell = document.createElement("td"); meaningCell.textContent = meaning;
+      row.append(heading, rank, meaningCell); rows.append(row);
+    }
+    byId("result-meta").hidden = byId("ratings").hidden = false;
   }
 
   function updateReferences() {
@@ -308,7 +318,7 @@
       await ollama.withGeneration(async send => {
         signal.throwIfAborted();
         onStart(); controls();
-        await task(async (system, data) => {
+        await task(async (system, data, format) => {
           signal.throwIfAborted();
           if (!await api.permissions.contains(permissions)) throw new Error("Ollamaの接続権限が変更されました。");
           signal.throwIfAborted();
@@ -319,7 +329,7 @@
           paintProgress();
           const answer = await send(input.endpoint, input.model, [{ role: "system", content: system }, { role: "user", content }], requestSignal, text => {
             if (text.length !== received) { received = text.length; paintProgress(); }
-          }, { truncate: false });
+          }, { truncate: false, format });
           requestSignal.throwIfAborted();
           return answer;
         });
@@ -345,32 +355,46 @@
     const input = currentInput();
     if (!input || byId("run").disabled) return;
     return sendEvaluation(input, async ask => {
-      const reviews = [];
-      for (const article of input.articles) {
-        byId("status").textContent = `記事を評価中（${reviews.length + 1} / ${input.articles.length}） ${article.title}`;
-        const review = await ask(`${input.prompt}\n\n${dataRule}\n今回は記事1本だけを評価し、根拠と評価できない範囲を日本語で簡潔に述べてください。代表記事は選ばないでください。`,
-          { author: input.author, notes: input.notes, article });
-        if (!review.trim()) throw new Error("個別評価が空でした。");
-        reviews.push({ id: article.articleId, title: article.title, review });
+      if (!preparedReviews || !sameInput(input, preparedReviews.input)) {
+        preparedReviews = undefined;
+        const reviews = [];
+        for (const { articleId, title, body, url } of input.articles) {
+          byId("status").textContent = `記事の特徴を抽出中（${reviews.length + 1} / ${input.articles.length}） ${title}`;
+          const review = await ask(`${input.prompt}\n\n${dataRule}\nこの段階ではこの記事1本から、作者の特徴を裏付ける具体例を日本語で短く抽出してください。ランク、採点、添削、代表選定は行いません。`,
+            { author: input.author, notes: input.notes, article: { articleId, title, body, url } });
+          if (!review.trim()) throw new Error("記事の特徴を抽出できませんでした。");
+          reviews.push({ id: articleId, title, review });
+        }
+        preparedReviews = { input, reviews };
       }
-      byId("status").textContent = "総合評価を作成しています…";
-      const raw = await ask(`${input.prompt}\n\n${dataRule}\n今回は個別評価から総評を作ってください。JSONだけを返してください。キーは summary（総評の文字列）、detail（選定理由と制約の文字列）、representatives（代表記事のidを最大3件並べた配列）。評価不十分な記事を枠埋めで選ばないでください。`,
-        { author: input.author, notes: input.notes, reviews });
-      let summary;
+      const { reviews } = preparedReviews;
+      byId("status").textContent = "作品群の能力を鑑定しています…";
+      const keys = rating.modelAxes.map(([key, label]) => `${key}（${label}）`).join("、");
+      const articleIds = reviews.map(review => review.id);
+      const raw = await ask(`${input.prompt}\n\n${dataRule}\n根拠メモを総合して、今回の作品群に共通する作者の特徴を鑑定してください。スピードと持続力は集計するため出力しません。総合点・記事点数・添削は出しません。JSONのみを返してください。キーは type（短いタイプ名）、summary（総評）、features（主要な特徴を最大3件、文字列配列）、representatives（参照記事IDを最大3件）、ratings（${keys}の4キー。各値は rank［A/B/C/D/E/判定不能］と reason［具体的な根拠］を持つオブジェクト）です。`,
+        { author: input.author, notes: input.notes, reviews }, rating.outputFormat(articleIds));
+      let assessment;
       try {
-        summary = JSON.parse(raw.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, "$1"));
-        if (typeof summary?.summary !== "string" || !summary.summary.trim() || typeof summary.detail !== "string" || !summary.detail.trim() ||
-            !Array.isArray(summary.representatives) || summary.representatives.length > 3 || new Set(summary.representatives).size !== summary.representatives.length ||
-            summary.representatives.some(id => !reviews.some(review => review.id === id))) throw new Error();
+        assessment = rating.parse(raw, articleIds);
       } catch {
-        byId("detail").textContent = raw;
-        selectTab(4);
-        throw new Error("総合評価の出力形式を確認できません。詳細に出力原文を表示しました。");
+        throw new Error("能力鑑定の応答を読み取れませんでした。「評価する」を押すと、今回の記事メモを使って最後の鑑定からやり直せます。");
       }
-      const representatives = summary.representatives.map(id => input.articles.find(article => article.articleId === id));
-      result = { input, evaluatedAt: new Date().toISOString(), reviews,
-        summary: `${summary.summary}\n\n代表記事\n${representatives.map(article => `- ${article.title}\n  ${article.url}`).join("\n") || "選定なし"}`,
-        detail: [summary.detail, ...reviews.map(item => `### ${item.title}\n${item.review}`)].join("\n\n") };
+      const now = Date.now(), evaluatedAt = new Date(now).toISOString();
+      const ratings = { ...assessment.ratings, speed: rating.speed(input.profileLikes), stamina: rating.stamina(input.postDates, now, input.pinnedDates) };
+      const representatives = assessment.representatives.map(id => input.articles.find(article => article.articleId === id));
+      const overview = [
+        `クリエイタータイプ\n${assessment.type}`, `総評\n${assessment.summary}`,
+        ...(assessment.features.length ? [`代表的特徴\n${assessment.features.map(feature => `- ${feature}`).join("\n")}`] : []),
+        `代表記事\n${representatives.map(article => `- ${article.title}\n  ${article.url}`).join("\n") || "選定なし"}`
+      ].join("\n\n");
+      const table = ["| 能力 | ランク | 評価内容 |", "| --- | --- | --- |", ...rating.axes.map(([key, label, meaning]) => `| ${label} | ${ratings[key].rank} | ${meaning} |`)].join("\n");
+      const meta = `${input.author.name} · ${input.author.url}\n評価日時 ${new Date(now).toLocaleString("ja-JP")} · モデル ${input.model}\n参照記事 ${input.articles.length}本（今回読んだ記事に基づく鑑定）`;
+      const detail = ["能力値の根拠", ...rating.axes.map(([key, label]) => `### ${label} · ${ratings[key].rank}\n${ratings[key].reason}`),
+        "記事から得た根拠メモ", ...reviews.map(item => `### ${item.title}\n${item.review}`)].join("\n\n");
+      result = { input, evaluatedAt, ratings, meta, summary: `${table}\n\n${overview}`, detail };
+      preparedReviews = undefined;
+      byId("result").textContent = overview;
+      showRatings(ratings);
       updateReferences();
       byId("discussion").textContent = "評価への質問や見落としを入力できます。";
       selectTab(3);
@@ -403,7 +427,7 @@
   for (const kind of ["result", "detail", "all"]) byId(`copy-${kind}`).onclick = async () => {
     if (!result) return;
     const { input, summary, detail, evaluatedAt } = result;
-    const heading = `# サイト評価 · ${input.author.name}\n${input.author.url}\n評価日時 ${evaluatedAt}\nモデル ${input.model}\n\n参照記事\n${input.articles.map(article => `- ${article.url}`).join("\n")}`;
+    const heading = `# クリエイター能力鑑定 · ${input.author.name}\n${input.author.url}\n評価日時 ${evaluatedAt}\nモデル ${input.model}\n\n参照記事\n${input.articles.map(article => `- ${article.url}`).join("\n")}`;
     const parts = [heading];
     if (kind !== "detail") parts.push(`## 結果\n${summary}`);
     if (kind !== "result") parts.push(`## 詳細\n${detail}`);

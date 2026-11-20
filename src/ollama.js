@@ -53,7 +53,7 @@
     }))];
   }
   async function chat(endpoint, model, messages, signal, onText, options = {}) {
-    const response = await request(endpoint, "/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, messages, stream: true, think: false, truncate: options.truncate !== false, shift: options.truncate !== false }) }, signal);
+    const response = await request(endpoint, "/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, messages, stream: true, think: false, truncate: options.truncate !== false, shift: options.truncate !== false, format: options.format }) }, signal);
     let buffer = "", answer = "", finished = false;
     async function line(text) {
       if (!text.trim()) return;
