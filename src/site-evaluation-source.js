@@ -30,14 +30,22 @@
     if (!card || [...card.querySelectorAll("a[href]")].some(link => {
       try { return articles.page(link.href).url !== articleUrl; } catch { return false; }
     })) return [];
-    const counts = [];
+    const labels = [];
     for (const icon of card.querySelectorAll('svg[aria-label="スキの数"]')) {
       if (icon.getAttribute("role") !== "img" || icon.getAttribute("data-id") !== "Icon" || articleCard(icon) !== card) continue;
       const group = icon.parentElement;
       if (group?.children.length !== 2 || group.children[0] !== icon || !group.classList.contains("text-text-like")) continue;
       const label = group.children[1];
       if (label.tagName !== "SPAN" || label.children.length) continue;
-      const value = label.textContent.trim();
+      labels.push(label.textContent.trim());
+    }
+    for (const button of card.querySelectorAll("button[aria-label]")) {
+      if (articleCard(button) !== card || button.closest("[data-oshaberi-note-owned]")) continue;
+      const match = /^(\d+|\d{1,3}(?:,\d{3})+)スキ この記事にスキをつけたユーザーを見る$/.exec(button.getAttribute("aria-label"));
+      if (match) labels.push(match[1]);
+    }
+    const counts = [];
+    for (const value of labels) {
       if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)$/.test(value)) continue;
       const count = Number(value.replaceAll(",", ""));
       if (Number.isSafeInteger(count)) counts.push(count);
@@ -50,15 +58,7 @@
     const article = doc.querySelector('article[id="note-article"]');
     const publishedAt = publicationDate([...(article?.querySelectorAll("time[datetime]") ?? [])].filter(node =>
       node.closest("article") === article && !node.closest('[id="note-body"]') && !node.closest('[id="note-paywall"]')));
-    const counts = new Set();
-    for (const button of article?.querySelectorAll("button[aria-label]") ?? []) {
-      if (button.closest("article") !== article || button.closest('[id="note-body"]') || button.closest('[data-oshaberi-note-owned]')) continue;
-      const match = /^(\d+|\d{1,3}(?:,\d{3})+)スキ この記事にスキをつけたユーザーを見る$/.exec(button.getAttribute("aria-label"));
-      if (!match) continue;
-      const count = Number(match[1].replaceAll(",", ""));
-      if (Number.isSafeInteger(count)) counts.add(count);
-    }
-    return { ...entry, publishedAt, likeCount: counts.size === 1 ? [...counts][0] : null };
+    return { ...entry, publishedAt };
   }
 
   function readProfile(doc, win, url) {

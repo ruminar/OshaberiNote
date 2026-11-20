@@ -131,7 +131,7 @@ test('公式ヘッダーのnoteロゴが揃うまで本文抽出を保留する'
   headerReady = true;
   const { value } = read();
   assert.equal(value.title, '記事');
-  assert.equal(value.likeCount, 1234);
+  assert.equal(Object.hasOwn(value, 'likeCount'), false);
   assert.equal(value.publishedAt, '2026-11-19T12:00:00+09:00');
   assert.equal(extracted, 1);
 });
@@ -214,6 +214,7 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   assert.equal(byId('run').disabled, true);
   byId('target').value = authorUrl;
   await byId('profile').onclick();
+  assert.match(byId('profile-name').textContent, /スキ合計150件.*平均25件/);
   const slots = byId('articles').querySelectorAll('input');
   const dropdown = byId('candidate');
   assert.equal(dropdown.value, candidates[0].url);
@@ -236,6 +237,10 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   assert.deepEqual(dropdown.children.map(option => option.value), candidates.slice(3).map(item => item.url));
   assert.equal(byId('add').disabled, false);
   await byId('collect').onclick();
+  for (const title of byId('results').querySelectorAll('summary')) {
+    assert.match(title.textContent, /本文.*投稿日/);
+    assert.doesNotMatch(title.textContent, /スキ/);
+  }
   byId('tab-notes').onclick();
   byId('notes').value = '記事外の実績は未確認'; byId('notes').oninput();
   assert.deepEqual(permissionRequests, []);
@@ -310,19 +315,33 @@ test('能力鑑定は投稿頻度の境界と資料不足を区別し、LLMの�
   assert.throws(() => rating.parse(JSON.stringify({ ...result, ratings: { ...result.ratings, impact: { rank: 'S', reason: '不正' } } }), ['n123']));
 });
 
-test('スキ数はプロフィール一覧の対応する記事カードから取得し、重複記事を1件として扱う', () => {
+test('プロフィールでCSS非表示にしたスキ数も記事カードから取得し、重複記事を1件として扱う', () => {
   const authorUrl = 'https://note.com/creator';
-  const card = (id, count) => `<div class="flex w-full bg-surface-normal flex-col"><a href="${authorUrl}/n/${id}" title="記事"></a><div class="text-text-like"><svg role="img" data-id="Icon" aria-label="スキの数"></svg><span id="count-${id}-${count}"></span></div></div>`;
-  const document = documentFromHtml(`<link rel="canonical" href="${authorUrl}"><h1></h1><main id="main-content"><h2></h2>${card('n123', '0')}${card('n123', '0')}${card('n234', '1234')}${card('n345', 'rounded')}</main>`);
+  const card = (id, contents) => `<div class="flex w-full bg-surface-normal flex-col"><a href="${authorUrl}/n/${id}" title="記事"></a><div><div class="mt-2 flex items-center gap-2 text-sm">${contents}</div></div></div>`;
+  const counter = count => `<div class="flex items-center justify-center gap-1 text-text-like"><svg role="img" data-id="Icon" aria-label="スキの数"></svg><span class="text-sm" data-test-count="${count}"></span></div>`;
+  const buttons = '<div class="flex items-center justify-center"><button type="button" aria-pressed="false"><svg role="img" data-id="Icon" aria-label="スキ"></svg></button><button id="count-button" aria-label="7スキ この記事にスキをつけたユーザーを見る"></button></div>';
+  const document = documentFromHtml(`<link rel="canonical" href="${authorUrl}"><h1></h1><main id="main-content"><h2></h2>${card('n123', counter('0'))}${card('n123', counter('0'))}${card('n234', counter('1,234'))}${card('n345', counter('1.2万'))}${card('n456', buttons)}</main>`);
   document.querySelector('h1').textContent = '作者';
   document.querySelector('h2').textContent = '記事一覧';
-  for (const node of document.querySelectorAll('h1, h2, a[href], span')) node.getClientRects = () => [{}];
+  const hidden = 'oshaberi-note-profile-like-hidden';
+  for (const node of document.querySelectorAll('h1, h2, a[href], span')) node.getClientRects = () => node.classList.contains(hidden) ? [] : [{}];
   for (const node of document.querySelectorAll('span')) {
-    const id = node.getAttribute('id');
-    node.textContent = id.endsWith('-0') ? '0' : id.endsWith('-1234') ? '1,234' : '1.2万';
+    node.textContent = node.getAttribute('data-test-count');
   }
+  const button = document.getElementById('count-button');
+  button.textContent = '7';
   const context = vm.createContext({ URL });
-  for (const file of ['common', 'articles', 'site-evaluation-source']) vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
-  const result = context.OshaberiNoteEvaluationSource.readProfile(document, { getComputedStyle: () => ({ visibility: 'visible' }) }, authorUrl);
-  assert.deepEqual(Array.from(result.candidates, item => [item.articleId, item.likeCount]), [['n123', 0], ['n234', 1234], ['n345', null]]);
+  for (const file of ['common', 'routing', 'articles', 'note-ui', 'site-evaluation-source']) vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
+  const win = { matchMedia: () => ({ matches: true }), getComputedStyle: () => ({ display: 'block', visibility: 'visible' }) };
+  const ui = context.OshaberiNoteUi.create(document, win, {});
+  const settings = { ...context.OshaberiNote.defaultSettings(), hideLikeCounts: true };
+  ui.update(settings, authorUrl);
+  assert.ok(button.classList.contains(hidden));
+  assert.equal(button.textContent, '7');
+  assert.ok([...document.querySelectorAll('[data-test-count]')].every(node => node.classList.contains(hidden)));
+  const result = context.OshaberiNoteEvaluationSource.readProfile(document, win, authorUrl);
+  assert.deepEqual(Array.from(result.candidates, item => [item.articleId, item.likeCount]), [['n123', 0], ['n234', 1234], ['n345', null], ['n456', 7]]);
+  ui.update({ ...settings, hideLikeCounts: false }, authorUrl);
+  assert.equal(button.classList.contains(hidden), false);
+  assert.equal(document.querySelectorAll(`.${hidden}`).length, 0);
 });

@@ -167,7 +167,12 @@
       collected.clear(); clearEvaluation();
     }
     target = next;
-    byId("profile-name").textContent = `${next.name}（${next.authorUrl}）\n公開一覧の初回表示 ${next.candidates.length}本\n${rating.stamina(next.postDates ?? [], Date.now(), next.pinnedDates ?? []).reason}`;
+    byId("profile-name").textContent = [
+      `${next.name}（${next.authorUrl}）`,
+      `公開一覧の初回表示 ${next.candidates.length}本`,
+      rating.speed(next.candidates).reason,
+      rating.stamina(next.postDates ?? [], Date.now(), next.pinnedDates ?? []).reason
+    ].join("\n");
     refreshCandidates();
     byId("status").textContent = `初回表示で${next.candidates.length}件の候補を確認しました。`;
   });
@@ -200,8 +205,7 @@
       try {
         const article = await read(url, "article", signal);
         collected.set(url, article);
-        const likes = Number.isSafeInteger(article.likeCount) ? `スキ ${article.likeCount}` : "スキ数不明";
-        title.textContent = `${article.title}（本文 ${article.body.length.toLocaleString()}文字 · ${likes} · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`;
+        title.textContent = `${article.title}（本文 ${article.body.length.toLocaleString()}文字 · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`;
         body.textContent = article.body; captured++;
       } catch (error) {
         signal.throwIfAborted();
@@ -248,7 +252,7 @@
       input.author.url === previous.author.url && input.author.name === previous.author.name && input.articles.length === previous.articles.length &&
       JSON.stringify([input.postDates, input.pinnedDates]) === JSON.stringify([previous.postDates, previous.pinnedDates]) &&
       JSON.stringify(input.profileLikes) === JSON.stringify(previous.profileLikes) &&
-      input.articles.every((article, i) => ["url", "title", "author", "body", "likeCount", "publishedAt"].every(key => article[key] === previous.articles[i][key])));
+      input.articles.every((article, i) => ["url", "title", "author", "body", "publishedAt"].every(key => article[key] === previous.articles[i][key])));
   }
 
   function clearEvaluation() {

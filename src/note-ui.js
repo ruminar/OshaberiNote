@@ -9,6 +9,7 @@
   const tipHidden = "data-oshaberi-note-tip-hidden";
   const productCard = '[data-aicn-thing-card="true"], [data-testid="aicn-thing-card"]';
   const likeHidden = "data-oshaberi-note-like-hidden";
+  const profileLikeHidden = "oshaberi-note-profile-like-hidden";
   const likeCss = `[${likeHidden}] { display: none !important; }`;
   const sidebarGridClasses = ["lg:grid-cols-[202px_minmax(0,1fr)]", "lg:grid-cols-[12.625rem_minmax(0,1fr)]"];
   function navigationSidebars(doc) {
@@ -32,7 +33,7 @@
   }
   // 数字・ハートの外見だけで判定せず、確認済みの操作部品／埋め込みカードを照合する。
   function createLikeVisibility(doc) {
-    let dirty = true, activeBefore = false;
+    let dirty = true, activeBefore = false, profileBefore = false;
     const targets = new Map(), frameStyles = new Map();
     const numeric = value => /^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?(?:万|億|[kKmM])?$/.test(value.trim());
     const interactive = 'button, a, input, select, textarea, [role="button"], [role="link"], [tabindex], [onclick], [contenteditable]';
@@ -42,7 +43,11 @@
         [...button.querySelectorAll("svg[aria-label]")].some(svg =>
           ["スキ", "スキを取り消す"].includes(svg.getAttribute("aria-label")) && svg.getAttribute("role") === "img" && svg.getAttribute("data-id") === "Icon");
     }
-    function scan(document, questionBox = false) {
+    function restore(target) {
+      if (target.hasAttribute(likeHidden)) target.removeAttribute(likeHidden);
+      if (target.classList.contains(profileLikeHidden)) target.classList.remove(profileLikeHidden);
+    }
+    function scan(document, questionBox = false, profile = false) {
       const next = new Set();
       for (const count of document.querySelectorAll('button[aria-label]')) {
         if (count.closest(`[${owned}]`) || !numeric(count.textContent)) continue;
@@ -67,7 +72,7 @@
             !stats || !["mt-2", "flex", "items-center", "gap-2", "text-sm"].every(c => stats.classList.contains(c)) ||
             !card || !["flex", "w-full", "bg-surface-normal", "flex-col"].every(c => card.classList.contains(c)) ||
             ![...card.querySelectorAll("a[href]")].some(a => core.isArticle(a.href))) continue;
-        next.add(group);
+        next.add(profile ? label : group);
       }
       for (const count of document.querySelectorAll('div[class~="p-noteEmbed__suki"]')) {
         const inner = count.parentElement, card = inner?.parentElement;
@@ -81,12 +86,20 @@
         if (links.length !== 1 || !inner.querySelector('div[class~="p-noteEmbed__body"]')) continue;
         next.add(count);
       }
-      for (const target of targets.get(document) ?? []) if (!next.has(target)) target.removeAttribute(likeHidden);
-      for (const target of next) if (!target.hasAttribute(likeHidden)) target.setAttribute(likeHidden, "");
+      for (const target of targets.get(document) ?? []) if (!next.has(target)) restore(target);
+      for (const target of next) {
+        if (profile && !target.classList.contains(profileLikeHidden)) {
+          restore(target);
+          target.classList.add(profileLikeHidden);
+        } else if (!profile && !target.hasAttribute(likeHidden)) {
+          restore(target);
+          target.setAttribute(likeHidden, "");
+        }
+      }
       targets.set(document, next);
     }
     function release(document) {
-      for (const target of targets.get(document) ?? []) target.removeAttribute(likeHidden);
+      for (const target of targets.get(document) ?? []) restore(target);
       targets.delete(document); frameStyles.get(document)?.remove(); frameStyles.delete(document);
     }
     function clear() { for (const document of targets.keys()) release(document); activeBefore = false; dirty = true; }
@@ -94,10 +107,15 @@
       invalidate() { dirty = true; },
       stop: clear,
       update(settings, url) {
-        let active = false;
-        try { active = settings.enabled && settings.hideLikeCounts === true && new URL(url).origin === "https://note.com"; } catch { /* 対象外は復元 */ }
+        let active = false, profile = false;
+        try {
+          const page = new URL(url);
+          active = settings.enabled && settings.hideLikeCounts === true && page.origin === "https://note.com";
+          profile = active && /^\/[a-zA-Z0-9_]+(?:\/all)?\/?$/.test(page.pathname) && core.pageKind(url)?.type === "profile";
+        } catch { /* 対象外は復元 */ }
         if (!active) { if (activeBefore) clear(); return; }
-        if (dirty || !activeBefore) scan(doc, Boolean(core.questionPage(url)));
+        if (dirty || !activeBefore || profile !== profileBefore) scan(doc, Boolean(core.questionPage(url)), profile);
+        profileBefore = profile;
         dirty = false; activeBefore = true;
         const documents = new Set([doc]);
         for (const frame of doc.querySelectorAll("iframe[src]")) {
