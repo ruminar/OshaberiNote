@@ -255,10 +255,16 @@
       const permissions = { origins: [`${url.protocol}//${url.hostname}/*`] };
       if (api.runtime.getManifest?.().browser_specific_settings?.gecko) {
         permissions.data_collection = ["personalCommunications", "websiteContent"];
+        // Firefoxの権限要求はクリックから直接開始する。
+        if (!await api.permissions.request({ data_collection: ["websiteContent"] })) {
+          throw new Error("記事本文の送信が許可されませんでした。評価する場合は「評価する」を押し、Firefoxの確認画面で許可してください。");
+        }
       }
+      signal.throwIfAborted();
       const state = await api.runtime.sendMessage({ type: "chat-operation", operation: "get" });
-      if (!state?.ok || state.settings.approvedUrl !== input.endpoint || !await api.permissions.contains(permissions)) {
-        throw new Error("「LLMの設定」で接続・モデル選択を確認してください。Firefoxでは「記事について」の接続権限も必要です。");
+      if (!state?.ok) throw new Error(state?.error || "Ollamaの接続状態を確認できませんでした。");
+      if (state.settings.approvedUrl !== input.endpoint || !await api.permissions.contains(permissions)) {
+        throw new Error("Ollamaの接続が未許可です。「LLMの設定」の「接続・再試行」で接続を確認してください。");
       }
       if (state.settings.anyActive) throw new Error("おしゃべりで応答を生成中です。終了後にお試しください。");
       await ollama.withGeneration(async send => {

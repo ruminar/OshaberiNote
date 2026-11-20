@@ -134,7 +134,8 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   const byId = id => document.getElementById(`evaluation-${id}`);
   const authorUrl = 'https://note.com/creator', endpoint = 'http://127.0.0.1:11434';
   const calls = [], copies = [];
-  let tab, available = false;
+  let tab, available = false, allowArticle = false, articleGranted = false, connectionChecks = 0;
+  const permissionRequests = [];
   const chrome = {
     tabs: {
       getCurrent: async () => ({ windowId: 7, index: 2 }),
@@ -148,8 +149,18 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
           : { url, articleId, title: `題 ${articleId}`, author: '作者', body: `本文 ${articleId}` } };
       }
     },
-    runtime: { sendMessage: async () => ({ ok: true, settings: { approvedUrl: endpoint } }) },
-    permissions: { contains: async () => true }
+    runtime: {
+      getManifest: () => ({ browser_specific_settings: { gecko: {} } }),
+      sendMessage: async () => { connectionChecks++; return { ok: true, settings: { approvedUrl: endpoint } }; }
+    },
+    permissions: {
+      async request(request) {
+        permissionRequests.push(JSON.parse(JSON.stringify(request)));
+        articleGranted = allowArticle;
+        return articleGranted;
+      },
+      contains: async ({ data_collection }) => !data_collection?.includes('websiteContent') || articleGranted
+    }
   };
   const context = vm.createContext({ document, chrome, URL, AbortController, AbortSignal, addEventListener() {},
     navigator: { clipboard: { writeText: async text => { copies.push(text); } } },
@@ -178,7 +189,15 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   await byId('collect').onclick();
   byId('tab-notes').onclick();
   byId('notes').value = '記事外の実績は未確認'; byId('notes').oninput();
+  assert.deepEqual(permissionRequests, []);
+  const denied = byId('run').onclick();
+  assert.deepEqual(permissionRequests, [{ data_collection: ['websiteContent'] }]);
+  await denied;
+  assert.equal(connectionChecks, 0);
+  assert.match(byId('status').textContent, /記事本文の送信が許可されませんでした/);
+  assert.equal(byId('notes').value, '記事外の実績は未確認');
   assert.equal(calls.length, 0);
+  allowArticle = true;
   await byId('run').onclick();
   assert.match(byId('status').textContent, /別の画面/);
   assert.equal(calls.length, 0);
