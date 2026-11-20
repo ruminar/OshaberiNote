@@ -60,6 +60,10 @@
             <button type="button" id="evaluation-stop" class="secondary" disabled>評価を中止</button>
           </div>
           <p id="evaluation-status" role="status"></p>
+          <div id="evaluation-progress" class="evaluation-progress" hidden>
+            <progress aria-label="Ollamaの処理中"></progress>
+            <span id="evaluation-progress-detail"></span>
+          </div>
           <div id="evaluation-tabs" class="settings-actions chat-tabs" role="tablist" aria-label="サイト評価"></div>
           <div id="evaluation-panel-info" role="tabpanel" aria-labelledby="evaluation-tab-info">
           <p id="evaluation-profile-name"></p>

@@ -135,6 +135,7 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   const authorUrl = 'https://note.com/creator', endpoint = 'http://127.0.0.1:11434';
   const calls = [], copies = [];
   let tab, available = false, allowArticle = false, articleGranted = false, connectionChecks = 0;
+  let tick, now = 0;
   const permissionRequests = [];
   const chrome = {
     tabs: {
@@ -163,6 +164,9 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
     }
   };
   const context = vm.createContext({ document, chrome, URL, AbortController, AbortSignal, addEventListener() {},
+    performance: { now: () => now },
+    setInterval(callback, interval) { assert.equal(interval, 1000); tick = callback; return 1; },
+    clearInterval(id) { assert.equal(id, 1); tick = undefined; },
     navigator: { clipboard: { writeText: async text => { copies.push(text); } } },
     OshaberiNoteChatState: { limits: { context: 256000 } },
     OshaberiNotePlatform: { load: async () => ({ enabled: true, ollamaUrl: endpoint, ollamaModel: 'test' }), subscribe() {} },
@@ -171,6 +175,17 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
       await task(async (url, model, messages, signal, onText, options) => {
         assert.equal(url, endpoint); assert.equal(model, 'test'); assert.equal(options.truncate, false);
         const data = JSON.parse(messages[1].content); calls.push(data);
+        assert.equal(byId('progress').hidden, false);
+        assert.match(byId('progress-detail').textContent, /応答を待っています/);
+        if (calls.length === 1) {
+          assert.match(byId('status').textContent, /1 \/ 3.*題 n123/);
+          now += 2400; tick();
+          assert.match(byId('progress-detail').textContent, /0分02秒.*応答を待っています/);
+          byId('tab-prompt').onclick();
+          assert.equal(byId('progress').hidden, false);
+        }
+        onText('応答の途中');
+        assert.match(byId('progress-detail').textContent, /5文字を受信/);
         if (data.reviews) return JSON.stringify({ summary: '総評の本文', detail: '選定理由', representatives: ['n234'] });
         if (data.question) return '補足文案を提案します。';
         return '個別所見';
@@ -193,6 +208,8 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   const denied = byId('run').onclick();
   assert.deepEqual(permissionRequests, [{ data_collection: ['websiteContent'] }]);
   await denied;
+  assert.equal(byId('progress').hidden, true);
+  assert.equal(tick, undefined);
   assert.equal(connectionChecks, 0);
   assert.match(byId('status').textContent, /記事本文の送信が許可されませんでした/);
   assert.equal(byId('notes').value, '記事外の実績は未確認');
@@ -204,6 +221,8 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   available = true;
   await byId('run').onclick();
   assert.equal(calls.length, 4);
+  assert.equal(byId('progress').hidden, true);
+  assert.equal(tick, undefined);
   assert.deepEqual(calls.slice(0, 3).map(call => call.article.body), ['本文 n123', '本文 n234', '本文 n345']);
   assert.ok(calls.every(call => call.notes === '記事外の実績は未確認'));
   assert.ok(!JSON.stringify(calls[3]).includes('本文 n123'));
