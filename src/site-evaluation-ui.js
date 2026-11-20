@@ -8,43 +8,77 @@
   let target, collector, controller;
   const matches = (value, url) => value?.replace(/\/$/, "") === url;
 
+  function collectorLost() {
+    collector = undefined;
+    controls();
+    return new Error("取得用タブが閉じられたか、別のページに移動しました。「公開プロフィールを取得」からやり直してください。");
+  }
+
+  function waitForPage(signal) {
+    signal.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        signal.removeEventListener("abort", cancel);
+        resolve();
+      }, 400);
+      function cancel() {
+        clearTimeout(timer);
+        reject(signal.reason);
+      }
+      signal.addEventListener("abort", cancel, { once: true });
+    });
+  }
+
   async function read(url, kind, signal) {
+    let previousUrl;
     if (collector) {
       const tab = await api.tabs.get(collector.id).catch(() => null);
-      if (!tab || !matches(tab.url, collector.url) || tab.pendingUrl) collector = undefined;
+      if (!tab || !matches(tab.url, collector.url) || tab.pendingUrl) {
+        if (kind === "article") throw collectorLost();
+        collector = undefined;
+      }
     }
     signal.throwIfAborted();
     if (!collector) {
+      if (kind === "article") throw collectorLost();
       const owner = await api.tabs.getCurrent();
       if (!owner) throw new Error("サイト評価をブラウザタブで開いてください。");
       signal.throwIfAborted();
       const tab = await api.tabs.create({ url, windowId: owner.windowId, index: owner.index + 1, active: false });
       collector = { id: tab.id, url };
     } else if (collector.url !== url) {
-      await api.tabs.update(collector.id, { url });
+      previousUrl = collector.url;
+      try { await api.tabs.update(collector.id, { url }); }
+      catch { throw collectorLost(); }
       collector.url = url;
     }
     const deadline = Date.now() + 12000;
     let reason = "取得用タブの表示を確認できません。";
+    let arrived = false;
     while (Date.now() < deadline) {
       signal.throwIfAborted();
-      const tab = await api.tabs.get(collector.id);
-      if (tab.status === "complete" && !matches(tab.url, url) && !tab.pendingUrl) throw new Error("取得先のページが変わりました。URLを確認して取り込み直してください。");
+      const tab = await api.tabs.get(collector.id).catch(() => null);
+      if (!tab) throw collectorLost();
+      if (matches(tab.url, url)) arrived = true;
+      // tabs.updateの直後は、読み込み開始前の旧URLとcompleteが返ることがある。
+      const starting = !arrived && previousUrl && matches(tab.url, previousUrl);
+      if (tab.status === "complete" && !matches(tab.url, url) && !tab.pendingUrl && !starting) throw collectorLost();
       if (tab.status === "complete" && matches(tab.url, url) && !tab.pendingUrl) {
         const reply = await api.tabs.sendMessage(collector.id, { type: "site-evaluation-read", url, kind }, { frameId: 0 }).catch(() => null);
         signal.throwIfAborted();
         if (reply?.value) return reply.value;
         if (reply?.error) reason = reply.error;
       }
-      await new Promise(resolve => setTimeout(resolve, 400));
+      await waitForPage(signal);
     }
+    if (!arrived) collector = undefined;
     throw new Error(reason);
   }
 
   function controls() {
     const busy = Boolean(controller);
     byId("target").disabled = byId("profile").disabled = busy;
-    byId("collect").disabled = busy || !target;
+    byId("collect").disabled = busy || !target || !collector;
     byId("candidate").disabled = byId("add").disabled = busy || !target?.candidates.length;
     byId("cancel").disabled = !busy;
     for (const slot of slots) slot.disabled = busy || !target;
@@ -104,6 +138,7 @@
         body.textContent = article.body; captured++;
       } catch (error) {
         signal.throwIfAborted();
+        if (!collector) throw error;
         title.textContent = `取得できませんでした · ${url}`;
         body.textContent = error.message;
       }
