@@ -244,6 +244,7 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   assert.equal(byId('progress').hidden, true);
   assert.equal(tick, undefined);
   assert.deepEqual(calls.slice(0, 3).map(call => call.article.body), ['本文 n123', '本文 n234', '本文 n345']);
+  assert.ok(calls.slice(0, 3).every(({ article }) => !Object.hasOwn(article, 'scope')));
   assert.ok(calls.every(call => call.notes === '記事外の実績は未確認'));
   assert.ok(!JSON.stringify(calls[3]).includes('本文 n123'));
   assert.match(byId('result').textContent, /総評の本文[\s\S]*題 n234/);
