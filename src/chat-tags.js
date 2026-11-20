@@ -192,5 +192,5 @@
     }
     return Object.freeze({ render, refresh, close() { if (dialog.open) dialog.close(); } });
   }
-  globalThis.OshaberiNoteChatTags = Object.freeze({ parts, create });
+  globalThis.OshaberiNoteChatTags = Object.freeze({ parts, links, create });
 })();

@@ -47,7 +47,7 @@ async function verifyArticleCollection(interruption) {
       assert.equal(url, tab.url);
       if (url === second && !headerReady) return { waiting: true, error: 'ヘッダー待ち' };
       visited.push(url);
-      return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates: [] } : { title: '記事', body: '<script>記事本文</script>' } };
+      return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates: [] } : { title: '記事', body: '<script>記事本文</script> https://example.org/article' } };
     }
   } };
   const context = vm.createContext({
@@ -59,7 +59,7 @@ async function verifyArticleCollection(interruption) {
     },
     clearTimeout(id) { clearedDelay = id; }
   });
-  for (const file of ['common', 'articles', 'site-evaluation-source', 'site-evaluation-ratings', 'site-evaluation-ui']) {
+  for (const file of ['common', 'articles', 'chat-tags', 'site-evaluation-source', 'site-evaluation-ratings', 'site-evaluation-ui']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
   }
   byId('target').value = 'creator';
@@ -90,6 +90,7 @@ async function verifyArticleCollection(interruption) {
   assert.equal(byId('results').querySelectorAll('details').length, interruption ? 1 : 2);
   assert.match(byId('results').textContent, /<script>記事本文<\/script>/);
   assert.equal(byId('results').querySelector('script'), null);
+  assert.equal(byId('results').querySelector('a').href, 'https://example.org/article');
   if (interruption === 'cancelled') {
     assert.equal(clearedDelay, 2);
     assert.match(byId('status').textContent, /取得を中止/);
@@ -141,14 +142,17 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   const byId = id => document.getElementById(`evaluation-${id}`);
   const authorUrl = 'https://note.com/creator', endpoint = 'http://127.0.0.1:11434';
   const candidates = ['n123', 'n234', 'n345', 'n456', 'n567', 'n678'].map((articleId, i) => ({ articleId, url: `${authorUrl}/n/${articleId}`, title: `題 ${articleId}`, likeCount: [0, 10, 20, 30, 40, 50][i] }));
-  const calls = [], copies = [];
+  const calls = [], copies = [], opened = [];
   let tab, available = false, allowArticle = false, articleGranted = false, connectionChecks = 0, invalidAssessment = true;
   let tick, now = 0;
   const permissionRequests = [];
   const chrome = {
     tabs: {
       getCurrent: async () => ({ windowId: 7, index: 2 }),
-      create: async ({ url }) => (tab = { id: 8, status: 'complete', url }),
+      create: async options => {
+        if (tab) { opened.push({ ...options }); return { id: 9 }; }
+        return (tab = { id: 8, status: 'complete', url: options.url });
+      },
       get: async () => tab,
       update: async (id, { url }) => { assert.equal(id, 8); tab.url = url; },
       sendMessage: async (id, { kind, url }) => {
@@ -202,12 +206,12 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
             ratings: { impact: { rank: 'A', reason: '面白い' }, reach: { rank: 'B', reason: '有用' }, precision: { rank: 'C', reason: '読みやすい' }, originality: { rank: '判定不能', reason: '資料不足' } } });
         }
         assert.equal(options.format, undefined);
-        if (data.question) return '補足文案を提案します。';
-        return '個別所見';
+        if (data.question) return '補足文案を提案します。[資料](https://example.org/reference)。';
+        return '個別所見 https://example.org/detail。';
       });
     } }
   });
-  for (const file of ['common', 'articles', 'site-evaluation-source', 'site-evaluation-ratings', 'site-evaluation-ui']) {
+  for (const file of ['common', 'articles', 'chat-tags', 'site-evaluation-source', 'site-evaluation-ratings', 'site-evaluation-ui']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
   }
   assert.deepEqual(byId('tabs').children.map(button => button.textContent), ['取得情報', '記事選択', '補足情報入力', 'サイト評価結果', 'サイト評価詳細', '感想戦', '評価プロンプト']);
@@ -215,6 +219,7 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   byId('target').value = authorUrl;
   await byId('profile').onclick();
   assert.match(byId('profile-name').textContent, /スキ合計150件.*平均25件/);
+  assert.equal(byId('profile-name').querySelector('a').getAttribute('href'), authorUrl);
   const slots = byId('articles').querySelectorAll('input');
   const dropdown = byId('candidate');
   assert.equal(dropdown.value, candidates[0].url);
@@ -273,21 +278,41 @@ test('7タブから補足付きで個別評価と総評を実行し、感想戦�
   assert.ok(calls.every(call => call.notes === '記事外の実績は未確認'));
   assert.ok(!JSON.stringify(calls[3]).includes('本文 n123'));
   assert.match(byId('result').textContent, /総評の本文[\s\S]*題 n234/);
+  assert.equal(byId('result').querySelector('a').href, candidates[1].url);
+  assert.equal(byId('detail').querySelector('a').href, 'https://example.org/detail');
   assert.match(byId('result').textContent, /実験型/);
   assert.deepEqual(byId('rating-rows').children.map(row => row.children[1].textContent), ['A', 'D', 'B', '判定不能', 'C', '判定不能']);
   assert.match(byId('detail').textContent, /一覧 6本のスキ合計150件 ÷ 6本で、平均25件/);
   assert.equal(byId('run').disabled, true);
   byId('tab-discussion').onclick();
-  byId('question').value = '着眼点の見落としは？'; byId('question').oninput();
+  const question = byId('question');
+  question.value = '着眼点の見落としは？ https://example.org/question'; question.oninput();
   byId('reference').value = `${authorUrl}/n/n123`;
-  await byId('discuss').onclick();
+  for (const keys of [{}, { ctrlKey: true, isComposing: true }, { ctrlKey: true, repeat: true }]) {
+    assert.equal(question.fire('keydown', { key: 'Enter', ...keys }).defaultPrevented, undefined);
+  }
+  assert.equal(calls.length, 5);
+  let prevented = false;
+  await question.onkeydown({ key: 'Enter', ctrlKey: true, preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
   assert.equal(calls[5].article.body, '本文 n123');
   assert.equal(byId('reference').value, '');
+  const [questionLink, answerLink] = byId('discussion').querySelectorAll('a');
+  assert.equal(questionLink.href, 'https://example.org/question');
+  assert.equal(answerLink.textContent, '資料');
+  const click = (type, button) => ({ type, button, preventDefault() {} });
+  await answerLink.onclick(click('click', 0));
+  await questionLink.onauxclick(click('auxclick', 1));
+  await answerLink.onauxclick(click('auxclick', 2));
+  assert.deepEqual(opened, [
+    { url: 'https://example.org/reference', windowId: 7, index: 3, active: true },
+    { url: 'https://example.org/question', windowId: 7, index: 3, active: false }
+  ]);
   await byId('copy-all').onclick();
   assert.doesNotMatch(copies[0], /補足文案/);
   byId('copy-discussion').checked = true;
   await byId('copy-all').onclick();
-  assert.match(copies[1], /補足文案/);
+  assert.match(copies[1], /補足文案.*\[資料\]\(https:\/\/example\.org\/reference\)/);
   assert.match(byId('result').textContent, /総評の本文/);
   byId('notes').value = '新しい観点'; byId('notes').oninput();
   assert.equal(byId('run').disabled, false);

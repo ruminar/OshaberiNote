@@ -9,6 +9,7 @@
   const core = globalThis.OshaberiNote;
   const ollama = globalThis.OshaberiNoteOllama;
   const rating = globalThis.OshaberiNoteEvaluationRatings;
+  const links = globalThis.OshaberiNoteChatTags.links;
   const promptKey = "oshaberiNote.evaluation.creatorPrompt.v1";
   const defaultPrompt = [
     "作品群から、その作者に共通する作家性・強み・表現の傾向を鑑定してください。根拠は今回参照した記事に求めてください。",
@@ -28,6 +29,39 @@
   let target, collector, controller, evaluationAbort, settings, result, preparedReviews;
   let collected = new Map(), discussion = [], promptRevision = 0, promptWrites = Promise.resolve();
   const matches = (value, url) => value?.replace(/\/$/, "") === url;
+
+  async function openLink(event, url) {
+    if (event.type === "auxclick" && event.button !== 1) return;
+    event.preventDefault();
+    try {
+      const owner = await api.tabs.getCurrent();
+      if (!owner) throw new Error();
+      await api.tabs.create({
+        url, windowId: owner.windowId, index: owner.index + 1,
+        active: event.button !== 1 && !event.ctrlKey && !event.metaKey
+      });
+    } catch {
+      byId("status").textContent = "リンクを開けませんでした。";
+    }
+  }
+
+  function showLinks(node, text) {
+    node.replaceChildren();
+    let offset = 0;
+    for (const { start, end, href, label } of links(text)) {
+      if (start > offset) node.append(document.createTextNode(text.slice(offset, start)));
+      const link = document.createElement("a");
+      link.href = href;
+      link.textContent = label;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.onclick = event => openLink(event, href);
+      link.onauxclick = event => openLink(event, href);
+      node.append(link);
+      offset = end;
+    }
+    if (offset < text.length) node.append(document.createTextNode(text.slice(offset)));
+  }
 
   function collectorLost() {
     collector = undefined;
@@ -113,8 +147,8 @@
     byId("discuss").disabled = byId("question").disabled || !byId("question").value.trim();
     for (const id of ["copy-result", "copy-detail", "copy-all"]) byId(id).disabled = !result;
     if (result) {
-      byId("result-meta").textContent = `${current ? "" : "現在の条件では未評価です。以下は前回の鑑定です。\n\n"}${result.meta}`;
-      byId("detail").textContent = `${current ? "" : "現在の条件では未評価です。以下は前回の詳細です。\n\n"}${result.detail}`;
+      showLinks(byId("result-meta"), `${current ? "" : "現在の条件では未評価です。以下は前回の鑑定です。\n\n"}${result.meta}`);
+      showLinks(byId("detail"), `${current ? "" : "現在の条件では未評価です。以下は前回の詳細です。\n\n"}${result.detail}`);
     }
   }
 
@@ -151,7 +185,7 @@
     if (controller || evaluationAbort) return;
     controller = new AbortController(); controls();
     try { await task(controller.signal); }
-    catch (error) { byId("status").textContent = controller.signal.aborted ? "取得を中止しました。" : (error.message || "取得に失敗しました。"); }
+    catch (error) { showLinks(byId("status"), controller.signal.aborted ? "取得を中止しました。" : (error.message || "取得に失敗しました。")); }
     finally { controller = undefined; controls(); }
   }
 
@@ -167,12 +201,12 @@
       collected.clear(); clearEvaluation();
     }
     target = next;
-    byId("profile-name").textContent = [
+    showLinks(byId("profile-name"), [
       `${next.name}（${next.authorUrl}）`,
       `公開一覧の初回表示 ${next.candidates.length}本`,
       rating.speed(next.candidates).reason,
       rating.stamina(next.postDates ?? [], Date.now(), next.pinnedDates ?? []).reason
-    ].join("\n");
+    ].join("\n"));
     refreshCandidates();
     byId("status").textContent = `初回表示で${next.candidates.length}件の候補を確認しました。`;
   });
@@ -205,13 +239,13 @@
       try {
         const article = await read(url, "article", signal);
         collected.set(url, article);
-        title.textContent = `${article.title}（本文 ${article.body.length.toLocaleString()}文字 · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`;
-        body.textContent = article.body; captured++;
+        showLinks(title, `${article.title}（本文 ${article.body.length.toLocaleString()}文字 · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`);
+        showLinks(body, article.body); captured++;
       } catch (error) {
         signal.throwIfAborted();
         if (!collector) throw error;
-        title.textContent = `取得できませんでした · ${url}`;
-        body.textContent = error.message;
+        showLinks(title, `取得できませんでした · ${url}`);
+        showLinks(body, error.message);
       }
       entry.append(title, body); byId("results").append(entry);
     }
@@ -340,7 +374,7 @@
         signal.throwIfAborted();
       });
     } catch (error) {
-      byId("status").textContent = signal.aborted ? "評価の処理を中止しました。" : error.message;
+      showLinks(byId("status"), signal.aborted ? "評価の処理を中止しました。" : error.message);
     } finally {
       clearInterval(timer);
       byId("progress").hidden = true;
@@ -363,7 +397,7 @@
         preparedReviews = undefined;
         const reviews = [];
         for (const { articleId, title, body, url } of input.articles) {
-          byId("status").textContent = `記事の特徴を抽出中（${reviews.length + 1} / ${input.articles.length}） ${title}`;
+          showLinks(byId("status"), `記事の特徴を抽出中（${reviews.length + 1} / ${input.articles.length}） ${title}`);
           const review = await ask(`${input.prompt}\n\n${dataRule}\nこの段階ではこの記事1本から、作者の特徴を裏付ける具体例を日本語で短く抽出してください。ランク、採点、添削、代表選定は行いません。`,
             { author: input.author, notes: input.notes, article: { articleId, title, body, url } });
           if (!review.trim()) throw new Error("記事の特徴を抽出できませんでした。");
@@ -397,7 +431,7 @@
         "記事から得た根拠メモ", ...reviews.map(item => `### ${item.title}\n${item.review}`)].join("\n\n");
       result = { input, evaluatedAt, ratings, meta, summary: `${table}\n\n${overview}`, detail };
       preparedReviews = undefined;
-      byId("result").textContent = overview;
+      showLinks(byId("result"), overview);
       showRatings(ratings);
       updateReferences();
       byId("discussion").textContent = "評価への質問や見落としを入力できます。";
@@ -419,9 +453,15 @@
       byId("question").value = "";
       byId("reference").value = "";
       discussion.push({ question, answer, ...(article ? { reference: article.title } : {}) });
-      byId("discussion").textContent = discussionText();
+      showLinks(byId("discussion"), discussionText());
       byId("status").textContent = "感想戦の回答が完了しました。";
     });
+  };
+  byId("question").onkeydown = event => {
+    if (event.key !== "Enter" || !event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || event.isComposing || event.keyCode === 229 || event.repeat) return;
+    if (byId("discuss").disabled) return;
+    event.preventDefault();
+    return byId("discuss").onclick();
   };
 
   function discussionText() {

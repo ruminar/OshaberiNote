@@ -34,6 +34,7 @@ class Element {
 }
 function documentFromHtml(html="") {
  const doc={nodes:new Map(),activeElement:null,createElement(tag){return new Element(tag,this);},createElementNS(namespace,tag){return this.createElement(tag);},getElementById(id){return this.nodes.get(id);},querySelectorAll(selector){return this.root.querySelectorAll(selector);},querySelector(selector){return this.root.querySelector(selector);}};
+ doc.createTextNode=text=>{const node=doc.createElement("#text");node.nodeType=3;node.textContent=text;return node;};
  doc.root=doc.createElement("document");const stack=[doc.root];
  for(const match of html.matchAll(/<\/?([\w-]+)\b([^>]*)>/g)){
   if(match[0].startsWith("</")){if(stack.length>1)stack.pop();continue;}
