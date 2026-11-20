@@ -3,7 +3,7 @@
   const core = globalThis.OshaberiNote;
   const platform = globalThis.OshaberiNotePlatform;
   const byId = id => document.getElementById(id);
-  const views = ["chat", "tags", "discovery", "authors", "llm", "settings", "transfer"];
+  const views = ["chat", "evaluation", "tags", "discovery", "authors", "llm", "settings", "transfer"];
   const discovery = globalThis.OshaberiNoteTagDiscovery;
   let chatTagSelection = false, registrationValid = () => true;
   const tagDialog = discovery?.createDialog(document, {

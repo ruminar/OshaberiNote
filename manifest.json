@@ -47,6 +47,7 @@
       "js": [
         "src/common.js",
         "src/articles.js",
+        "src/site-evaluation-source.js",
         "src/platform/browser-api.js",
         "src/tag-discovery.js",
         "src/note-ui.js",

@@ -17,6 +17,8 @@
   <script defer src="src/ollama.js"></script>
   <script defer src="src/chat-tags.js"></script>
   <script defer src="src/chat-ui.js"></script>
+  <script defer src="src/site-evaluation-source.js"></script>
+  <script defer src="src/site-evaluation-ui.js"></script>
 </head>
 <body>
   <main>
@@ -31,6 +33,7 @@
         <p id="tag-warning" class="warning" role="alert" hidden></p>
         <nav id="home-menu" aria-label="専用ホーム" hidden>
           <button type="button" id="nav-chat" aria-controls="panel-chat">おしゃべり</button>
+          <button type="button" id="nav-evaluation" aria-controls="panel-evaluation">サイト評価</button>
           <button type="button" id="nav-tags" aria-controls="panel-tags">お気に入り</button>
           <button type="button" id="nav-discovery" aria-controls="panel-discovery">タグ登録支援</button>
           <button type="button" id="nav-authors" aria-controls="panel-authors">ユーザーの表示管理</button>
@@ -46,6 +49,30 @@
         </div>
       </aside>
       <div class="home-content">
+        <section id="panel-evaluation" aria-labelledby="evaluation-heading" hidden>
+          <h2 id="evaluation-heading">サイト評価</h2>
+          <label for="evaluation-target">プロフィールURL または ユーザーID</label>
+          <input id="evaluation-target" type="text" placeholder="https://note.com/ruminar">
+          <div class="settings-actions">
+            <button type="button" id="evaluation-profile">公開プロフィールを取得</button>
+            <button type="button" id="evaluation-cancel" class="secondary" disabled>取得を中止</button>
+          </div>
+          <p id="evaluation-status" role="status"></p>
+          <p id="evaluation-profile-name"></p>
+          <label for="evaluation-candidate">表示中の記事候補</label>
+          <select id="evaluation-candidate" disabled></select>
+          <button type="button" id="evaluation-add" class="secondary" disabled>候補を追加</button>
+          <fieldset id="evaluation-articles">
+            <legend>記事URL（最大5本）</legend>
+            <input type="url" aria-label="記事URL 1" disabled>
+            <input type="url" aria-label="記事URL 2" disabled>
+            <input type="url" aria-label="記事URL 3" disabled>
+            <input type="url" aria-label="記事URL 4" disabled>
+            <input type="url" aria-label="記事URL 5" disabled>
+          </fieldset>
+          <button type="button" id="evaluation-collect" disabled>記事本文を取得</button>
+          <div id="evaluation-results"></div>
+        </section>
         <section id="panel-chat" aria-labelledby="chat-heading" hidden>
           <h2 id="chat-heading">おしゃべり</h2>
           <div id="chat-actions" class="settings-actions chat-tabs" role="tablist" aria-label="会話の種類"></div>

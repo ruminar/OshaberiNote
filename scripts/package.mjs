@@ -7,6 +7,7 @@ export const runtimeFiles = [
   "home.html", "LICENSE", "THIRD_PARTY_LICENSE", "PRIVACY.md", "_locales/ja/messages.json",
   "src/common.js", "src/articles.js", "src/article-store.js", "src/chat-actions.js", "src/platform/browser-api.js", "src/routing.js",
   "src/tag-discovery.js", "src/tag-discovery.css", "src/background.js", "src/content.js", "src/note-ui.js", "src/content.css", "src/embed-likes.js", "src/embed-likes.css", "src/home.js", "src/home.css", "src/chat-state.js", "src/ollama.js", "src/chat-tags.js", "src/chat-ui.js",
+  "src/site-evaluation-source.js", "src/site-evaluation-ui.js",
   "icons/icon16.png", "icons/icon32.png", "icons/icon48.png", "icons/icon128.png"
 ];
 export async function createManifest(browser) {

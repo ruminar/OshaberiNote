@@ -46,6 +46,10 @@ input, #operation-mode, #theme, #favorite-group-display { width: 100%; max-width
 input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
 .check-option { display: flex; align-items: center; gap: 10px; margin: 20px 0 8px; }
 .settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+#evaluation-articles { display: grid; gap: 8px; min-width: 0; margin: 16px 0; border: 1px solid var(--border); }
+#evaluation-candidate { max-width: 100%; padding: 8px; font: inherit; }
+#evaluation-results details { margin-block: 12px; }
+#evaluation-results pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-tabs { gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--divider); }
 .chat-tabs [role="tab"] { background: transparent; color: var(--accent); border-color: transparent; border-radius: 8px 8px 0 0; }
 .chat-tabs [aria-selected="true"] { background: var(--button-bg); color: var(--button-text); border-color: var(--accent); }
