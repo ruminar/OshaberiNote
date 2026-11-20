@@ -47,6 +47,10 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
 .check-option { display: flex; align-items: center; gap: 10px; margin: 20px 0 8px; }
 .settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 #evaluation-articles { display: grid; gap: 8px; min-width: 0; margin: 16px 0; border: 1px solid var(--border); }
+.evaluation-article-row { display: grid; grid-template-columns: minmax(0, min(62%, 520px)) minmax(0, 1fr); align-items: center; gap: 4px 12px; }
+.evaluation-article-row span { overflow-wrap: anywhere; }
+.evaluation-article-row span:empty { display: none; }
+@media (max-width: 600px) { .evaluation-article-row { grid-template-columns: minmax(0, 1fr); } }
 #evaluation-candidate { max-width: 100%; padding: 8px; font: inherit; }
 #evaluation-results details { margin-block: 12px; }
 #evaluation-results pre { white-space: pre-wrap; overflow-wrap: anywhere; }

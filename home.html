@@ -74,11 +74,26 @@
           <button type="button" id="evaluation-add" class="secondary" disabled>候補を追加</button>
           <fieldset id="evaluation-articles">
             <legend>記事URL（最大5本）</legend>
-            <input type="url" aria-label="記事URL 1" disabled>
-            <input type="url" aria-label="記事URL 2" disabled>
-            <input type="url" aria-label="記事URL 3" disabled>
-            <input type="url" aria-label="記事URL 4" disabled>
-            <input type="url" aria-label="記事URL 5" disabled>
+            <div class="evaluation-article-row">
+              <input type="url" aria-label="記事URL 1" aria-describedby="evaluation-article-title-1" disabled>
+              <span id="evaluation-article-title-1"></span>
+            </div>
+            <div class="evaluation-article-row">
+              <input type="url" aria-label="記事URL 2" aria-describedby="evaluation-article-title-2" disabled>
+              <span id="evaluation-article-title-2"></span>
+            </div>
+            <div class="evaluation-article-row">
+              <input type="url" aria-label="記事URL 3" aria-describedby="evaluation-article-title-3" disabled>
+              <span id="evaluation-article-title-3"></span>
+            </div>
+            <div class="evaluation-article-row">
+              <input type="url" aria-label="記事URL 4" aria-describedby="evaluation-article-title-4" disabled>
+              <span id="evaluation-article-title-4"></span>
+            </div>
+            <div class="evaluation-article-row">
+              <input type="url" aria-label="記事URL 5" aria-describedby="evaluation-article-title-5" disabled>
+              <span id="evaluation-article-title-5"></span>
+            </div>
           </fieldset>
           <button type="button" id="evaluation-collect" disabled>記事本文を取得</button>
           <div id="evaluation-results"></div>

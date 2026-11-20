@@ -132,11 +132,18 @@
     const select = byId("candidate"), previous = select.value;
     const selectedIndex = [...select.children].findIndex(option => option.value === previous);
     const selectedIds = new Set();
-    for (const slot of slots) {
+    const titles = new Map(target.candidates.map(candidate => [candidate.articleId, candidate.title]));
+    for (const [index, slot] of slots.entries()) {
       const url = slot.value.trim();
-      if (!url) continue;
-      try { selectedIds.add(source.articleFor(url, target.authorUrl).articleId); }
-      catch { /* 入力途中のURLは候補の除外に使わない。 */ }
+      let title = "";
+      if (url) {
+        try {
+          const { articleId } = source.articleFor(url, target.authorUrl);
+          selectedIds.add(articleId);
+          title = titles.get(articleId) ?? "";
+        } catch { /* 入力途中のURLは候補の除外に使わない。 */ }
+      }
+      byId(`article-title-${index + 1}`).textContent = title;
     }
     const candidates = target.candidates.filter(candidate => !selectedIds.has(candidate.articleId));
     select.replaceChildren();
