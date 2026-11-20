@@ -458,7 +458,18 @@
     byId("chat-form").requestSubmit();
   });
   async function sendMessage(event, queuedArticle) {
-    event?.preventDefault(); if (!queuedArticle && byId("chat-send").disabled) return;
+    event?.preventDefault();
+    const ollama = globalThis.OshaberiNoteOllama;
+    let started = false;
+    const send = chat => { started = true; return generateMessage(queuedArticle, chat); };
+    try {
+      if (globalThis.navigator?.locks) await ollama.withGeneration(send);
+      else await send(ollama.chat);
+    } catch (error) { status(error.message); }
+    finally { if (started) Promise.resolve().then(maybeSendArticle); }
+  }
+  async function generateMessage(queuedArticle, chat) {
+    if (!queuedArticle && byId("chat-send").disabled) return;
     if (!queuedArticle && selectedAction === "article" && !pendingArticleRequest) {
       const current = currentArticleContext();
       if (articleDraftContext && (articleDraftContext.epoch !== current.epoch || articleDraftContext.segmentId !== current.segmentId)) {
@@ -487,7 +498,7 @@
       if (selectedAction === actionId) render(started); busy = false; controls();
       if (visible && selectedAction === actionId && !byId("chat-input").disabled) byId("chat-input").focus({ preventScroll: true });
       status("応答を生成しています…");
-      const response = await globalThis.OshaberiNoteOllama.chat(endpoint, model, started.messages, controller.signal, async answer => {
+      const response = await chat(endpoint, model, started.messages, controller.signal, async answer => {
         controller.signal.throwIfAborted();
         if (selectedAction === actionId) {
           if (state.epoch !== epoch || state.active?.id !== id) throw new Error("生成は中止されました。");
@@ -524,7 +535,7 @@
       if (error.code === "STALE_ARTICLE_CONTEXT") { await sync(); status(`${error.message} 入力は保持しています。自動再送は行いません。`); }
       else if (["CHAT_BUSY", "ARTICLE_QUEUE_WAIT"].includes(error.code)) { await sync(); status("先に登録された依頼または別の応答が完了するまで待機します。"); }
       else if (sequence === sendSequence) status(error.name === "AbortError" ? "生成を中止しました。未完了の会話は次回送信しません。" : `${error.message}${error.status === 403 ? " 詳細は「LLMの設定」で確認してください。" : ""} 自動再送は行いません。`);
-    } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) { generatingId = undefined; generation = undefined; } if (sending === sequence) sending = undefined; if (sequence === sendSequence) busy = false; controls(); Promise.resolve().then(maybeSendArticle); }
+    } finally { clearTimeout(timer); if (requestAbort === controller) requestAbort = undefined; if (generatingId === id) { generatingId = undefined; generation = undefined; } if (sending === sequence) sending = undefined; if (sequence === sendSequence) busy = false; controls(); }
   };
   byId("chat-form").onsubmit = sendMessage;
   byId("chat-stop").onclick = async () => {
@@ -625,7 +636,7 @@
       maybeSendArticle();
     } catch (error) { blocked = true; status(error.message); controls(); }
   }
-  const heartbeat = setInterval(() => { try { connection?.postMessage({ type: "keep-alive" }); } catch { abort(); } }, 20000);
+  const heartbeat = setInterval(() => { try { connection?.postMessage({ type: "keep-alive" }); maybeSendArticle(); } catch { abort(); } }, 20000);
   addEventListener("pagehide", () => { clearInterval(heartbeat); abort(); connection?.disconnect(); });
   void init();
 })();

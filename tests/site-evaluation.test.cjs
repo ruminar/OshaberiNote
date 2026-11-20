@@ -128,3 +128,81 @@ test('公式ヘッダーのnoteロゴが揃うまで本文抽出を保留する'
   assert.equal(read().value.title, '記事');
   assert.equal(extracted, 1);
 });
+
+test('7タブから補足付きで個別評価と総評を実行し、感想戦では選んだ原文だけを添付する', async () => {
+  const document = documentFromHtml(fs.readFileSync(path.join(__dirname, '../home.html'), 'utf8'));
+  const byId = id => document.getElementById(`evaluation-${id}`);
+  const authorUrl = 'https://note.com/creator', endpoint = 'http://127.0.0.1:11434';
+  const calls = [], copies = [];
+  let tab, available = false;
+  const chrome = {
+    tabs: {
+      getCurrent: async () => ({ windowId: 7, index: 2 }),
+      create: async ({ url }) => (tab = { id: 8, status: 'complete', url }),
+      get: async () => tab,
+      update: async (id, { url }) => { assert.equal(id, 8); tab.url = url; },
+      sendMessage: async (id, { kind, url }) => {
+        assert.equal(id, 8); assert.equal(tab.url, url);
+        const articleId = url.split('/').at(-1);
+        return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates: [] }
+          : { url, articleId, title: `題 ${articleId}`, author: '作者', body: `本文 ${articleId}` } };
+      }
+    },
+    runtime: { sendMessage: async () => ({ ok: true, settings: { approvedUrl: endpoint } }) },
+    permissions: { contains: async () => true }
+  };
+  const context = vm.createContext({ document, chrome, URL, AbortController, AbortSignal, addEventListener() {},
+    navigator: { clipboard: { writeText: async text => { copies.push(text); } } },
+    OshaberiNoteChatState: { limits: { context: 256000 } },
+    OshaberiNotePlatform: { load: async () => ({ enabled: true, ollamaUrl: endpoint, ollamaModel: 'test' }), subscribe() {} },
+    OshaberiNoteOllama: { withGeneration: async task => {
+      if (!available) throw new Error('別の画面で応答を生成中です。');
+      await task(async (url, model, messages, signal, onText, options) => {
+        assert.equal(url, endpoint); assert.equal(model, 'test'); assert.equal(options.truncate, false);
+        const data = JSON.parse(messages[1].content); calls.push(data);
+        if (data.reviews) return JSON.stringify({ summary: '総評の本文', detail: '選定理由', representatives: ['n234'] });
+        if (data.question) return '補足文案を提案します。';
+        return '個別所見';
+      });
+    } }
+  });
+  for (const file of ['common', 'articles', 'site-evaluation-source', 'site-evaluation-ui']) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
+  }
+  assert.deepEqual(byId('tabs').children.map(button => button.textContent), ['取得情報', '記事選択', '補足情報入力', 'サイト評価結果', 'サイト評価詳細', '感想戦', '評価プロンプト']);
+  assert.equal(byId('run').disabled, true);
+  byId('target').value = authorUrl;
+  await byId('profile').onclick();
+  const slots = byId('articles').querySelectorAll('input');
+  for (const [i, articleId] of ['n123', 'n234', 'n345'].entries()) slots[i].value = `${authorUrl}/n/${articleId}`;
+  await byId('collect').onclick();
+  byId('tab-notes').onclick();
+  byId('notes').value = '記事外の実績は未確認'; byId('notes').oninput();
+  assert.equal(calls.length, 0);
+  await byId('run').onclick();
+  assert.match(byId('status').textContent, /別の画面/);
+  assert.equal(calls.length, 0);
+  available = true;
+  await byId('run').onclick();
+  assert.equal(calls.length, 4);
+  assert.deepEqual(calls.slice(0, 3).map(call => call.article.body), ['本文 n123', '本文 n234', '本文 n345']);
+  assert.ok(calls.every(call => call.notes === '記事外の実績は未確認'));
+  assert.ok(!JSON.stringify(calls[3]).includes('本文 n123'));
+  assert.match(byId('result').textContent, /総評の本文[\s\S]*題 n234/);
+  assert.equal(byId('run').disabled, true);
+  byId('tab-discussion').onclick();
+  byId('question').value = '着眼点の見落としは？'; byId('question').oninput();
+  byId('reference').value = `${authorUrl}/n/n123`;
+  await byId('discuss').onclick();
+  assert.equal(calls[4].article.body, '本文 n123');
+  assert.equal(byId('reference').value, '');
+  await byId('copy-all').onclick();
+  assert.doesNotMatch(copies[0], /補足文案/);
+  byId('copy-discussion').checked = true;
+  await byId('copy-all').onclick();
+  assert.match(copies[1], /補足文案/);
+  assert.match(byId('result').textContent, /総評の本文/);
+  byId('notes').value = '新しい観点'; byId('notes').oninput();
+  assert.equal(byId('run').disabled, false);
+  assert.match(byId('result').textContent, /現在の条件では未評価/);
+});

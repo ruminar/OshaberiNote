@@ -77,5 +77,13 @@
     if (!finished) throw new Error("応答が完了前に切断されました。自動再送は行いません。");
     return answer;
   }
-  globalThis.OshaberiNoteOllama = Object.freeze({ models, chat });
+  async function withGeneration(task) {
+    const locks = globalThis.navigator?.locks;
+    if (!locks) throw new Error("このブラウザではサイト評価の同時実行を制御できません。");
+    return locks.request("oshaberi-note-ollama-generation", { ifAvailable: true }, lock => {
+      if (!lock) throw Object.assign(new Error("別の画面で応答を生成中です。終了後にもう一度お試しください。"), { code: "CHAT_BUSY" });
+      return task(chat);
+    });
+  }
+  globalThis.OshaberiNoteOllama = Object.freeze({ models, withGeneration, chat });
 })();

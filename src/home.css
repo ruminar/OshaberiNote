@@ -50,6 +50,9 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: var(--accent); }
 #evaluation-candidate { max-width: 100%; padding: 8px; font: inherit; }
 #evaluation-results details { margin-block: 12px; }
 #evaluation-results pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+#panel-evaluation [role="tabpanel"], .evaluation-navigation { margin-top: 16px; }
+#panel-evaluation textarea { display: block; width: 100%; padding: 12px; border: 1px solid var(--field-border); border-radius: 6px; font: inherit; resize: vertical; }
+#evaluation-result, #evaluation-detail, #evaluation-discussion { white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 12px; }
 .chat-tabs { gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--divider); }
 .chat-tabs [role="tab"] { background: transparent; color: var(--accent); border-color: transparent; border-radius: 8px 8px 0 0; }
 .chat-tabs [aria-selected="true"] { background: var(--button-bg); color: var(--button-text); border-color: var(--accent); }

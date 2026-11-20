@@ -56,9 +56,15 @@
           <div class="settings-actions">
             <button type="button" id="evaluation-profile">公開プロフィールを取得</button>
             <button type="button" id="evaluation-cancel" class="secondary" disabled>取得を中止</button>
+            <button type="button" id="evaluation-run" disabled>評価する</button>
+            <button type="button" id="evaluation-stop" class="secondary" disabled>評価を中止</button>
           </div>
           <p id="evaluation-status" role="status"></p>
+          <div id="evaluation-tabs" class="settings-actions chat-tabs" role="tablist" aria-label="サイト評価"></div>
+          <div id="evaluation-panel-info" role="tabpanel" aria-labelledby="evaluation-tab-info">
           <p id="evaluation-profile-name"></p>
+          </div>
+          <div id="evaluation-panel-articles" role="tabpanel" aria-labelledby="evaluation-tab-articles" hidden>
           <label for="evaluation-candidate">表示中の記事候補</label>
           <select id="evaluation-candidate" disabled></select>
           <button type="button" id="evaluation-add" class="secondary" disabled>候補を追加</button>
@@ -72,6 +78,41 @@
           </fieldset>
           <button type="button" id="evaluation-collect" disabled>記事本文を取得</button>
           <div id="evaluation-results"></div>
+          </div>
+          <div id="evaluation-panel-notes" role="tabpanel" aria-labelledby="evaluation-tab-notes" hidden>
+            <label for="evaluation-notes">評価に加えたい事情（任意）</label>
+            <textarea id="evaluation-notes" rows="7" maxlength="8000"></textarea>
+            <p class="muted">記事本文を3本以上取得し、「LLMの設定」で接続・モデル選択を済ませてから「評価する」を押してください。</p>
+          </div>
+          <div id="evaluation-panel-result" role="tabpanel" aria-labelledby="evaluation-tab-result" hidden>
+            <div id="evaluation-result">まだ評価していません。</div>
+            <button type="button" id="evaluation-copy-result" class="secondary" disabled>結果をコピー</button>
+          </div>
+          <div id="evaluation-panel-detail" role="tabpanel" aria-labelledby="evaluation-tab-detail" hidden>
+            <div id="evaluation-detail">まだ評価していません。</div>
+            <div class="settings-actions">
+              <button type="button" id="evaluation-copy-detail" class="secondary" disabled>詳細をコピー</button>
+              <button type="button" id="evaluation-copy-all" class="secondary" disabled>評価全文をコピー</button>
+              <label><input type="checkbox" id="evaluation-copy-discussion"> 感想戦もコピーに含める</label>
+            </div>
+          </div>
+          <div id="evaluation-panel-discussion" role="tabpanel" aria-labelledby="evaluation-tab-discussion" hidden>
+            <div id="evaluation-discussion">まだ評価していません。</div>
+            <label for="evaluation-reference">参照する記事</label>
+            <select id="evaluation-reference" disabled></select>
+            <label for="evaluation-question">評価への質問・指摘</label>
+            <textarea id="evaluation-question" rows="4" maxlength="8000" disabled></textarea>
+            <button type="button" id="evaluation-discuss" disabled>送信</button>
+          </div>
+          <div id="evaluation-panel-prompt" role="tabpanel" aria-labelledby="evaluation-tab-prompt" hidden>
+            <label for="evaluation-prompt">評価方針</label>
+            <textarea id="evaluation-prompt" rows="12" maxlength="16000"></textarea>
+            <button type="button" id="evaluation-reset-prompt" class="secondary">デフォルトに戻す</button>
+          </div>
+          <div class="settings-actions evaluation-navigation">
+            <button type="button" id="evaluation-back" class="secondary">戻る</button>
+            <button type="button" id="evaluation-next" class="secondary">次へ</button>
+          </div>
         </section>
         <section id="panel-chat" aria-labelledby="chat-heading" hidden>
           <h2 id="chat-heading">おしゃべり</h2>
