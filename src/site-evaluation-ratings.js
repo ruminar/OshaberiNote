@@ -8,10 +8,10 @@
     ["precision", "精密動作性", "読みやすさ"], ["originality", "成長性", "独創性"]
   ];
   const modelAxes = axes.filter(([key]) => !["speed", "stamina"].includes(key));
-  const evidenceKinds = ["strength", "standard", "weakness"];
+  const evidenceKinds = ["strength", "weakness"];
   const classifications = {
-    decisive: ["決め手", "strength"], supporting: ["補助的な強み", "strength"], standard: ["標準的", "standard"],
-    critical: ["致命的な弱み", "weakness"], material: ["影響のある弱み", "weakness"], minor: ["無視できる弱み", "weakness"]
+    decisive: ["決め手", "strength"], useful: ["有用", "strength"], slight: ["軽微", "strength"],
+    critical: ["致命的", "weakness"], material: ["影響あり", "weakness"], minor: ["無視できる", "weakness"]
   };
   const categories = Object.keys(classifications);
   const speedThresholds = [200, 100, 50, 20];
@@ -106,20 +106,14 @@
       counts[category]++;
       lines.push(`- ${classifications[category][0]} · ${item.title} · ${item.example}`);
     }
-    let rank = unknown;
-    if (counts.minor < evidence.length) {
-      // 各記事・評価軸につき強みと弱みは各1件なので、分類別の件数を出現記事数として使える。
-      if (counts.critical || (!counts.decisive && counts.material >= Math.max(2, Math.ceil(reviews.length / 2)))) rank = "E";
-      else if (!counts.decisive) rank = "D";
-      else if (counts.material) rank = "C";
-      else rank = grade(counts.decisive, [3, 2, 1, 0]);
-    }
-    const breakdown = categories.map(category => `${classifications[category][0]} ${counts[category]}件`).join(" · ");
+    const breakdown = [ ["長所", "strength"], ["短所", "weakness"] ].map(([label, kind]) =>
+      `${label} ${categories.filter(category => classifications[category][1] === kind)
+        .map(category => `${classifications[category][0]} ${counts[category]}件`).join("・")}`).join(" ｜ ");
     const discrepancy = categories.some(category => entry.counts[category] !== counts[category]);
-    const reason = [`${breakdown}（参照 ${reviews.length}本、試用基準）`];
+    const reason = [`${breakdown}（参照 ${reviews.length}本）`];
     if (discrepancy) reason.push("LLMの申告件数と分類結果に差があったため、根拠の分類から再集計しました。");
-    if (rank === unknown) reason.push("該当軸を比較できる根拠がありません。");
-    return { rank, reason: [...reason, ...lines].join("\n") };
+    if (!evidence.length) reason.push("この軸の長所・短所の根拠は抽出されませんでした。");
+    return { counts, breakdown, reason: [...reason, ...lines].join("\n") };
   }
 
   function parse(raw, reviews) {

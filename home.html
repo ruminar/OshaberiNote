@@ -108,7 +108,7 @@
             <p id="evaluation-result-meta" hidden></p>
             <table id="evaluation-ratings" hidden>
               <caption>クリエイター能力鑑定</caption>
-              <thead><tr><th scope="col">能力</th><th scope="col">ランク</th><th scope="col">評価内容</th></tr></thead>
+              <thead><tr><th scope="col">能力</th><th scope="col">分類件数・ランク</th><th scope="col">評価内容</th></tr></thead>
               <tbody id="evaluation-rating-rows"></tbody>
             </table>
             <div id="evaluation-result">まだ評価していません。</div>
@@ -143,6 +143,12 @@
             <label for="evaluation-prompt">根拠メモを総合する評価方針</label>
             <textarea id="evaluation-prompt" rows="12" maxlength="16000"></textarea>
             <button type="button" id="evaluation-reset-prompt" class="secondary">デフォルトに戻す</button>
+            <details>
+              <summary>後半の指示を編集（テスト用）</summary>
+              <textarea id="evaluation-classification-instructions" rows="12" maxlength="16000" aria-label="鑑定プロンプト後半の指示（テスト用）" aria-describedby="evaluation-classification-instructions-help"></textarea>
+              <p id="evaluation-classification-instructions-help">変更はこの画面を開いている間だけ有効です。</p>
+              <button type="button" id="evaluation-reset-classification-instructions" class="secondary">後半の指示を元に戻す</button>
+            </details>
             <details>
               <summary>Ollamaへ送る鑑定プロンプト全文</summary>
               <textarea id="evaluation-classification-prompt" rows="12" aria-label="Ollamaへ送る鑑定プロンプト全文" readonly></textarea>
