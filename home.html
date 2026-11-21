@@ -68,6 +68,16 @@
           <div id="evaluation-tabs" class="settings-actions chat-tabs" role="tablist" aria-label="サイト評価"></div>
           <div id="evaluation-panel-info" role="tabpanel" aria-labelledby="evaluation-tab-info">
           <p id="evaluation-profile-name"></p>
+          <details>
+            <summary>テスト用キャッシュ</summary>
+            <div class="settings-actions">
+              <button type="button" id="evaluation-save-cache" class="secondary" disabled>現在の資料を保存</button>
+              <button type="button" id="evaluation-load-cache" class="secondary" disabled>指定した作者の資料を読み込む</button>
+              <button type="button" id="evaluation-remove-cache" class="secondary" disabled>指定した作者の資料を削除</button>
+              <button type="button" id="evaluation-replay-cache" class="secondary" disabled>保存済みの鑑定を再集計</button>
+            </div>
+            <p>本文や根拠メモをこのブラウザに保存します。読み込み時にnoteへ接続しません。</p>
+          </details>
           </div>
           <div id="evaluation-panel-articles" role="tabpanel" aria-labelledby="evaluation-tab-articles" hidden>
           <label for="evaluation-candidate">表示中の記事候補</label>

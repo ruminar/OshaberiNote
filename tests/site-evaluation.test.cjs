@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { webcrypto } = require('node:crypto');
 const { documentFromHtml } = require('./helpers/dom.cjs');
 
 async function verifyArticleCollection(interruption) {
@@ -196,15 +197,21 @@ test('8タブで2種類の送信プロンプトを確認でき、感想戦では
   const candidates = ['n123', 'n234', 'n345', 'n456', 'n567', 'n678'].map((articleId, i) => ({ articleId, url: `${authorUrl}/n/${articleId}`, title: `題 ${articleId}`, likeCount: [0, 10, 20, 30, 40, 50][i] }));
   const calls = [], copies = [], opened = [];
   let tab, available = false, allowArticle = false, articleGranted = false, connectionChecks = 0, invalidAssessment = true;
-  let tick, now = 0;
+  let tick, now = 0, noteReads = 0;
   const permissionRequests = [], promptWrites = [];
   const promptKey = 'oshaberiNote.evaluation.creatorPrompt.v2';
   const extractionPromptKey = 'oshaberiNote.evaluation.extractionPrompt.v2';
   const savedPrompts = { [promptKey]: '保存済みの評価方針', [extractionPromptKey]: '保存済みの抽出指示' };
+  const cacheKey = 'oshaberiNote.evaluation.testCache.v1:creator';
+  const cached = new Map();
   const chrome = {
     storage: { local: {
-      get: async key => { assert.ok(Object.hasOwn(savedPrompts, key)); return { [key]: savedPrompts[key] }; },
-      set: async values => { promptWrites.push({ ...values }); }
+      get: async key => ({ [key]: Object.hasOwn(savedPrompts, key) ? savedPrompts[key] : structuredClone(cached.get(key)) }),
+      set: async values => {
+        if (Object.hasOwn(values, cacheKey)) cached.set(cacheKey, structuredClone(values[cacheKey]));
+        else promptWrites.push({ ...values });
+      },
+      remove: async key => { cached.delete(key); }
     } },
     tabs: {
       getCurrent: async () => ({ windowId: 7, index: 2 }),
@@ -215,6 +222,7 @@ test('8タブで2種類の送信プロンプトを確認でき、感想戦では
       get: async () => tab,
       update: async (id, { url }) => { assert.equal(id, 8); tab.url = url; },
       sendMessage: async (id, { kind, url }) => {
+        noteReads++;
         assert.equal(id, 8); assert.equal(tab.url, url);
         const articleId = url.split('/').at(-1);
         return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates }
@@ -234,7 +242,7 @@ test('8タブで2種類の送信プロンプトを確認でき、感想戦では
       contains: async ({ data_collection }) => !data_collection?.includes('websiteContent') || articleGranted
     }
   };
-  const context = vm.createContext({ document, chrome, URL, AbortController, AbortSignal, addEventListener() {},
+  const context = vm.createContext({ document, chrome, URL, AbortController, AbortSignal, TextEncoder, crypto: webcrypto, addEventListener() {},
     performance: { now: () => now },
     setInterval(callback, interval) { assert.equal(interval, 1000); tick = callback; return 1; },
     clearInterval(id) { assert.equal(id, 1); tick = undefined; },
@@ -461,6 +469,39 @@ test('8タブで2種類の送信プロンプトを確認でき、感想戦では
   assert.deepEqual(calls.slice(6, 9).map(call => call.article?.body), ['本文 n123', '本文 n234', '本文 n345']);
   assert.equal(calls[9].reviews.length, 3);
   assert.ok(promptWrites.every(value => !Object.values(value).some(prompt => prompt.includes('テスト用の追記') || prompt.includes('テスト用の一時指示'))));
+  const readsBeforeCache = noteReads, connectionsBeforeCache = connectionChecks;
+  assert.equal(byId('save-cache').disabled, false);
+  await byId('save-cache').onclick();
+  assert.match(byId('status').textContent, /根拠メモも保存しました/);
+  assert.equal(cached.get(cacheKey).articles[0].body, '本文 n123');
+  assert.match(cached.get(cacheKey).fingerprints[0], /^[0-9a-f]{64}$/);
+  assert.ok(cached.get(cacheKey).articles[0].capturedAt);
+  assert.equal(cached.get(cacheKey).evidence.model, 'test');
+  assert.match(cached.get(cacheKey).evidence.completed.promptHash, /^[0-9a-f]{64}$/);
+  assert.ok(!JSON.stringify(cached.get(cacheKey)).includes('テスト用の追記'));
+  byId('notes').value = '別の補足'; byId('notes').oninput();
+  await byId('load-cache').onclick();
+  assert.equal(byId('notes').value, '記事外の実績は未確認');
+  assert.match(byId('results').textContent, /本文 n123/);
+  assert.equal(byId('collect').disabled, true);
+  assert.equal(byId('replay-cache').disabled, false);
+  await byId('replay-cache').onclick();
+  assert.match(byId('status').textContent, /再集計しました/);
+  assert.equal(calls.length, 10);
+  assert.equal(connectionChecks, connectionsBeforeCache);
+  classificationInstructions.value += '\n別の鑑定指示'; classificationInstructions.oninput();
+  await byId('run').onclick();
+  assert.equal(calls.length, 11);
+  assert.equal(calls[10].reviews.length, 3);
+  assert.equal(noteReads, readsBeforeCache);
+  cached.get(cacheKey).articles[0].body = '本文の改変';
+  await byId('load-cache').onclick();
+  assert.match(byId('status').textContent, /記事本文と識別情報が一致しません/);
+  await byId('remove-cache').onclick();
+  assert.equal(cached.size, 0);
+  await byId('load-cache').onclick();
+  assert.match(byId('status').textContent, /テスト用キャッシュがありません/);
+  assert.equal(noteReads, readsBeforeCache);
   byId('notes').value = '新しい観点'; byId('notes').oninput();
   assert.equal(byId('run').disabled, false);
   assert.match(byId('result-meta').textContent, /現在の条件では未評価/);
@@ -475,7 +516,13 @@ test('能力鑑定は投稿頻度の境界と資料不足を区別する', () =>
   const posts = count => [...Array.from({ length: count }, (_, i) => date(i)), date(57)];
   for (const [count, rank] of [[56, 'A'], [16, 'B'], [8, 'C'], [7, 'D']]) assert.equal(rating.stamina(posts(count), now).rank, rank);
   assert.equal(rating.stamina([date(60), date(61)], now).rank, 'E');
-  assert.equal(rating.stamina([date(1), date(2)], now).rank, '判定不能');
+  const frequent = Array.from({ length: 18 }, (_, i) => date(Math.floor(i * 14 / 17)));
+  const observed = rating.stamina(frequent, now, [date(40)]);
+  assert.equal(observed.rank, 'A');
+  assert.match(observed.reason, /初回の公開一覧.*14日間.*18本.*週平均9本/);
+  assert.equal(rating.stamina([date(0), date(0)], now).rank, 'A');
+  assert.match(rating.stamina([date(14), date(28)], now).reason, /28日間.*2本.*週平均0.5本/);
+  assert.equal(rating.stamina([date(1), null], now).rank, '判定不能');
   assert.equal(rating.stamina([date(2), date(1), date(60)], now).rank, '判定不能');
   assert.equal(rating.speed([{ likeCount: 0 }]).rank, 'E');
   assert.equal(rating.speed([{ likeCount: 0 }, { likeCount: null }]).rank, '判定不能');

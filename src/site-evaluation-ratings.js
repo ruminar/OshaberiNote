@@ -36,13 +36,17 @@
     const pinned = pinnedDates.map(value => typeof value === "string" ? Date.parse(value) : NaN);
     if (!ordered || pinned.some(value => !Number.isFinite(value) || value > now)) return { rank: unknown, reason: "公開記事一覧から投稿順と投稿日を確認できませんでした。" };
     const newest = Math.max(timestamps[0], ...pinned);
-    const latest = new Date(newest).toISOString().slice(0, 10), since = now - windowDays * day;
+    const latest = new Date(newest).toISOString().slice(0, 10);
     if (now - newest >= inactiveDays * day) return { rank: "E", reason: `公開一覧の最新投稿日は${latest}で、60日以上経過しています。` };
-    if (timestamps.at(-1) >= since) return { rank: unknown, reason: `最新投稿日は${latest}です。公開記事一覧の初回表示では直近${windowDays}日間の投稿を確認しきれませんでした。` };
+    const windowStart = now - windowDays * day;
+    const since = Math.max(windowStart, timestamps.at(-1));
+    const observedDays = Math.max(1, Math.ceil((now - since) / day));
     const count = [...timestamps, ...pinned].filter(value => value >= since).length;
-    const weekly = count / (windowDays / 7);
+    const weekly = count * 7 / observedDays;
     const rank = weekly >= 7 ? "A" : weekly >= 2 ? "B" : weekly >= 1 ? "C" : "D";
-    return { rank, reason: `公開一覧から確認した直近${windowDays}日は${count}本（週平均${weekly}本）、最新投稿は${latest}です。` };
+    const period = since > windowStart ? `初回の公開一覧で確認した期間（${observedDays}日間）` : `公開一覧から確認した直近${windowDays}日`;
+    const weeklyText = weekly.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+    return { rank, reason: `${period}は${count}本（週平均${weeklyText}本）、最新投稿は${latest}です。` };
   }
 
   const string = { type: "string" };
