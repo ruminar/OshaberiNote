@@ -9,12 +9,9 @@
   ];
   const modelAxes = axes.filter(([key]) => !["speed", "stamina"].includes(key));
   const evidenceKinds = ["strength", "weakness"];
-  const classifications = {
-    decisive: ["決め手", "strength"], useful: ["有用", "strength"], slight: ["軽微", "strength"],
-    critical: ["致命的", "weakness"], material: ["影響あり", "weakness"], minor: ["無視できる", "weakness"]
-  };
-  const categories = Object.keys(classifications);
-  const speedThresholds = [200, 100, 50, 20];
+  const levels = { strength: ["決め手", "有用", "軽微"], weakness: ["致命的", "影響あり", "影響なし"] };
+  const levelLabels = Object.values(levels).flat();
+  const speedThresholds = [360, 120, 60, 20];
   const windowDays = 56, inactiveDays = 60, day = 86400000;
 
   function grade(value, thresholds) {
@@ -50,88 +47,68 @@
   }
 
   const string = { type: "string" };
-  const nonempty = { ...string, minLength: 1 };
   const object = properties => ({ type: "object", properties, required: Object.keys(properties), additionalProperties: false });
   const keyed = (keys, value) => Object.fromEntries(keys.map(key => [key, value]));
   const forAxes = build => object(Object.fromEntries(modelAxes.map(([key]) => [key, build(key)])));
   const parseJson = raw => JSON.parse(raw.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, "$1"));
-  const text = item => typeof item === "string" && Boolean(item.trim());
   const exactKeys = (item, keys) => item && typeof item === "object" && !Array.isArray(item) &&
     Object.keys(item).length === keys.length && keys.every(key => Object.hasOwn(item, key));
 
   function evidenceFormat() {
-    return forAxes(() => object(keyed(evidenceKinds, { ...string, maxLength: 240 })));
-  }
-
-  function readEvidence(raw, articleId) {
-    const value = parseJson(raw);
-    if (!exactKeys(value, modelAxes.map(([key]) => key))) throw new Error("評価軸が一致しません。");
-    return Object.fromEntries(modelAxes.map(([key]) => {
-      const entry = value[key];
-      if (!exactKeys(entry, evidenceKinds) || !evidenceKinds.every(kind => typeof entry[kind] === "string" && entry[kind].length <= 240)) {
-        throw new Error("根拠メモの項目が一致しません。");
-      }
-      return [key, evidenceKinds.filter(kind => text(entry[kind])).map(kind =>
-        ({ id: `${articleId}:${key}:${kind}`, kind, example: entry[kind].trim() }))];
+    return forAxes(() => object({
+      strength: { ...string, maxLength: 240, description: "記事本文に基づく長所の具体例と理由。重要度のラベルを入れない。該当なしは空文字。" },
+      weakness: { ...string, maxLength: 240, description: "記事本文に基づく短所の具体例と理由。重要度のラベルを入れない。該当なしは空文字。" },
+      ...Object.fromEntries(evidenceKinds.map(kind => [`${kind}_level`, { ...string, enum: ["", ...levels[kind]] }]))
     }));
   }
 
-  function outputFormat(reviews) {
-    const articleIds = reviews.map(review => review.id);
-    return object({
-      type: nonempty,
-      summary: nonempty,
-      features: { type: "array", items: nonempty, maxItems: 3 },
-      representatives: { type: "array", items: { type: "string", enum: articleIds }, maxItems: 3 },
-      ratings: forAxes(key => {
-        const evidence = reviews.flatMap(review => review.evidence[key]);
-        return object({
-          assignments: object(Object.fromEntries(evidence.map(item => [item.id, {
-            type: "string", enum: categories.filter(category => classifications[category][1] === item.kind)
-          }]))),
-          counts: object(keyed(categories, { type: "integer", minimum: 0, maximum: evidence.length }))
-        });
-      })
-    });
+  function readEvidence(raw) {
+    let value;
+    try { value = parseJson(raw); }
+    catch { throw new Error("応答が有効なJSONではありません。"); }
+    const axisKeys = modelAxes.map(([key]) => key);
+    if (!exactKeys(value, axisKeys)) throw new Error("JSONに必要な4つの評価軸が揃っていないか、余分な項目があります。");
+    return Object.fromEntries(modelAxes.map(([key, label]) => {
+      const entry = value[key];
+      if (!exactKeys(entry, [...evidenceKinds, ...evidenceKinds.map(kind => `${kind}_level`)])) {
+        throw new Error(`${label}（${key}）の根拠・重要度の項目に不足または余分があります。`);
+      }
+      const evidence = [];
+      for (const kind of evidenceKinds) {
+        const field = `${label}の${kind === "strength" ? "長所" : "短所"}`;
+        if (typeof entry[kind] !== "string") throw new Error(`${field}（${kind}）が文字列ではありません。`);
+        const example = entry[kind].trim();
+        if (levelLabels.includes(example.replace(/^[「『"'\s]+|[」』"'。．.\s]+$/gu, ""))) {
+          throw new Error(`${field}（${kind}）に重要度のラベルだけがあり、記事に基づく根拠がありません。`);
+        }
+        if ([...example].length > 240) throw new Error(`${field}（${kind}）の根拠が240文字を超えています。`);
+        const level = typeof entry[`${kind}_level`] === "string" ? entry[`${kind}_level`].trim() : null;
+        if (example && level === "") throw new Error(`${field}（${kind}_level）に重要度がありません。`);
+        if (level !== "" && !levels[kind].includes(level)) throw new Error(`${field}（${kind}_level）の重要度が指定の選択肢にありません。`);
+        if (example) evidence.push({ kind, level, example });
+      }
+      return [key, evidence];
+    }));
   }
 
-  function invalidAssessment() { return new Error("能力鑑定の出力形式を確認できませんでした。"); }
-
-  function classify(entry, reviews, key) {
-    const evidence = reviews.flatMap(review => review.evidence[key].map(item => ({ ...item, title: review.title })));
-    if (!exactKeys(entry, ["counts", "assignments"]) || !exactKeys(entry.counts, categories) ||
-        !categories.every(category => Number.isInteger(entry.counts[category]) && entry.counts[category] >= 0) ||
-        !exactKeys(entry.assignments, evidence.map(item => item.id))) throw invalidAssessment();
-    const counts = keyed(categories, 0);
-    const lines = [];
-    for (const item of evidence) {
-      const category = entry.assignments[item.id];
-      if (!categories.includes(category) || classifications[category][1] !== item.kind) throw invalidAssessment();
-      counts[category]++;
-      lines.push(`- ${classifications[category][0]} · ${item.title} · ${item.example}`);
-    }
-    const breakdown = [ ["長所", "strength"], ["短所", "weakness"] ].map(([label, kind]) =>
-      `${label} ${categories.filter(category => classifications[category][1] === kind)
-        .map(category => `${classifications[category][0]} ${counts[category]}件`).join("・")}`).join(" ｜ ");
-    const discrepancy = categories.some(category => entry.counts[category] !== counts[category]);
-    const reason = [`${breakdown}（参照 ${reviews.length}本）`];
-    if (discrepancy) reason.push("LLMの申告件数と分類結果に差があったため、根拠の分類から再集計しました。");
-    if (!evidence.length) reason.push("この軸の長所・短所の根拠は抽出されませんでした。");
-    return { counts, breakdown, reason: [...reason, ...lines].join("\n") };
+  function aggregate(reviews) {
+    const evidenceByArticle = reviews.map(({ title, raw }) => ({ title, evidence: readEvidence(raw) }));
+    return Object.fromEntries(modelAxes.map(([key]) => {
+      const counts = keyed(levelLabels, 0);
+      const rows = { strength: [], weakness: [] };
+      for (const { title, evidence } of evidenceByArticle) {
+        for (const { kind, level, example } of evidence[key]) {
+          counts[level]++;
+          rows[kind].push([title, level, example]);
+        }
+      }
+      const groupLabels = [["長所", "strength"], ["短所", "weakness"]];
+      const breakdown = groupLabels.map(([label, kind]) =>
+        `${label} ${levels[kind].map(level => `${level} ${counts[level]}件`).join("・")}`).join(" ｜ ");
+      const groups = groupLabels.map(([label, kind]) => ({ label, rows: rows[kind] }));
+      return [key, { counts, breakdown, reason: `${breakdown}（参照 ${reviews.length}本）`, groups }];
+    }));
   }
 
-  function parse(raw, reviews) {
-    const value = parseJson(raw);
-    const articleIds = reviews.map(review => review.id);
-    if (!exactKeys(value, ["type", "summary", "features", "representatives", "ratings"]) ||
-        !text(value.type) || !text(value.summary) || !Array.isArray(value.features) || value.features.length > 3 || !value.features.every(text) ||
-        !Array.isArray(value.representatives) || value.representatives.length > 3 || new Set(value.representatives).size !== value.representatives.length ||
-        !value.representatives.every(id => articleIds.includes(id)) || !exactKeys(value.ratings, modelAxes.map(([key]) => key))) {
-      throw invalidAssessment();
-    }
-    const ratings = Object.fromEntries(modelAxes.map(([key]) => [key, classify(value.ratings[key], reviews, key)]));
-    return { ...value, ratings };
-  }
-
-  globalThis.OshaberiNoteEvaluationRatings = Object.freeze({ axes, modelAxes, speed, stamina, evidenceFormat, readEvidence, outputFormat, parse });
+  globalThis.OshaberiNoteEvaluationRatings = Object.freeze({ axes, speed, stamina, evidenceFormat, readEvidence, aggregate });
 })();

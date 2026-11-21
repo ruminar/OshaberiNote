@@ -61,6 +61,10 @@
             <button type="button" id="evaluation-stop" class="secondary" disabled>評価を中止</button>
           </div>
           <p id="evaluation-status" role="status"></p>
+          <details id="evaluation-invalid-response" hidden>
+            <summary>読み取れなかったOllamaの応答</summary>
+            <textarea id="evaluation-invalid-response-text" rows="8" aria-label="読み取れなかったOllamaの応答" readonly></textarea>
+          </details>
           <div id="evaluation-progress" class="evaluation-progress" hidden>
             <progress aria-label="Ollamaの処理中"></progress>
             <span id="evaluation-progress-detail"></span>
@@ -125,7 +129,12 @@
             <button type="button" id="evaluation-copy-result" class="secondary" disabled>結果をコピー</button>
           </div>
           <div id="evaluation-panel-detail" role="tabpanel" aria-labelledby="evaluation-tab-detail" hidden>
+            <p id="evaluation-detail-previous" hidden>現在の条件では未評価です。以下は前回の詳細です。</p>
             <div id="evaluation-detail">まだ評価していません。</div>
+            <details id="evaluation-article-responses" hidden>
+              <summary>記事ごとのOllama応答（JSON）</summary>
+              <div id="evaluation-article-response-list"></div>
+            </details>
             <div class="settings-actions">
               <button type="button" id="evaluation-copy-detail" class="secondary" disabled>詳細をコピー</button>
               <button type="button" id="evaluation-copy-all" class="secondary" disabled>評価全文をコピー</button>
@@ -141,27 +150,12 @@
             <button type="button" id="evaluation-discuss" disabled>送信</button>
           </div>
           <div id="evaluation-panel-extraction-prompt" role="tabpanel" aria-labelledby="evaluation-tab-extraction-prompt" hidden>
-            <label for="evaluation-extraction-prompt">根拠抽出の指示（デバッグ用）</label>
+            <label for="evaluation-extraction-prompt">記事評価の指示</label>
             <textarea id="evaluation-extraction-prompt" rows="12" maxlength="16000"></textarea>
             <button type="button" id="evaluation-reset-extraction-prompt" class="secondary">デフォルトに戻す</button>
             <details>
-              <summary>Ollamaへ送る根拠抽出プロンプト全文</summary>
-              <textarea id="evaluation-extraction-prompt-preview" rows="12" aria-label="Ollamaへ送る根拠抽出プロンプト全文" readonly></textarea>
-            </details>
-          </div>
-          <div id="evaluation-panel-prompt" role="tabpanel" aria-labelledby="evaluation-tab-prompt" hidden>
-            <label for="evaluation-prompt">根拠メモを総合する評価方針</label>
-            <textarea id="evaluation-prompt" rows="12" maxlength="16000"></textarea>
-            <button type="button" id="evaluation-reset-prompt" class="secondary">デフォルトに戻す</button>
-            <details>
-              <summary>後半の指示を編集（テスト用）</summary>
-              <textarea id="evaluation-classification-instructions" rows="12" maxlength="16000" aria-label="鑑定プロンプト後半の指示（テスト用）" aria-describedby="evaluation-classification-instructions-help"></textarea>
-              <p id="evaluation-classification-instructions-help">変更はこの画面を開いている間だけ有効です。</p>
-              <button type="button" id="evaluation-reset-classification-instructions" class="secondary">後半の指示を元に戻す</button>
-            </details>
-            <details>
-              <summary>Ollamaへ送る鑑定プロンプト全文</summary>
-              <textarea id="evaluation-classification-prompt" rows="12" aria-label="Ollamaへ送る鑑定プロンプト全文" readonly></textarea>
+              <summary>Ollamaへ送る記事評価プロンプト全文</summary>
+              <textarea id="evaluation-extraction-prompt-preview" rows="12" aria-label="Ollamaへ送る記事評価プロンプト全文" readonly></textarea>
             </details>
           </div>
           <div class="settings-actions evaluation-navigation">

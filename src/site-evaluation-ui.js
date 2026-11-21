@@ -10,22 +10,13 @@
   const ollama = globalThis.OshaberiNoteOllama;
   const rating = globalThis.OshaberiNoteEvaluationRatings;
   const links = globalThis.OshaberiNoteChatTags.links;
-  const promptKey = "oshaberiNote.evaluation.creatorPrompt.v2";
-  const extractionPromptKey = "oshaberiNote.evaluation.extractionPrompt.v2";
+  const extractionPromptKey = "oshaberiNote.evaluation.articleAssessmentPrompt.v1";
+  const retiredExtractionSentence = "根拠があるときだけ埋め、該当なし・資料不足は空文字としてください。";
   const cachePrefix = "oshaberiNote.evaluation.testCache.v1:";
-  const defaultPrompt = [
-    "作品群から、その作者に共通する作家性・強み・表現の傾向を鑑定してください。根拠は今回参照した記事に求めてください。",
-    "破壊力は面白さ・意外性・印象の強さです。読者が読み進める動機を維持できるか、読書に費やした時間や労力に見合う楽しさ・発見・感動などの「読者報酬」が得られるかも評価してください。結末や主張だけでなく、そこへ至る読書体験も考慮してください。",
-    "射程距離は、想定読者が得られる、情報知識や利益、文学的体験、文化的価値など。独自のツールやプロンプトなどの提供も独自性に応じて高く評価する。専門性が高く読者が少ない作品でも、有用性や希少性を評価してください。読みやすさはこの軸に含めません。",
-    "精密動作性は明瞭さ・構成・読みやすさです。ただし専門性や意図的な難解さを、それだけで減点しないでください。",
-    "成長性は現在の作品に見える着想・発想・表現の独自性、および模倣の困難さです。将来は予測しません。また成長性については、個人的な感想があることや、わかりやすく情報を説明していることを加点根拠にしないでください。",
-    "いずれの項目においても、理解が難しいことを弱点に数えないでください。高度な情報を記事に書くことにペナルティを生じさせてはいけません。ただし、明らかに不要な理解困難さが認められる場合は、精密動作性に短所として記録してください。",
-    "代表記事は作者の特徴をよく表しているものを選んでください。創作者の人格の推測、記事の添削、総合点、記事ごとの採点は不要です。"
-  ].join("\n");
   const tabNames = [
     ["info", "取得情報"], ["articles", "記事選択"], ["notes", "補足情報入力"],
     ["result", "サイト評価結果"], ["detail", "サイト評価詳細"], ["discussion", "感想戦"],
-    ["extraction-prompt", "根拠抽出プロンプト"], ["prompt", "鑑定プロンプト"]
+    ["extraction-prompt", "記事評価プロンプト"]
   ];
   let tabIndex = 0;
   let target, collector, controller, evaluationAbort, settings, result, preparedReviews;
@@ -140,15 +131,14 @@
     byId("add").disabled = byId("candidate").disabled || slots.every(slot => slot.value.trim());
     byId("cancel").disabled = !busy;
     for (const slot of slots) slot.disabled = busy || !target;
-    for (const id of ["notes", "prompt", "reset-prompt", "extraction-prompt", "reset-extraction-prompt",
-      "classification-instructions", "reset-classification-instructions"]) byId(id).disabled = busy;
+    for (const id of ["notes", "extraction-prompt", "reset-extraction-prompt"]) byId(id).disabled = busy;
     const snapshot = currentInput();
     const current = result && sameInput(snapshot, result.input);
     const key = api.storage?.local && cacheKey();
     const selected = key && target?.authorUrl === source.profile(byId("target").value) && selectedArticles();
     byId("save-cache").disabled = busy || !selected?.length;
     byId("load-cache").disabled = byId("remove-cache").disabled = busy || !key;
-    byId("replay-cache").disabled = busy || !preparedReviews?.completed || !sameExtraction(snapshot, preparedReviews.input);
+    byId("replay-cache").disabled = busy || !preparedReviews?.evaluatedAt || !sameExtraction(snapshot, preparedReviews.input);
     byId("run").disabled = busy || !snapshot || Boolean(current);
     byId("stop").disabled = !evaluationAbort;
     byId("question").disabled = byId("reference").disabled = busy || !current;
@@ -156,18 +146,13 @@
     for (const id of ["copy-result", "copy-detail", "copy-all"]) byId(id).disabled = !result;
     if (result) {
       showLinks(byId("result-meta"), `${current ? "" : "現在の条件では未評価です。以下は前回の鑑定です。\n\n"}${result.meta}`);
-      showLinks(byId("detail"), `${current ? "" : "現在の条件では未評価です。以下は前回の詳細です。\n\n"}${result.detail}`);
+      byId("detail-previous").hidden = Boolean(current);
     }
   }
 
   function cacheKey() {
     try { return cachePrefix + source.profile(byId("target").value).split("/").at(-1); }
     catch { return ""; }
-  }
-
-  async function promptFingerprint(prompt) {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(prompt));
-    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
   }
 
   function selectedArticles() {
@@ -303,8 +288,8 @@
   }
 
   function currentInput() {
-    const prompt = byId("prompt").value.trim(), extraction = byId("extraction-prompt").value.trim();
-    if (!target || !settings?.enabled || !settings.ollamaModel || !prompt || !extraction) return null;
+    const extraction = byId("extraction-prompt").value.trim();
+    if (!target || !settings?.enabled || !settings.ollamaModel || !extraction) return null;
     try {
       if (source.profile(byId("target").value) !== target.authorUrl) return null;
       const articles = selectedArticles().map(({ capturedAt, ...article }) => article);
@@ -314,7 +299,7 @@
       const notes = byId("notes").value.trim();
       const postDates = target.postDates ?? [], pinnedDates = target.pinnedDates ?? [];
       const profileLikes = target.candidates.map(({ articleId, likeCount }) => ({ articleId, likeCount }));
-      return { author, articles, endpoint, model, notes, prompt: buildClassificationPrompt(prompt), extraction, postDates, pinnedDates, profileLikes };
+      return { author, articles, endpoint, model, notes, extraction, postDates, pinnedDates, profileLikes };
     } catch { return null; }
   }
 
@@ -325,7 +310,7 @@
   }
 
   function sameInput(input, previous) {
-    return sameExtraction(input, previous) && input.prompt === previous.prompt &&
+    return sameExtraction(input, previous) &&
       JSON.stringify([input.postDates, input.pinnedDates]) === JSON.stringify([previous.postDates, previous.pinnedDates]) &&
       JSON.stringify(input.profileLikes) === JSON.stringify(previous.profileLikes) &&
       input.articles.every((article, i) => article.publishedAt === previous.articles[i].publishedAt);
@@ -333,7 +318,14 @@
 
   function clearEvaluation() {
     result = undefined; discussion = [];
+    byId("invalid-response").hidden = true;
+    byId("invalid-response").open = false;
+    byId("invalid-response-text").value = "";
+    byId("article-responses").hidden = true;
+    byId("article-responses").open = false;
+    byId("article-response-list").replaceChildren();
     byId("result").textContent = byId("detail").textContent = byId("discussion").textContent = "まだ評価していません。";
+    byId("detail-previous").hidden = true;
     byId("question").value = "";
     byId("copy-discussion").checked = false;
     byId("reference").replaceChildren();
@@ -433,85 +425,70 @@
   ].join("\n");
   const defaultExtractionPrompt = [
     "この記事1本から、各評価軸の観察事実を抽出してください。",
-    "破壊力（impact）は面白さ・意外性・印象の強さ。読者が読み進める動機と、読書に見合う楽しさ・発見・感動を考える。理解が難しいことは減点対象にしないが、読者報酬が無いことは減点対象とする。",
-    "射程距離（reach）は想定読者が得られる、情報知識や利益、文学的体験、文化的価値など。独自のツールやプロンプトなどの提供も独自性に応じて高く評価する。読者層の広さ、専門性の高さ、読みやすさだけで判断しない。",
+    "破壊力（impact）は面白さ・意外性・印象の強さです。作者が読者に面白いと感じてもらうためにどのような工夫を文章にしているかを確認し、思わず笑ってしまうなど共感を呼ぶような項目が複数あれば評価を上げ、なければ下げます。",
+    "射程距離（reach）は想定読者が得られる、情報知識や利益、文学的体験、文化的価値など。独自のツールやプロンプトなどの提供も独自性に応じて高く評価する。普遍的な価値が認められるなら加算。",
     "精密動作性（precision）は明瞭さ・構成・読みやすさ。専門性や意図的な難解さ自体は弱みとしない。",
-    "成長性（originality）は現在の記事の着眼点・構成・表現の独自性。本人の体験であることや、よくある情報を明瞭に説明したことだけで強みとせず、将来の成長を予測しない。独自性が高く、情報価値があり、模倣が困難であれば加点。",
+    "成長性（originality）は現在の記事の着眼点・構成・表現の独自性。作家性・個性。本人の体験であることや、よくある情報を明瞭に説明したことだけで強みとせず、将来の成長を予測しない。独自性が高く、情報価値があり、模倣が困難であれば加点。",
     "いずれの項目においても、理解が難しいことを弱点に数えないでください。高度な情報を記事に書くことにペナルティを生じさせてはいけません。ただし、明らかに不要な理解困難さが認められる場合は、精密動作性（precision）に短所として記録してください。",
     "同じジャンル・目的の記事と比べ、strength（長所）、weakness（短所）ごとに0～1件を記録してください。",
     "各欄には何が書かれているかと、それがなぜその軸の根拠になるかを、短い引用または具体例を使い日本語240文字以内で記録してください。",
     "弱みは、何が読者の理解や体験を妨げるかを具体的に説明できるときだけ記録してください。その軸と無関係な長所や、単に標準的である点は弱みに入れません。",
-    "根拠があるときだけ埋め、該当なし・資料不足は空文字としてください。標準的な点を弱みに含めず、ランク、採点、総評、添削、代表選定は行いません。"
+    "標準的な点を弱みに含めず、ランク、採点、総評、添削、代表選定は行いません。"
   ].join("\n");
-  const extractionFormat = "impact、reach、precision、originalityをキーとし、各値にはstrengthとweaknessだけを持つJSONを返してください。この出力形式を優先してください。";
+  const extractionFormat = [
+    "strengthとweaknessは根拠文の欄です。記事の具体的な記述と、なぜ評価の根拠になるかを書いてください。「有用」「軽微」「影響なし」などの分類名だけをこの2欄に入れてはいけません。",
+    "強みはそのレベルに応じて「決め手」「有用」「軽微」を、strength_levelに保持。",
+    "弱みはそのレベルに応じて「致命的」「影響あり」「影響なし」を、weakness_levelに保持。",
+    "根拠が空文字なら対応する重要度も空文字にしてください。根拠がある場合は対応する重要度を選んでください。",
+    '1軸の構造例（例文を転用しない）: {"strength":"手順の前に必要な道具をまとめてあり、読者が準備しやすい。","weakness":"","strength_level":"有用","weakness_level":""}',
+    "impact、reach、precision、originalityをキーとし、各値にはstrengthとweaknessとstrength_levelとweakness_levelを持つJSONを返してください。この出力形式を優先してください。"
+  ].join("\n");
   const buildExtractionPrompt = instructions => [dataRule, instructions, extractionFormat].join("\n");
-  const defaultClassificationInstructions = [
-    dataRule,
-    "原文はなく、reviewsの根拠メモだけを使います。根拠が欠けていること自体を弱みとしないでください。",
-    "軸ごとに根拠を分類してください。同じ記事内の別軸の根拠を持ち込まないでください。",
-    "長所（strength）はdecisive（決め手、その軸でその記事を評価する強い理由）、useful（有用、読者に具体的な利点がある）、slight（軽微、効果が小さい）のいずれかです。",
-    "短所（weakness）はcritical（致命的、その軸で記事の価値を大きく損なう）、material（影響あり、具体的な悪影響がある）、minor（無視できる、悪影響がごく小さい）のいずれかです。",
-    "weaknessの欄にあっても、具体的な悪影響が書かれていない、または実際には標準的な点や長所を記述している根拠はminorにしてください。",
-    "各根拠の重要度は、その根拠が出た記事について判断してください。同じ理由が5記事に当てはまれば、5件とも同じ分類にできます。記事ごとに異なる理由を求めず、他の記事に似た理由があることを理由に重要度を変えないでください。",
-    "根拠IDは元の根拠を参照するために使います。assignmentsには元の根拠IDをすべてキーとして記載し、各値には分類名の文字列を入れてください。countsには分類ごとの根拠IDの数を入れ、該当しない分類は0にしてください。",
-    "type、summary、features（文字列の配列、最大3件）、representatives（参照記事IDの配列、最大3件）、ratingsのJSONを返してください。ratingsはimpact、reach、precision、originalityを持ち、各値はassignmentsとcountsです。",
-    "ランク、点数、添削は出しません。件数の集計方法と出力形式は、この固定指示を優先してください。"
-  ].join("\n");
-  const buildClassificationPrompt = policy =>
-    [policy, byId("classification-instructions").value.trim()].filter(Boolean).join("\n\n");
 
   byId("run").onclick = () => {
     const input = currentInput();
     if (!input || byId("run").disabled) return;
     return sendEvaluation(input, async ask => {
-      if (!preparedReviews || !sameExtraction(input, preparedReviews.input)) {
-        preparedReviews = undefined;
-        const reviews = [];
-        for (const { articleId, title, body, url } of input.articles) {
-          showLinks(byId("status"), `記事の特徴を抽出中（${reviews.length + 1} / ${input.articles.length}） ${title}`);
-          const raw = await ask(buildExtractionPrompt(input.extraction),
-            { author: input.author, notes: input.notes, article: { articleId, title, body, url } }, rating.evidenceFormat());
-          try {
-            reviews.push({ id: articleId, title, evidence: rating.readEvidence(raw, articleId) });
-          } catch {
-            throw new Error(`「${title}」の根拠メモを読み取れませんでした。もう一度評価できます。`);
-          }
-        }
-        preparedReviews = { input, reviews };
-      }
+      if (!preparedReviews || !sameExtraction(input, preparedReviews.input)) preparedReviews = { input, reviews: [] };
       const { reviews } = preparedReviews;
-      byId("status").textContent = "作品群の能力を鑑定しています…";
-      const promptHash = await promptFingerprint(input.prompt);
-      const raw = await ask(input.prompt,
-        { author: input.author, notes: input.notes, reviews }, rating.outputFormat(reviews));
-      let assessment;
-      try {
-        assessment = rating.parse(raw, reviews);
-      } catch {
-        throw new Error("能力鑑定の応答を読み取れませんでした。「評価する」を押すと、今回の記事メモを使って最後の鑑定からやり直せます。");
+      for (const { articleId, title, body, url } of input.articles.slice(reviews.length)) {
+        showLinks(byId("status"), `記事を評価中（${reviews.length + 1} / ${input.articles.length}） ${title}`);
+        const raw = await ask(buildExtractionPrompt(input.extraction),
+          { author: input.author, notes: input.notes, article: { articleId, title, body, url } }, rating.evidenceFormat());
+        try { rating.readEvidence(raw); }
+        catch (error) {
+          byId("invalid-response-text").value = raw;
+          byId("invalid-response").hidden = false;
+          throw new Error(`「${title}」の評価を読み取れませんでした。${error.message}「評価する」でこの記事から再開できます。`);
+        }
+        reviews.push({ id: articleId, title, raw });
       }
-      const evaluatedAt = new Date().toISOString();
-      preparedReviews.completed = { promptHash, raw, evaluatedAt };
-      showAssessment(input, assessment, evaluatedAt);
+      const evaluatedAt = preparedReviews.evaluatedAt ?? new Date().toISOString();
+      showAssessment(input, reviews, evaluatedAt);
+      preparedReviews.evaluatedAt = evaluatedAt;
       byId("status").textContent = `${reviews.length}件の記事を評価しました。`;
     }, clearEvaluation);
   };
 
-  function showAssessment(input, assessment, evaluatedAt) {
-    const ratings = { ...assessment.ratings, speed: rating.speed(input.profileLikes), stamina: rating.stamina(input.postDates, Date.parse(evaluatedAt), input.pinnedDates) };
-    const representatives = assessment.representatives.map(id => input.articles.find(article => article.articleId === id));
-    const overview = [
-      `クリエイタータイプ\n${assessment.type}`, `総評\n${assessment.summary}`,
-      ...(assessment.features.length ? [`代表的特徴\n${assessment.features.map(feature => `- ${feature}`).join("\n")}`] : []),
-      `代表記事\n${representatives.map(article => `- ${article.title}\n  ${article.url}`).join("\n") || "選定なし"}`
-    ].join("\n\n");
+  function showAssessment(input, reviews, evaluatedAt) {
+    const ratings = { ...rating.aggregate(reviews), speed: rating.speed(input.profileLikes), stamina: rating.stamina(input.postDates, Date.parse(evaluatedAt), input.pinnedDates) };
+    const overview = `評価した記事\n${input.articles.map(article => `- ${article.title}\n  ${article.url}`).join("\n")}`;
     const table = ["| 能力 | 分類件数・ランク | 評価内容 |", "| --- | --- | --- |", ...rating.axes.map(([key, label, meaning]) => `| ${label} | ${ratings[key].rank ?? ratings[key].breakdown} | ${meaning} |`)].join("\n");
     const meta = `${input.author.name} · ${input.author.url}\n評価日時 ${new Date(evaluatedAt).toLocaleString("ja-JP")} · モデル ${input.model}\n参照記事 ${input.articles.length}本（今回読んだ記事に基づく鑑定）`;
-    const detail = ["評価の根拠", ...rating.axes.map(([key, label]) => {
-      const { rank, reason } = ratings[key];
-      return `### ${label}${rank ? ` · ${rank}` : ""}\n${reason}`;
-    })].join("\n\n");
+    const detail = showAssessmentDetail(ratings);
     result = { input, evaluatedAt, ratings, meta, summary: `${table}\n\n${overview}`, detail };
+    const responses = byId("article-response-list");
+    for (const { title, raw } of reviews) {
+      const entry = document.createElement("details"), heading = document.createElement("summary"), body = document.createElement("textarea");
+      heading.textContent = title;
+      body.value = raw;
+      body.readOnly = true;
+      body.rows = 8;
+      body.setAttribute("aria-label", `${title}のOllama応答`);
+      entry.append(heading, body);
+      responses.append(entry);
+    }
+    byId("article-responses").hidden = false;
     showLinks(byId("result"), overview);
     showRatings(ratings);
     updateReferences();
@@ -519,13 +496,60 @@
     selectTab(3);
   }
 
+  function showAssessmentDetail(ratings) {
+    const container = byId("detail");
+    container.replaceChildren();
+    const markdown = [];
+    const appendText = (parent, tag, text) => {
+      const node = document.createElement(tag);
+      showLinks(node, text);
+      parent.append(node);
+      return node;
+    };
+    const headers = ["記事名", "レベル", "説明"];
+    const markdownRow = values => `| ${values.map(value => value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ")).join(" | ")} |`;
+    for (const [key, label] of rating.axes) {
+      const { rank, reason, groups } = ratings[key];
+      const heading = rank ? `${label} · ${rank}` : label;
+      appendText(container, "h3", heading);
+      appendText(container, "p", reason);
+      markdown.push(`### ${heading}\n\n${reason}`);
+      for (const group of groups ?? []) {
+        appendText(container, "h4", group.label);
+        markdown.push(`#### ${group.label}`);
+        if (!group.rows.length) {
+          const empty = "該当する根拠はありません。";
+          appendText(container, "p", empty);
+          markdown.push(empty);
+          continue;
+        }
+        const table = document.createElement("table");
+        table.className = "evaluation-evidence-table";
+        table.setAttribute("aria-label", `${label}の${group.label}`);
+        const head = document.createElement("thead"), header = document.createElement("tr");
+        for (const caption of headers) appendText(header, "th", caption).setAttribute("scope", "col");
+        head.append(header);
+        const body = document.createElement("tbody");
+        for (const values of group.rows) {
+          const row = document.createElement("tr");
+          for (const value of values) appendText(row, "td", value);
+          body.append(row);
+        }
+        table.append(head, body);
+        container.append(table);
+        markdown.push([markdownRow(headers), "| --- | --- | --- |", ...group.rows.map(markdownRow)].join("\n"));
+      }
+    }
+    return markdown.join("\n\n");
+  }
+
   byId("save-cache").onclick = () => run(async signal => {
     const key = cacheKey(), articles = selectedArticles();
     if (!key || !articles.length || target?.authorUrl !== source.profile(byId("target").value)) return;
     const input = currentInput();
-    const evidence = preparedReviews && sameExtraction(input, preparedReviews.input) ?
-      { extraction: buildExtractionPrompt(input.extraction), endpoint: input.endpoint, model: input.model,
-        reviews: preparedReviews.reviews, completed: preparedReviews.completed ?? null } : null;
+    const evidence = preparedReviews?.reviews.length && sameExtraction(input, preparedReviews.input) ?
+      { format: 2, extraction: buildExtractionPrompt(input.extraction), endpoint: input.endpoint, model: input.model,
+        reviews: preparedReviews.reviews, evaluatedAt: preparedReviews.evaluatedAt ?? null } : null;
     const savedAt = new Date().toISOString();
     const fingerprints = await Promise.all(articles.map(article => globalThis.OshaberiNoteArticles.fingerprint(article)));
     signal.throwIfAborted();
@@ -562,9 +586,16 @@
     byId("results").replaceChildren();
     articles.forEach(showArticle);
     const input = currentInput();
-    if (input && evidence?.extraction === buildExtractionPrompt(input.extraction) &&
-        evidence.endpoint === input.endpoint && evidence.model === input.model) {
-      preparedReviews = { input, reviews: evidence.reviews, completed: evidence.completed };
+    if (input && evidence?.format === 2 && evidence.extraction === buildExtractionPrompt(input.extraction) &&
+        evidence.endpoint === input.endpoint && evidence.model === input.model &&
+        Array.isArray(evidence.reviews) && evidence.reviews.length <= articles.length &&
+        evidence.reviews.every((review, i) => review?.id === articles[i].articleId && typeof review.raw === "string")) {
+      const reviews = evidence.reviews.map(({ id, raw }, i) => ({ id, raw, title: articles[i].title }));
+      try {
+        for (const { raw } of reviews) rating.readEvidence(raw);
+        const evaluatedAt = reviews.length === articles.length && Number.isFinite(Date.parse(evidence.evaluatedAt)) ? evidence.evaluatedAt : undefined;
+        preparedReviews = { input, reviews, evaluatedAt };
+      } catch { /* 本文キャッシュから新しい評価を開始できる。 */ }
     }
     byId("status").textContent = `保存資料を読み込みました（${new Date(savedAt).toLocaleString("ja-JP")}保存・記事${articles.length}本）。${preparedReviews ? "根拠メモを再利用できます。" : ""}`;
   });
@@ -578,15 +609,10 @@
 
   byId("replay-cache").onclick = () => {
     if (byId("replay-cache").disabled) return;
-    return run(async signal => {
-      const input = currentInput(), { reviews, completed } = preparedReviews;
-      let assessment;
-      try { assessment = rating.parse(completed.raw, reviews); }
-      catch { throw new Error("保存済みの鑑定を読み取れませんでした。"); }
-      const promptMatches = await promptFingerprint(input.prompt) === completed.promptHash;
-      signal.throwIfAborted();
+    return run(() => {
+      const input = currentInput(), { reviews, evaluatedAt } = preparedReviews;
       clearEvaluation();
-      showAssessment(promptMatches ? input : { ...input, prompt: "" }, assessment, completed.evaluatedAt);
+      showAssessment(input, reviews, evaluatedAt);
       byId("status").textContent = "保存済みの鑑定を再集計しました。";
     });
   };
@@ -651,12 +677,11 @@
     if (api.storage?.local) void api.storage.local.get(key).then(values => {
       const saved = values[key];
       if (!edited && typeof saved === "string" && saved.length <= Number(field.getAttribute("maxlength"))) {
-        field.value = saved;
+        field.value = saved.replace(retiredExtractionSentence, "");
         refreshPreview();
       }
       controls();
     }).catch(() => { byId("status").textContent = `保存済みの${label}を読み込めませんでした。`; });
-    return refreshPreview;
   }
 
   for (const [index, [id, label]] of tabNames.entries()) {
@@ -673,15 +698,7 @@
   selectTab(0);
   byId("back").onclick = () => { if (tabIndex > 0) selectTab(tabIndex - 1, true); };
   byId("next").onclick = () => { if (tabIndex + 1 < tabNames.length) selectTab(tabIndex + 1, true); };
-  initializePrompt("extraction-prompt", extractionPromptKey, defaultExtractionPrompt, "extraction-prompt-preview", buildExtractionPrompt, "根拠抽出プロンプト");
-  const classificationInstructions = byId("classification-instructions");
-  classificationInstructions.value = defaultClassificationInstructions;
-  const refreshClassificationPreview = initializePrompt("prompt", promptKey, defaultPrompt, "classification-prompt", buildClassificationPrompt, "評価方針");
-  classificationInstructions.oninput = () => { refreshClassificationPreview(); controls(); };
-  byId("reset-classification-instructions").onclick = () => {
-    classificationInstructions.value = defaultClassificationInstructions;
-    classificationInstructions.oninput();
-  };
+  initializePrompt("extraction-prompt", extractionPromptKey, defaultExtractionPrompt, "extraction-prompt-preview", buildExtractionPrompt, "記事評価プロンプト");
   function updateSettings(value) {
     const next = core.readSettings(value);
     if (settings && (!next.enabled || next.ollamaUrl !== settings.ollamaUrl || next.ollamaModel !== settings.ollamaModel)) evaluationAbort?.abort();
