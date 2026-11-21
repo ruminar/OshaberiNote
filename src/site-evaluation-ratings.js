@@ -9,9 +9,10 @@
   ];
   const modelAxes = axes.filter(([key]) => !["speed", "stamina"].includes(key));
   const evidenceKinds = ["strength", "weakness"];
-  const levels = { strength: ["決め手", "有用", "軽微"], weakness: ["致命的", "影響あり", "影響なし"] };
+  const levels = { strength: ["決め手", "有用", "軽微"], weakness: ["致命的", "深刻", "影響あり", "影響なし"] };
   const levelLabels = Object.values(levels).flat();
   const speedThresholds = [360, 120, 60, 20];
+  const evidenceThresholds = [4, 3, 2, 1];
   const windowDays = 56, inactiveDays = 60, day = 86400000;
 
   function grade(value, thresholds) {
@@ -62,7 +63,7 @@
     }));
   }
 
-  function readEvidence(raw) {
+  function readEvidence(raw, legacySeverity = false) {
     let value;
     try { value = parseJson(raw); }
     catch { throw new Error("応答が有効なJSONではありません。"); }
@@ -78,11 +79,13 @@
         const field = `${label}の${kind === "strength" ? "長所" : "短所"}`;
         if (typeof entry[kind] !== "string") throw new Error(`${field}（${kind}）が文字列ではありません。`);
         const example = entry[kind].trim();
-        if (levelLabels.includes(example.replace(/^[「『"'\s]+|[」』"'。．.\s]+$/gu, ""))) {
+        const bareExample = example.replace(/^[「『"'\s]+|[」』"'。．.\s]+$/gu, "");
+        if (levelLabels.includes(bareExample)) {
           throw new Error(`${field}（${kind}）に重要度のラベルだけがあり、記事に基づく根拠がありません。`);
         }
         if ([...example].length > 240) throw new Error(`${field}（${kind}）の根拠が240文字を超えています。`);
-        const level = typeof entry[`${kind}_level`] === "string" ? entry[`${kind}_level`].trim() : null;
+        const rawLevel = typeof entry[`${kind}_level`] === "string" ? entry[`${kind}_level`].trim() : null;
+        const level = legacySeverity && kind === "weakness" && rawLevel === "致命的" ? "深刻" : rawLevel;
         if (example && level === "") throw new Error(`${field}（${kind}_level）に重要度がありません。`);
         if (level !== "" && !levels[kind].includes(level)) throw new Error(`${field}（${kind}_level）の重要度が指定の選択肢にありません。`);
         if (example) evidence.push({ kind, level, example });
@@ -92,7 +95,7 @@
   }
 
   function aggregate(reviews) {
-    const evidenceByArticle = reviews.map(({ title, raw }) => ({ title, evidence: readEvidence(raw) }));
+    const evidenceByArticle = reviews.map(({ title, raw, legacySeverity }) => ({ title, evidence: readEvidence(raw, legacySeverity) }));
     return Object.fromEntries(modelAxes.map(([key]) => {
       const counts = keyed(levelLabels, 0);
       const rows = { strength: [], weakness: [] };
@@ -110,5 +113,31 @@
     }));
   }
 
-  globalThis.OshaberiNoteEvaluationRatings = Object.freeze({ axes, speed, stamina, evidenceFormat, readEvidence, aggregate });
+  function provisionalRank(key, counts, speedRank, hasMedia, originalityRank) {
+    const { 決め手: decisive, 有用: useful, 致命的: fatal, 深刻: severe, 影響あり: material } = counts;
+    if (fatal || severe) return decisive ? unknown : "E";
+    let score = useful === 5 && !material ? 2 : Math.trunc(decisive + (useful - material) / 3);
+    if (key === "precision" && !decisive) score = useful - material;
+    if (key === "reach" && !decisive) {
+      if (originalityRank === "A") score = Math.trunc((useful + 1) / 2);
+      if (originalityRank === "B") score = Math.trunc((useful + 1) / 3);
+      if (speedRank === "A") score++;
+    }
+    if (key === "impact" && hasMedia) {
+      score += ["A", "B"].includes(speedRank) ? 2 : 1;
+    }
+    return grade(score, evidenceThresholds);
+  }
+
+  function rankEvidence(aggregated, speedRank, hasMedia) {
+    const originalityRank = provisionalRank("originality", aggregated.originality.counts);
+    return Object.fromEntries(modelAxes.map(([key]) => {
+      const axis = aggregated[key];
+      const rank = key === "originality" ? originalityRank : provisionalRank(key, axis.counts, speedRank, hasMedia, originalityRank);
+      const [strength, weakness] = evidenceKinds.map(kind => levels[kind].map(level => axis.counts[level]).join("/"));
+      return [key, { ...axis, rank, display: `${rank}　長所(${strength})｜ 短所(${weakness})` }];
+    }));
+  }
+
+  globalThis.OshaberiNoteEvaluationRatings = Object.freeze({ axes, speed, stamina, evidenceFormat, readEvidence, aggregate, rankEvidence });
 })();

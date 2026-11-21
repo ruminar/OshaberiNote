@@ -10,7 +10,7 @@
   const ollama = globalThis.OshaberiNoteOllama;
   const rating = globalThis.OshaberiNoteEvaluationRatings;
   const links = globalThis.OshaberiNoteChatTags.links;
-  const extractionPromptKey = "oshaberiNote.evaluation.articleAssessmentPrompt.v1";
+  const extractionPromptKey = "oshaberiNote.evaluation.articleAssessmentPrompt.v2";
   const retiredExtractionSentence = "根拠があるときだけ埋め、該当なし・資料不足は空文字としてください。";
   const cachePrefix = "oshaberiNote.evaluation.testCache.v1:";
   const tabNames = [
@@ -131,7 +131,7 @@
     byId("add").disabled = byId("candidate").disabled || slots.every(slot => slot.value.trim());
     byId("cancel").disabled = !busy;
     for (const slot of slots) slot.disabled = busy || !target;
-    for (const id of ["notes", "extraction-prompt", "reset-extraction-prompt"]) byId(id).disabled = busy;
+    for (const id of ["notes", "media-impact", "extraction-prompt", "reset-extraction-prompt"]) byId(id).disabled = busy;
     const snapshot = currentInput();
     const current = result && sameInput(snapshot, result.input);
     const key = api.storage?.local && cacheKey();
@@ -208,6 +208,7 @@
       for (const slot of slots) slot.value = "";
       byId("results").replaceChildren();
       byId("notes").value = "";
+      byId("media-impact").checked = false;
       preparedReviews = undefined;
       collected.clear(); clearEvaluation();
     }
@@ -299,7 +300,7 @@
       const notes = byId("notes").value.trim();
       const postDates = target.postDates ?? [], pinnedDates = target.pinnedDates ?? [];
       const profileLikes = target.candidates.map(({ articleId, likeCount }) => ({ articleId, likeCount }));
-      return { author, articles, endpoint, model, notes, extraction, postDates, pinnedDates, profileLikes };
+      return { author, articles, endpoint, model, notes, extraction, postDates, pinnedDates, profileLikes, hasMedia: byId("media-impact").checked };
     } catch { return null; }
   }
 
@@ -310,7 +311,7 @@
   }
 
   function sameInput(input, previous) {
-    return sameExtraction(input, previous) &&
+    return sameExtraction(input, previous) && input.hasMedia === previous.hasMedia &&
       JSON.stringify([input.postDates, input.pinnedDates]) === JSON.stringify([previous.postDates, previous.pinnedDates]) &&
       JSON.stringify(input.profileLikes) === JSON.stringify(previous.profileLikes) &&
       input.articles.every((article, i) => article.publishedAt === previous.articles[i].publishedAt);
@@ -338,7 +339,7 @@
     for (const [key, label, meaning] of rating.axes) {
       const row = document.createElement("tr");
       const heading = document.createElement("th"); heading.setAttribute("scope", "row"); heading.textContent = label;
-      const outcome = document.createElement("td"); outcome.textContent = ratings[key].rank ?? ratings[key].breakdown;
+      const outcome = document.createElement("td"); outcome.textContent = ratings[key].display ?? ratings[key].rank;
       const meaningCell = document.createElement("td"); meaningCell.textContent = meaning;
       row.append(heading, outcome, meaningCell); rows.append(row);
     }
@@ -427,18 +428,19 @@
     "この記事1本から、各評価軸の観察事実を抽出してください。",
     "破壊力（impact）は面白さ・意外性・印象の強さです。作者が読者に面白いと感じてもらうためにどのような工夫を文章にしているかを確認し、思わず笑ってしまうなど共感を呼ぶような項目が複数あれば評価を上げ、なければ下げます。",
     "射程距離（reach）は想定読者が得られる、情報知識や利益、文学的体験、文化的価値など。独自のツールやプロンプトなどの提供も独自性に応じて高く評価する。普遍的な価値が認められるなら加算。",
-    "精密動作性（precision）は明瞭さ・構成・読みやすさ。専門性や意図的な難解さ自体は弱みとしない。",
-    "成長性（originality）は現在の記事の着眼点・構成・表現の独自性。作家性・個性。本人の体験であることや、よくある情報を明瞭に説明したことだけで強みとせず、将来の成長を予測しない。独自性が高く、情報価値があり、模倣が困難であれば加点。",
+    "精密動作性（precision）は明瞭さ・構成・読みやすさ。専門性や意図的な難解さ自体は弱みとしない。リンクカードのタイトルや著者名が未取得なのは、遅延読み込みが間に合っていないだけなので減点しない。",
+    "成長性（originality）は現在の記事の着眼点・構成・表現の独自性。作家性・個性。本人の体験であることや、よくある情報を明瞭に説明したことだけで強みとせず、将来の成長を予測しない。独自性が高く、情報価値があり、模倣が困難であれば加点。決め手と判断する場合、この記事がもし失われた場合にどのような影響が発生するかを考慮してください。影響がないなら決め手にはなりません。他の人に簡単にできることも決め手にはなりません。",
     "いずれの項目においても、理解が難しいことを弱点に数えないでください。高度な情報を記事に書くことにペナルティを生じさせてはいけません。ただし、明らかに不要な理解困難さが認められる場合は、精密動作性（precision）に短所として記録してください。",
     "同じジャンル・目的の記事と比べ、strength（長所）、weakness（短所）ごとに0～1件を記録してください。",
     "各欄には何が書かれているかと、それがなぜその軸の根拠になるかを、短い引用または具体例を使い日本語240文字以内で記録してください。",
     "弱みは、何が読者の理解や体験を妨げるかを具体的に説明できるときだけ記録してください。その軸と無関係な長所や、単に標準的である点は弱みに入れません。",
     "標準的な点を弱みに含めず、ランク、採点、総評、添削、代表選定は行いません。"
   ].join("\n");
+  const weaknessInstruction = "弱みはそのレベルに応じて「致命的」「深刻」「影響あり」「影響なし」を、weakness_levelに保持。致命的はその軸で記事の価値がほぼ成立しない場合、深刻は価値が大きく損なわれる場合に使ってください。";
   const extractionFormat = [
     "strengthとweaknessは根拠文の欄です。記事の具体的な記述と、なぜ評価の根拠になるかを書いてください。「有用」「軽微」「影響なし」などの分類名だけをこの2欄に入れてはいけません。",
     "強みはそのレベルに応じて「決め手」「有用」「軽微」を、strength_levelに保持。",
-    "弱みはそのレベルに応じて「致命的」「影響あり」「影響なし」を、weakness_levelに保持。",
+    weaknessInstruction,
     "根拠が空文字なら対応する重要度も空文字にしてください。根拠がある場合は対応する重要度を選んでください。",
     '1軸の構造例（例文を転用しない）: {"strength":"手順の前に必要な道具をまとめてあり、読者が準備しやすい。","weakness":"","strength_level":"有用","weakness_level":""}',
     "impact、reach、precision、originalityをキーとし、各値にはstrengthとweaknessとstrength_levelとweakness_levelを持つJSONを返してください。この出力形式を優先してください。"
@@ -448,6 +450,7 @@
   byId("run").onclick = () => {
     const input = currentInput();
     if (!input || byId("run").disabled) return;
+    if (preparedReviews?.evaluatedAt && sameExtraction(input, preparedReviews.input)) return replayAssessment(input);
     return sendEvaluation(input, async ask => {
       if (!preparedReviews || !sameExtraction(input, preparedReviews.input)) preparedReviews = { input, reviews: [] };
       const { reviews } = preparedReviews;
@@ -471,9 +474,11 @@
   };
 
   function showAssessment(input, reviews, evaluatedAt) {
-    const ratings = { ...rating.aggregate(reviews), speed: rating.speed(input.profileLikes), stamina: rating.stamina(input.postDates, Date.parse(evaluatedAt), input.pinnedDates) };
+    const speed = rating.speed(input.profileLikes);
+    const ratings = { ...rating.rankEvidence(rating.aggregate(reviews), speed.rank, input.hasMedia), speed,
+      stamina: rating.stamina(input.postDates, Date.parse(evaluatedAt), input.pinnedDates) };
     const overview = `評価した記事\n${input.articles.map(article => `- ${article.title}\n  ${article.url}`).join("\n")}`;
-    const table = ["| 能力 | 分類件数・ランク | 評価内容 |", "| --- | --- | --- |", ...rating.axes.map(([key, label, meaning]) => `| ${label} | ${ratings[key].rank ?? ratings[key].breakdown} | ${meaning} |`)].join("\n");
+    const table = ["| 能力 | 分類件数・ランク | 評価内容 |", "| --- | --- | --- |", ...rating.axes.map(([key, label, meaning]) => `| ${label} | ${ratings[key].display ?? ratings[key].rank} | ${meaning} |`)].join("\n");
     const meta = `${input.author.name} · ${input.author.url}\n評価日時 ${new Date(evaluatedAt).toLocaleString("ja-JP")} · モデル ${input.model}\n参照記事 ${input.articles.length}本（今回読んだ記事に基づく鑑定）`;
     const detail = showAssessmentDetail(ratings);
     result = { input, evaluatedAt, ratings, meta, summary: `${table}\n\n${overview}`, detail };
@@ -548,13 +553,14 @@
     if (!key || !articles.length || target?.authorUrl !== source.profile(byId("target").value)) return;
     const input = currentInput();
     const evidence = preparedReviews?.reviews.length && sameExtraction(input, preparedReviews.input) ?
-      { format: 2, extraction: buildExtractionPrompt(input.extraction), endpoint: input.endpoint, model: input.model,
+      { format: 3, extraction: buildExtractionPrompt(input.extraction), endpoint: input.endpoint, model: input.model,
         reviews: preparedReviews.reviews, evaluatedAt: preparedReviews.evaluatedAt ?? null } : null;
     const savedAt = new Date().toISOString();
     const fingerprints = await Promise.all(articles.map(article => globalThis.OshaberiNoteArticles.fingerprint(article)));
     signal.throwIfAborted();
     try {
-      await api.storage.local.set({ [key]: { target, articles, savedAt, fingerprints, notes: byId("notes").value, evidence } });
+      await api.storage.local.set({ [key]: { target, articles, savedAt, fingerprints, notes: byId("notes").value,
+        hasMedia: byId("media-impact").checked, evidence } });
     } catch {
       throw new Error("テスト用キャッシュを保存できませんでした。ブラウザの保存容量を確認してください。");
     }
@@ -565,7 +571,7 @@
     const key = cacheKey(), url = source.profile(byId("target").value);
     const cached = (await api.storage.local.get(key))[key];
     if (!cached) throw new Error("指定した作者のテスト用キャッシュがありません。");
-    const { target: profile, articles, notes, savedAt, fingerprints, evidence } = cached;
+    const { target: profile, articles, notes, savedAt, fingerprints, evidence, hasMedia } = cached;
     if (profile?.authorUrl !== url || !Array.isArray(profile.candidates) || !Array.isArray(articles) || !articles.length ||
         articles.length > slots.length || typeof notes !== "string" || !Number.isFinite(Date.parse(savedAt)) ||
         !Array.isArray(fingerprints) || fingerprints.length !== articles.length) throw new Error("保存済み資料の形式を確認できません。");
@@ -582,17 +588,24 @@
     collected = new Map(articles.map(article => [article.url, article]));
     slots.forEach((slot, index) => { slot.value = urls[index] ?? ""; });
     byId("notes").value = notes;
+    byId("media-impact").checked = hasMedia === true;
     showProfile(profile);
     byId("results").replaceChildren();
     articles.forEach(showArticle);
     const input = currentInput();
-    if (input && evidence?.format === 2 && evidence.extraction === buildExtractionPrompt(input.extraction) &&
+    const legacySeverity = evidence?.format === 2;
+    const savedExtraction = legacySeverity && typeof evidence.extraction === "string"
+      ? evidence.extraction.replace(/^弱みはそのレベルに応じて「(?:深刻|致命的)」「影響あり」「影響なし」を、weakness_levelに保持。$/m, weaknessInstruction)
+      : evidence?.extraction;
+    if (input && (legacySeverity || evidence?.format === 3) && savedExtraction === buildExtractionPrompt(input.extraction) &&
         evidence.endpoint === input.endpoint && evidence.model === input.model &&
         Array.isArray(evidence.reviews) && evidence.reviews.length <= articles.length &&
         evidence.reviews.every((review, i) => review?.id === articles[i].articleId && typeof review.raw === "string")) {
-      const reviews = evidence.reviews.map(({ id, raw }, i) => ({ id, raw, title: articles[i].title }));
+      const reviews = evidence.reviews.map((review, i) => ({
+        id: review.id, raw: review.raw, title: articles[i].title, legacySeverity: legacySeverity || review.legacySeverity === true
+      }));
       try {
-        for (const { raw } of reviews) rating.readEvidence(raw);
+        for (const review of reviews) rating.readEvidence(review.raw, review.legacySeverity);
         const evaluatedAt = reviews.length === articles.length && Number.isFinite(Date.parse(evidence.evaluatedAt)) ? evidence.evaluatedAt : undefined;
         preparedReviews = { input, reviews, evaluatedAt };
       } catch { /* 本文キャッシュから新しい評価を開始できる。 */ }
@@ -609,13 +622,17 @@
 
   byId("replay-cache").onclick = () => {
     if (byId("replay-cache").disabled) return;
+    return replayAssessment(currentInput());
+  };
+
+  function replayAssessment(input) {
     return run(() => {
-      const input = currentInput(), { reviews, evaluatedAt } = preparedReviews;
+      const { reviews, evaluatedAt } = preparedReviews;
       clearEvaluation();
       showAssessment(input, reviews, evaluatedAt);
       byId("status").textContent = "保存済みの鑑定を再集計しました。";
     });
-  };
+  }
 
   byId("discuss").onclick = () => {
     if (byId("discuss").disabled) return;
@@ -711,6 +728,7 @@
   }
   for (const slot of slots) slot.oninput = () => { if (target) refreshCandidates(); controls(); };
   for (const input of [byId("target"), byId("notes"), byId("question")]) input.oninput = controls;
+  byId("media-impact").onchange = controls;
   byId("cancel").onclick = () => controller?.abort();
   byId("stop").onclick = () => evaluationAbort?.abort();
   api.permissions?.onRemoved?.addListener(() => evaluationAbort?.abort());
