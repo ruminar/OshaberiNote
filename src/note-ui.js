@@ -200,6 +200,32 @@
     svg.setAttribute("stroke-linecap", "round"); svg.setAttribute("stroke-linejoin", "round");
     path.setAttribute("d", type === "membership" ? core.membershipIconPath : core.bookIconPath); svg.append(path); return svg;
   }
+  function hasClasses(element, names) { return Boolean(element && names.every(name => element.classList.contains(name))); }
+  const membershipLock = "M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2Zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2Zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2Z";
+  function isMembershipLock(path) {
+    return path.getAttribute("d") === membershipLock && Boolean(path.closest("svg") && path.closest("h3"));
+  }
+  function isPaidPrice(price) {
+    return price.classList.contains("text-text-success") && isPaidAmount(price.textContent);
+  }
+  function isPaidAmount(text) {
+    return /^¥\s*[1-9]\d*(?:,\d{3})*\s*[〜～]?\s*$/.test(text.trim());
+  }
+  function isArticlePrice(price) {
+    if (isPaidPrice(price)) return true;
+    // 拡散等を条件に無料になる有料記事。0円だけでは無料記事と区別できない。
+    if (!price.classList.contains("text-text-success") || !/^¥\s*0\s*[〜～~]\s*$/.test(price.textContent.trim())) return false;
+    const holder = price.parentElement, row = holder?.parentElement;
+    return holder?.tagName === "DIV" && holder.classList.contains("text-text-success") &&
+      row?.tagName === "DIV" && hasClasses(row, ["flex", "items-center", "gap-2"]) &&
+      [...row.children].some(badge => badge.tagName === "SPAN" &&
+        hasClasses(badge, ["bg-surface-offer", "rounded-full"]) && badge.textContent.trim() === "割引あり");
+  }
+  function hasPaidArticleOffer(container) {
+    return [...container.querySelectorAll("span[class]")].some(isArticlePrice) ||
+      [...container.querySelectorAll("path[d]")].some(isMembershipLock);
+  }
+
   function create(doc, win, actions = {}) {
     const likeVisibility = createLikeVisibility(doc);
     const discovery = globalThis.OshaberiNoteTagDiscovery;
@@ -1100,26 +1126,6 @@
       return profilePaidAllowance?.userId === userId.toLowerCase() ? profilePaidAllowance.allowed : core.authorRule(settings, userId)?.action === "allow";
     }
     const paidHidden = "data-oshaberi-note-paid-hidden";
-    const membershipLock = "M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2Zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2Zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2Z";
-    function isMembershipLock(path) {
-      return path.getAttribute("d") === membershipLock && Boolean(path.closest("svg") && path.closest("h3"));
-    }
-    function isPaidPrice(price) {
-      return price.classList.contains("text-text-success") && isPaidAmount(price.textContent);
-    }
-    function isPaidAmount(text) {
-      return /^¥\s*[1-9]\d*(?:,\d{3})*\s*[〜～]?\s*$/.test(text.trim());
-    }
-    function isArticlePrice(price) {
-      if (isPaidPrice(price)) return true;
-      // 拡散等を条件に無料になる有料記事。0円だけでは無料記事と区別できない。
-      if (!price.classList.contains("text-text-success") || !/^¥\s*0\s*[〜～~]\s*$/.test(price.textContent.trim())) return false;
-      const holder = price.parentElement, row = holder?.parentElement;
-      return holder?.tagName === "DIV" && holder.classList.contains("text-text-success") &&
-        row?.tagName === "DIV" && hasClasses(row, ["flex", "items-center", "gap-2"]) &&
-        [...row.children].some(badge => badge.tagName === "SPAN" &&
-          hasClasses(badge, ["bg-surface-offer", "rounded-full"]) && badge.textContent.trim() === "割引あり");
-    }
     let paidDirty = true, paidSignature;
     function isMagazineCard(card) {
       return card.tagName === "DIV" && ["relative", "mb-[6px]", "mr-[6px]", "flex", "w-[calc(100%-6px)]"].every(name => card.classList.contains(name));
@@ -1166,8 +1172,7 @@
         link.classList.contains("inset-0") && link.getAttribute("title") && link.getAttribute("aria-label") && core.isArticle(link.href) &&
         link.parentElement.querySelector("h3") &&
         !isAllowedCard(card, link, settings) &&
-        ([...link.parentElement.querySelectorAll("span[class]")].some(isArticlePrice) ||
-          [...link.parentElement.querySelectorAll("path[d]")].some(isMembershipLock)));
+        hasPaidArticleOffer(link.parentElement));
     }
     function isAllowedCard(card, link, settings) {
       if (!settings.noteUserId || settings.authorWarning) return false;
@@ -1691,7 +1696,6 @@
     const magazinePromotions = new Set();
     const magazinePromotionHidden = "data-oshaberi-note-magazine-promotion-hidden";
     let magazinePromotionsDirty = true, magazinePromotionsSignature;
-    function hasClasses(element, names) { return Boolean(element && names.every(name => element.classList.contains(name))); }
     function notesBanner(block) {
       if (block.tagName !== "DIV" || !hasClasses(block, ["hidden", "md:block"])) return false;
       return [...block.children].some(scroller => scroller.tagName === "DIV" &&
@@ -2583,5 +2587,5 @@
       hiddenCards.clear(); doc.removeEventListener?.("visibilitychange", onVisibility);
     } };
   }
-  globalThis.OshaberiNoteUi = Object.freeze({ create, createLikeVisibility, isOfficialHeaderLogo });
+  globalThis.OshaberiNoteUi = Object.freeze({ create, createLikeVisibility, isOfficialHeaderLogo, hasPaidArticleOffer });
 })();

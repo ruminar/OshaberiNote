@@ -14,6 +14,7 @@
   const levelLabels = Object.values(levels).flat();
   const speedThresholds = [360, 120, 60, 20];
   const windowDays = 56, inactiveDays = 60, day = 86400000;
+  const displayNumber = value => value.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
 
   function grade(value, thresholds) {
     return ["A", "B", "C", "D"][thresholds.findIndex(minimum => value >= minimum)] ?? "E";
@@ -21,11 +22,12 @@
 
   function speed(articles) {
     const counts = articles.map(article => article.likeCount).filter(value => Number.isSafeInteger(value) && value >= 0);
-    if (!counts.length || counts.length !== articles.length) return { rank: unknown, reason: `クリエイターページの一覧でスキ数を確認できた記事は${counts.length} / ${articles.length}本です。` };
+    if (!counts.length) return { rank: unknown, reason: "クリエイターページの一覧でスキ数を確認できた記事がありません。" };
     const total = counts.reduce((sum, count) => sum + count, 0);
     if (!Number.isSafeInteger(total)) return { rank: unknown, reason: "スキ数の合計を正確に計算できませんでした。" };
     const average = total / counts.length;
-    return { rank: grade(average, speedThresholds), reason: `クリエイターページの一覧 ${counts.length}本のスキ合計${total}件 ÷ ${counts.length}本で、平均${average.toLocaleString("ja-JP", { maximumFractionDigits: 2 })}件です。ランク境界は試用値です。` };
+    return { rank: grade(average, speedThresholds), metric: `平均${displayNumber(average)}スキ`,
+      reason: `クリエイターページの一覧 ${counts.length}本のスキ合計${total}件 ÷ ${counts.length}本で、平均${displayNumber(average)}件です。ランク境界は試用値です。` };
   }
 
   const bodyLength = body => [...body.replace(/\s/gu, "")].length;
@@ -36,34 +38,34 @@
     }
     const linkCards = articles.reduce((sum, { body }) => sum + (body.match(/^\[リンクカード\][ \t]*\r?$/gm)?.length ?? 0), 0);
     if (linkCards >= 500) {
-      return { rank: unknown, reason: `選んだ記事のリンクカードが合計${linkCards}件あり、500件以上のため射程距離は判定不能です。` };
+      return { rank: unknown, metric: `リンクカード${displayNumber(linkCards)}件`,
+        reason: `選んだ記事のリンクカードが合計${linkCards}件あり、500件以上のため射程距離は判定不能です。` };
     }
     const total = articles.reduce((sum, { body }) => sum + bodyLength(
       body.replace(/^\[リンクカード\][ \t]*\r?\n(?:[ \t]*(?:種類|タイトル|著者|紹介文|URL|埋め込みURL)：[^\r\n]+(?:\r?\n|$))+/gm, "")
     ), 0);
     const average = total / articles.length;
-    const display = value => value.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
-    return { rank: grade(average, [20000, 10000, 4000, 1000]),
-      reason: `評価した${articles.length}本の本文合計${display(total)}字 ÷ ${articles.length}本で、平均${display(average)}字です（リンクカード情報・空白・改行を除く）。` };
+    return { rank: grade(average, [20000, 10000, 4000, 1000]), metric: `平均${displayNumber(average)}字`,
+      reason: `評価した${articles.length}本の本文合計${displayNumber(total)}字 ÷ ${articles.length}本で、平均${displayNumber(average)}字です（リンクカード情報・空白・改行を除く）。` };
   }
 
-  function stamina(dates, now, pinnedDates = []) {
-    const timestamps = dates.map(value => typeof value === "string" ? Date.parse(value) : NaN);
-    const ordered = timestamps.length >= 2 && timestamps.every((value, index) => Number.isFinite(value) && value <= now && (!index || value <= timestamps[index - 1]));
-    const pinned = pinnedDates.map(value => typeof value === "string" ? Date.parse(value) : NaN);
-    if (!ordered || pinned.some(value => !Number.isFinite(value) || value > now)) return { rank: unknown, reason: "公開記事一覧から投稿順と投稿日を確認できませんでした。" };
-    const newest = Math.max(timestamps[0], ...pinned);
+  function stamina(dates, now) {
+    const timestamps = dates.map(value => typeof value === "string" ? Date.parse(value) : NaN).filter(Number.isFinite);
+    const ordered = timestamps.length >= 2 && timestamps.every((value, index) => value <= now && (!index || value <= timestamps[index - 1]));
+    if (!ordered) return { rank: unknown, reason: "公開記事一覧から、固定記事を除く無料記事2本以上の投稿日と新着順を確認できませんでした。" };
+    const newest = timestamps[0];
     const latest = new Date(newest).toISOString().slice(0, 10);
-    if (now - newest >= inactiveDays * day) return { rank: "E", reason: `公開一覧の最新投稿日は${latest}で、60日以上経過しています。` };
-    const windowStart = now - windowDays * day;
+    if (now - newest >= inactiveDays * day) return { rank: "E", metric: `最新投稿 ${latest}`,
+      reason: `公開一覧の最新投稿日は${latest}で、60日以上経過しています。` };
+    const windowStart = newest - windowDays * day;
     const since = Math.max(windowStart, timestamps.at(-1));
-    const observedDays = Math.max(1, Math.ceil((now - since) / day));
-    const count = [...timestamps, ...pinned].filter(value => value >= since).length;
+    const observedDays = Math.max(1, Math.ceil((newest - since) / day));
+    const count = timestamps.filter(value => value >= since).length;
     const weekly = count * 7 / observedDays;
     const rank = weekly >= 7 ? "A" : weekly >= 2 ? "B" : weekly >= 1 ? "C" : "D";
-    const period = since > windowStart ? `初回の公開一覧で確認した期間（${observedDays}日間）` : `公開一覧から確認した直近${windowDays}日`;
-    const weeklyText = weekly.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
-    return { rank, reason: `${period}は${count}本（週平均${weeklyText}本）、最新投稿は${latest}です。` };
+    const period = since > windowStart ? `初回の公開一覧で確認した期間（${observedDays}日間）` : `最新投稿日までの${windowDays}日間`;
+    const metric = `週平均${displayNumber(weekly)}本`;
+    return { rank, metric, reason: `${period}は無料記事${count}本（固定記事を除く、${metric}）、最新投稿は${latest}です。` };
   }
 
   const string = { type: "string" };

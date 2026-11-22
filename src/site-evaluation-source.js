@@ -65,14 +65,15 @@
     const authorUrl = profile(url);
     const canonicals = [...doc.querySelectorAll('link[rel="canonical"]')];
     if (canonicals.length !== 1 || profile(canonicals[0].href) !== authorUrl) throw new Error("プロフィールのURLと表示内容を確認できません。");
-    const visible = node => Boolean(node?.getClientRects().length && win.getComputedStyle(node).visibility === "visible" && !node.closest('[data-oshaberi-note-owned], [hidden], [aria-hidden="true"]'));
+    const visible = node => Boolean(node?.getClientRects().length && win.getComputedStyle(node).visibility === "visible" &&
+      !node.closest('[data-oshaberi-note-paid-hidden]') && !node.closest('[data-oshaberi-note-owned], [hidden], [aria-hidden="true"]'));
     const headings = [...doc.querySelectorAll("h1")].filter(visible);
     if (headings.length !== 1 || !headings[0].textContent.trim()) throw new Error("公開プロフィールの表示名を確認できません。");
     const name = core.authorName(headings[0].textContent.trim());
     const main = doc.getElementById("main-content");
     const hasArticleList = [...(main?.querySelectorAll("h2") ?? [])].some(node => visible(node) && node.textContent.trim() === "記事一覧") &&
-      !main.querySelector('[data-oshaberi-note-paid-hidden], [data-oshaberi-note-author-hidden]');
-    const candidates = new Map(), countsById = new Map();
+      !main.querySelector('[data-oshaberi-note-author-hidden]');
+    const candidates = new Map(), countsById = new Map(), paidIds = new Set();
     for (const link of main?.querySelectorAll("a[href]") ?? []) {
       if (!visible(link)) continue;
       let address;
@@ -80,6 +81,7 @@
       const card = articleCard(link);
       const title = (link.getAttribute("title") || link.getAttribute("aria-label") || link.textContent).trim();
       if (!title || title.length > 500) continue;
+      if (card && globalThis.OshaberiNoteUi?.hasPaidArticleOffer?.(card)) paidIds.add(address.articleId);
       const pinned = Boolean(card && [...card.querySelectorAll("span, p")].some(node => visible(node) && node.textContent.trim() === "固定された記事"));
       const publishedAt = card ? publicationDate(card.querySelectorAll("time[datetime]")) : null;
       const counts = countsById.get(address.articleId) ?? new Set();
@@ -94,8 +96,7 @@
       return { ...item, likeCount: counts?.size === 1 ? [...counts][0] : null };
     });
     return { authorUrl, name, candidates: entries.sort((a, b) => Number(b.pinned) - Number(a.pinned)),
-      postDates: hasArticleList ? entries.filter(item => !item.pinned).map(item => item.publishedAt) : [],
-      pinnedDates: hasArticleList ? entries.filter(item => item.pinned).map(item => item.publishedAt) : [] };
+      postDates: hasArticleList ? entries.filter(item => !item.pinned && !paidIds.has(item.articleId)).map(item => item.publishedAt) : [] };
   }
 
   if (api?.runtime?.id && globalThis.location?.origin === "https://note.com" && window === window.top) {

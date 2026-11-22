@@ -191,6 +191,10 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
     [axis, evidenceEntry({ strength: '有用', weakness: '影響なし', strength_level: '軽微', weakness_level: '影響なし' })])));
   let tab, available = false, allowArticle = false, articleGranted = false, connectionChecks = 0, invalidAssessment = true;
   let tick, now = 0, noteReads = 0;
+  let settingsChanged;
+  const settings = { enabled: true, ollamaUrl: endpoint, ollamaModel: 'test' };
+  const today = Date.now();
+  const postDates = [1, 8].map(days => new Date(today - days * 86400000).toISOString());
   const permissionRequests = [], promptWrites = [];
   const extractionPromptKey = 'oshaberiNote.evaluation.articleAssessmentPrompt.v3';
   const retiredSentence = '根拠があるときだけ埋め、該当なし・資料不足は空文字としてください。';
@@ -218,7 +222,7 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
         noteReads++;
         assert.equal(id, 8); assert.equal(tab.url, url);
         const articleId = url.split('/').at(-1);
-        return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates }
+        return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates, postDates }
           : { url, articleId, title: `題 ${articleId}`, author: '作者', body: `本文 ${articleId}`, likeCount: articleId === 'n123' ? 1000 : 22 } };
       }
     },
@@ -241,7 +245,7 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
     clearInterval(id) { assert.equal(id, 1); tick = undefined; },
     navigator: { clipboard: { writeText: async text => { copies.push(text); } } },
     OshaberiNoteChatState: { limits: { context: 256000 } },
-    OshaberiNotePlatform: { load: async () => ({ enabled: true, ollamaUrl: endpoint, ollamaModel: 'test' }), subscribe() {} },
+    OshaberiNotePlatform: { load: async () => settings, subscribe(listener) { settingsChanged = listener; } },
     OshaberiNoteOllama: { withGeneration: async task => {
       if (!available) throw new Error('別の画面で応答を生成中です。');
       await task(async (url, model, messages, signal, onText, options) => {
@@ -255,6 +259,11 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
           assert.match(byId('progress-detail').textContent, /0分02秒.*応答を待っています/);
           byId('tab-extraction-prompt').onclick();
           assert.equal(byId('progress').hidden, false);
+        }
+        if (data.article?.body.startsWith('試験用の長文') && !data.article.bodyTruncated) {
+          throw Object.assign(new Error('コンテキスト超過'), {
+            code: 'OLLAMA_CONTEXT_LIMIT', inputTokens: 25011, contextTokens: 16384
+          });
         }
         onText('応答の途中');
         assert.match(byId('progress-detail').textContent, /5文字を受信/);
@@ -385,9 +394,9 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   assert.equal(byId('detail').querySelector('a').href, 'https://example.org/detail');
   const outcomes = byId('rating-rows').children.map(row => row.children[1].textContent);
   assert.equal(outcomes[0], 'E　長所(0/0/3/0)｜ 短所(0/0/0/0)');
-  assert.equal(outcomes[1], 'D');
-  assert.equal(outcomes[2], 'E');
-  assert.equal(outcomes[3], '判定不能');
+  assert.equal(outcomes[1], 'D（平均25スキ）');
+  assert.equal(outcomes[2], 'E（平均6字）');
+  assert.equal(outcomes[3], 'B（週平均2本）');
   assert.equal(outcomes[4], 'A　長所(0/3/0/0)｜ 短所(0/0/0/0)');
   assert.equal(outcomes[5], 'E　長所(0/0/0/0)｜ 短所(0/0/3/0)');
   const tables = byId('detail').querySelectorAll('table');
@@ -431,6 +440,21 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   byId('copy-discussion').checked = true;
   await byId('copy-all').onclick();
   assert.match(copies[1], /補足文案.*\[資料\]\(https:\/\/example\.org\/reference\)/);
+  assert.match(copies[1], /スピード \| D（平均25スキ）/);
+  settingsChanged({ ...settings, dashboardDisabled: true });
+  assert.deepEqual(byId('rating-rows').children.map(row => row.children[1].textContent), ['E', 'D', 'E', 'B', 'A', 'E']);
+  assert.equal(byId('rank-heading').textContent, 'ランク');
+  assert.doesNotMatch(byId('profile-name').textContent, /スキ合計|週平均/);
+  assert.doesNotMatch(byId('detail').textContent, /スキ合計|平均6字|週平均|圧倒的 0件/);
+  assert.match(byId('detail').textContent, /興味を引いた構成/);
+  await byId('copy-all').onclick();
+  assert.match(copies.at(-1), /スピード \| D \|/);
+  assert.doesNotMatch(copies.at(-1), /平均25スキ|平均6字|週平均|長所\(|短所\(|圧倒的 0件/);
+  assert.match(copies.at(-1), /興味を引いた構成/);
+  settingsChanged(settings);
+  assert.deepEqual(byId('rating-rows').children.map(row => row.children[1].textContent), outcomes);
+  assert.equal(byId('rank-heading').textContent, '分類件数・ランク');
+  assert.equal(calls.length, 5);
   assert.match(byId('result').textContent, /評価した記事/);
   byId('extraction-prompt').value = '   '; byId('extraction-prompt').oninput();
   assert.equal(byId('run').disabled, true);
@@ -472,7 +496,7 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   assert.equal(byId('replay-cache').disabled, false);
   await byId('replay-cache').onclick();
   assert.match(byId('status').textContent, /再集計しました/);
-  assert.equal(byId('rating-rows').children[2].children[1].textContent, 'E');
+  assert.equal(byId('rating-rows').children[2].children[1].textContent, 'E（平均6字）');
   assert.match(byId('detail').textContent, /本文合計18字 ÷ 3本で、平均6字/);
   assert.match(byId('detail').textContent, /長所 圧倒的 0件・顕著 3件/);
   assert.equal(previous.format, 5);
@@ -500,18 +524,26 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   await byId('replay-cache').onclick();
   assert.equal(calls.length, 11);
   const expectedRanks = byId('rating-rows').children.map(row => row.children[1].textContent);
-  expectedRanks[2] = '判定不能';
+  expectedRanks[2] = '判定不能（リンクカード500件）';
   const originalCache = structuredClone(cached.get(cacheKey));
   const card = '[リンクカード]\nタイトル：紹介記事\nURL：https://example.org/n/n123\n';
   const linkCollection = cached.get(cacheKey);
-  linkCollection.articles[0].body = card.repeat(300) + '本文のあるリンク集'.repeat(100);
+  linkCollection.articles[0].body = '試験用の長文😀'.repeat(3500) + '\n' + card.repeat(300);
   linkCollection.articles[1].body = card.repeat(200);
   linkCollection.fingerprints = await Promise.all(linkCollection.articles.map(article => context.OshaberiNoteArticles.fingerprint(article)));
   delete linkCollection.evidence;
   await byId('load-cache').onclick();
   assert.equal(byId('replay-cache').disabled, true);
   await byId('run').onclick();
-  assert.equal(calls.length, 14);
+  assert.equal(calls.length, 15);
+  const fullArticle = calls[11].article, truncatedArticle = calls[12].article;
+  assert.equal(fullArticle.body, linkCollection.articles[0].body);
+  assert.equal(truncatedArticle.bodyTruncated, true);
+  assert.equal(truncatedArticle.articleId, fullArticle.articleId);
+  assert.ok(fullArticle.body.startsWith(truncatedArticle.body));
+  assert.ok(!truncatedArticle.body.includes('[リンクカード]'));
+  assert.doesNotMatch(truncatedArticle.body, /[\uD800-\uDBFF]$/);
+  assert.match(byId('result').textContent, /Ollamaには本文の先頭部分を送信/);
   assert.match(byId('detail').textContent, /合計500件あり.*射程距離は判定不能/);
   assert.deepEqual(byId('rating-rows').children.map(row => row.children[1].textContent), expectedRanks);
   assert.equal(byId('article-responses').hidden, false);
@@ -519,7 +551,8 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   await byId('load-cache').onclick();
   assert.equal(byId('replay-cache').disabled, false);
   await byId('replay-cache').onclick();
-  assert.equal(calls.length, 14);
+  assert.equal(calls.length, 15);
+  assert.match(byId('result').textContent, /Ollamaには本文の先頭部分を送信/);
   assert.deepEqual(byId('rating-rows').children.map(row => row.children[1].textContent), expectedRanks);
   cached.set(cacheKey, originalCache);
   await byId('load-cache').onclick();
@@ -548,18 +581,23 @@ test('能力鑑定は投稿頻度の境界と資料不足を区別する', () =>
   for (const [count, rank] of [[56, 'A'], [16, 'B'], [8, 'C'], [7, 'D']]) assert.equal(rating.stamina(posts(count), now).rank, rank);
   assert.equal(rating.stamina([date(60), date(61)], now).rank, 'E');
   const frequent = Array.from({ length: 18 }, (_, i) => date(Math.floor(i * 14 / 17)));
-  const observed = rating.stamina(frequent, now, [date(40)]);
+  const observed = rating.stamina(frequent, now);
   assert.equal(observed.rank, 'A');
   assert.match(observed.reason, /初回の公開一覧.*14日間.*18本.*週平均9本/);
   assert.equal(rating.stamina([date(0), date(0)], now).rank, 'A');
-  assert.match(rating.stamina([date(14), date(28)], now).reason, /28日間.*2本.*週平均0.5本/);
+  assert.match(rating.stamina([date(14), date(28)], now).reason, /14日間.*2本.*週平均1本/);
   assert.equal(rating.stamina([date(1), null], now).rank, '判定不能');
+  assert.equal(rating.stamina([date(1), null, date(2)], now).rank, 'A');
   assert.equal(rating.stamina([date(2), date(1), date(60)], now).rank, '判定不能');
   for (const [count, rank] of [[0, 'E'], [19, 'E'], [20, 'D'], [59, 'D'], [60, 'C'], [119, 'C'], [120, 'B'], [200, 'B'], [359, 'B'], [360, 'A']]) {
     assert.equal(rating.speed([{ likeCount: count }]).rank, rank);
   }
   assert.equal(rating.speed([{ likeCount: 119 }, { likeCount: 120 }]).rank, 'C');
-  assert.equal(rating.speed([{ likeCount: 0 }, { likeCount: null }]).rank, '判定不能');
+  const partial = rating.speed([...Array.from({ length: 18 }, () => ({ likeCount: 120 })), { likeCount: null }]);
+  assert.equal(partial.rank, 'B');
+  assert.match(partial.reason, /18本のスキ合計2160件 ÷ 18本で、平均120件/);
+  assert.equal(rating.speed([{ likeCount: 0 }, { likeCount: null }]).rank, 'E');
+  assert.equal(rating.speed([{ likeCount: 0 }, { likeCount: 20 }, { likeCount: null }]).rank, 'E');
   assert.equal(rating.speed([{ likeCount: null }]).rank, '判定不能');
 });
 
@@ -682,4 +720,34 @@ test('プロフィールでCSS非表示にしたスキ数も記事カードか�
   ui.update({ ...settings, hideLikeCounts: false }, authorUrl);
   assert.equal(button.classList.contains(hidden), false);
   assert.equal(document.querySelectorAll(`.${hidden}`).length, 0);
+});
+
+test('持続力は非表示の有料記事があっても固定記事と有料記事を除いた公開一覧から算出する', () => {
+  const url = 'https://note.com/creator';
+  const now = Date.parse('2026-11-20T00:00:00Z');
+  const date = days => new Date(now - days * 86400000).toISOString();
+  const card = (id, days, details = '') => `<article><a href="${url}/n/n${id}" title="記事"></a><time datetime="${date(days)}"></time>${details}</article>`;
+  const regular = Array.from({ length: 18 }, (_, i) => card(i + 100, Math.floor(i * 14 / 17)));
+  const document = documentFromHtml(`<link rel="canonical" href="${url}"><h1></h1><main id="main-content"><h2></h2>
+    ${card(999, 120, '<p id="pinned"></p>')}
+    <div data-oshaberi-note-paid-hidden>${card(998, 21)}</div>
+    ${card(997, 21, '<span class="text-text-success" id="price"></span>')}
+    ${regular.join('')}</main>`);
+  document.querySelector('h1').textContent = '作者';
+  document.querySelector('h2').textContent = '記事一覧';
+  document.getElementById('pinned').textContent = '固定された記事';
+  document.getElementById('price').textContent = '¥300';
+  for (const node of document.querySelectorAll('h1, h2, a[href], p, span')) node.getClientRects = () => [{}];
+  const context = vm.createContext({ URL });
+  for (const file of ['common', 'articles', 'note-ui', 'site-evaluation-source', 'site-evaluation-ratings']) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, `../src/${file}.js`), 'utf8'), context);
+  }
+  const win = { getComputedStyle: () => ({ visibility: 'visible' }) };
+  const { postDates } = context.OshaberiNoteEvaluationSource.readProfile(document, win, url);
+  assert.equal(postDates.length, 18);
+  assert.equal(postDates[0], date(0));
+  assert.equal(postDates.at(-1), date(14));
+  const stamina = context.OshaberiNoteEvaluationRatings.stamina(postDates, now);
+  assert.equal(stamina.rank, 'A');
+  assert.match(stamina.reason, /14日間.*無料記事18本.*週平均9本/);
 });

@@ -363,7 +363,7 @@ test('HTTP 400のコンテキスト不足をトークン数付きで案内し、
  const detail='request (5986 tokens) exceeds the available context size (4096 tokens), try increasing it';
  const f=client([encoded(JSON.stringify({error:detail}))],{status:400});let updates=0;
  await assert.rejects(f.api.chat('http://localhost:11434','local',[{role:'user',content:'本文を保持'}],new AbortController().signal,()=>{updates++;},{truncate:false}),error=>{
-  assert.equal(error.status,400);assert.match(error.message,/入力5986トークン／上限4096トークン/);assert.match(error.message,/短い質問でも対象記事の本文/);return true;
+  assert.equal(error.status,400);assert.equal(error.code,'OLLAMA_CONTEXT_LIMIT');assert.equal(error.inputTokens,5986);assert.equal(error.contextTokens,4096);assert.match(error.message,/入力5986トークン／上限4096トークン/);assert.match(error.message,/短い質問でも対象記事の本文/);return true;
  });
  const body=JSON.parse(f.request.body);assert.equal(body.truncate,false);assert.equal(body.shift,false);assert.equal(body.messages[0].content,'本文を保持');assert.equal(updates,0);
 });
