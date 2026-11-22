@@ -265,6 +265,8 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
         assert.equal(messages[0].content, byId('extraction-prompt-preview').value);
         assert.match(messages[0].content, /根拠抽出の試験用指示/);
         assert.deepEqual(Array.from(options.format.properties.impact.required), ['strength', 'weakness', 'strength_level', 'weakness_level']);
+        assert.deepEqual(Array.from(options.format.properties.impact.properties.strength_level.enum), ['', '突出', '決め手', '有用', '軽微']);
+        assert.match(messages[0].content, /突出は、その能力において、作者を強く特徴づける顕著な成果/);
         assert.deepEqual(Array.from(options.format.properties.impact.properties.weakness_level.enum), ['', '致命的', '深刻', '影響あり', '影響なし']);
         assert.match(messages[0].content, /「致命的」「深刻」「影響あり」「影響なし」を、weakness_levelに保持/);
         if (invalidAssessment && data.article.articleId === 'n234') return labelsOnly;
@@ -377,12 +379,12 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   assert.equal(byId('result').querySelector('a').href, candidates[0].url);
   assert.equal(byId('detail').querySelector('a').href, 'https://example.org/detail');
   const outcomes = byId('rating-rows').children.map(row => row.children[1].textContent);
-  assert.equal(outcomes[0], 'D　長所(0/3/0)｜ 短所(0/0/0/0)');
+  assert.equal(outcomes[0], 'D　長所(0/0/3/0)｜ 短所(0/0/0/0)');
   assert.equal(outcomes[1], 'D');
-  assert.equal(outcomes[2], 'E　長所(0/0/0)｜ 短所(0/0/3/0)');
+  assert.equal(outcomes[2], 'D　長所(0/0/0/0)｜ 短所(0/0/3/0)');
   assert.equal(outcomes[3], '判定不能');
-  assert.equal(outcomes[4], 'B　長所(3/0/0)｜ 短所(0/0/0/0)');
-  assert.equal(outcomes[5], 'E　長所(0/0/0)｜ 短所(0/0/0/0)');
+  assert.equal(outcomes[4], 'A　長所(0/3/0/0)｜ 短所(0/0/0/0)');
+  assert.equal(outcomes[5], 'D　長所(0/0/0/0)｜ 短所(0/0/0/0)');
   const tables = byId('detail').querySelectorAll('table');
   const strengths = tables.find(table => table.getAttribute('aria-label') === '破壊力の長所');
   const weaknesses = tables.find(table => table.getAttribute('aria-label') === '射程距離の短所');
@@ -418,7 +420,7 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   ]);
   await byId('copy-all').onclick();
   assert.doesNotMatch(copies[0], /補足文案/);
-  assert.match(copies[0], /破壊力 \| D　長所\(0\/3\/0\)｜ 短所\(0\/0\/0\/0\)/);
+  assert.match(copies[0], /破壊力 \| D　長所\(0\/0\/3\/0\)｜ 短所\(0\/0\/0\/0\)/);
   assert.match(copies[0], /### 破壊力[\s\S]*#### 長所\n\n\| 記事名 \| レベル \| 説明 \|[\s\S]*興味を引いた構成 \\\|/);
   byId('copy-discussion').checked = true;
   await byId('copy-all').onclick();
@@ -435,7 +437,7 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   media.checked = true; media.onchange();
   assert.equal(byId('run').disabled, false);
   await byId('run').onclick();
-  assert.equal(byId('rating-rows').children[0].children[1].textContent, 'C　長所(0/3/0)｜ 短所(0/0/0/0)');
+  assert.equal(byId('rating-rows').children[0].children[1].textContent, 'C　長所(0/0/3/0)｜ 短所(0/0/0/0)');
   assert.equal(calls.length, 8);
   assert.equal(connectionChecks, connectionsBeforeCache);
   assert.equal(byId('save-cache').disabled, false);
@@ -456,7 +458,9 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   cached.get(cacheKey).evidence = {
     ...previous,
     format: 2,
-    extraction: previous.extraction.replace(/^弱みはそのレベル.*$/m, '弱みはそのレベルに応じて「致命的」「影響あり」「影響なし」を、weakness_levelに保持。'),
+    extraction: previous.extraction
+      .replace(/^強みはそのレベル[\s\S]*?(?=^弱みはそのレベル)/m, '強みはそのレベルに応じて「決め手」「有用」「軽微」を、strength_levelに保持。\n')
+      .replace(/^弱みはそのレベル.*$/m, '弱みはそのレベルに応じて「致命的」「影響あり」「影響なし」を、weakness_levelに保持。'),
     reviews: [{ ...previous.reviews[0], raw: JSON.stringify(oldResponse) }, ...previous.reviews.slice(1)]
   };
   byId('notes').value = '別の補足'; byId('notes').oninput();
@@ -468,7 +472,7 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   assert.equal(byId('replay-cache').disabled, false);
   await byId('replay-cache').onclick();
   assert.match(byId('status').textContent, /再集計しました/);
-  assert.equal(byId('rating-rows').children[2].children[1].textContent, 'E　長所(0/0/0)｜ 短所(0/1/2/0)');
+  assert.equal(byId('rating-rows').children[2].children[1].textContent, 'E　長所(0/0/0/0)｜ 短所(0/1/2/0)');
   assert.match(byId('detail').textContent, /短所 致命的 0件・深刻 1件・影響あり 2件/);
   await byId('save-cache').onclick();
   assert.equal(cached.get(cacheKey).evidence.format, 3);
@@ -518,53 +522,57 @@ test('能力鑑定は投稿頻度の境界と資料不足を区別する', () =>
   assert.equal(rating.speed([{ likeCount: null }]).rank, '判定不能');
 });
 
-test('能力鑑定の仮ランクは深刻な短所を優先し、軸ごとの補正を適用する', () => {
+test('仮ランクは致命的を最優先し、決め手がある場合は下位分類を点数に使わない', () => {
   const context = vm.createContext({});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/site-evaluation-ratings.js'), 'utf8'), context);
   const rating = context.OshaberiNoteEvaluationRatings;
   const calculate = (overrides, speed = 'C', hasMedia = false) => {
     const aggregated = Object.fromEntries(['impact', 'reach', 'precision', 'originality'].map(key => [key, {
-      counts: { 決め手: 0, 有用: 0, 軽微: 0, 致命的: 0, 深刻: 0, 影響あり: 0, 影響なし: 0, ...overrides[key] }
+      counts: { 突出: 0, 決め手: 0, 有用: 0, 軽微: 0, 致命的: 0, 深刻: 0, 影響あり: 0, 影響なし: 0, ...overrides[key] }
     }]));
     return rating.rankEvidence(aggregated, speed, hasMedia);
   };
-  for (const [decisive, rank] of [[0, 'E'], [1, 'D'], [2, 'C'], [3, 'B'], [4, 'A'], [5, 'A']]) {
+  for (const [decisive, rank] of [[0, 'D'], [1, 'C'], [2, 'B'], [3, 'A'], [4, 'A'], [5, 'A']]) {
     assert.equal(calculate({ impact: { 決め手: decisive } }).impact.rank, rank);
   }
   assert.equal(calculate({ impact: { 深刻: 1, 決め手: 1 } }, 'A', true).impact.rank, '判定不能');
+  assert.equal(calculate({ impact: { 深刻: 1, 突出: 1 } }).impact.rank, '判定不能');
+  assert.equal(calculate({ precision: { 突出: 1, 決め手: 1, 有用: 3 } }).precision.display, 'B　長所(1/1/3/0)｜ 短所(0/0/0/0)');
   assert.equal(calculate({ impact: { 深刻: 1, 有用: 5 } }, 'A', true).impact.rank, 'E');
-  assert.equal(calculate({ impact: { 致命的: 1, 決め手: 1 } }, 'A', true).impact.rank, '判定不能');
+  assert.equal(calculate({ impact: { 致命的: 1, 深刻: 1, 決め手: 1 } }, 'A', true).impact.rank, 'E');
   assert.equal(calculate({ impact: { 致命的: 1, 有用: 5 } }, 'A', true).impact.rank, 'E');
-  assert.equal(calculate({ impact: { 有用: 5 } }).impact.rank, 'C');
+  assert.equal(calculate({ impact: { 有用: 5 } }).impact.rank, 'B');
   assert.equal(calculate({ impact: { 有用: 5, 影響あり: 1 } }).impact.rank, 'D');
-  assert.equal(calculate({ impact: { 決め手: 3, 影響あり: 1 } }).impact.rank, 'C');
-  for (const [speed, rank] of [['A', 'B'], ['B', 'B'], ['C', 'C'], ['D', 'C'], ['E', 'C'], ['判定不能', 'C']]) {
+  assert.equal(calculate({ impact: { 決め手: 3, 影響あり: 1 } }).impact.rank, 'A');
+  for (const [speed, rank] of [['A', 'A'], ['B', 'A'], ['C', 'B'], ['D', 'B'], ['E', 'B'], ['判定不能', 'B']]) {
     assert.equal(calculate({ impact: { 決め手: 1 } }, speed, true).impact.rank, rank);
   }
-  assert.equal(calculate({ impact: { 影響あり: 1 } }, 'C', true).impact.rank, 'D');
+  assert.equal(calculate({ impact: { 影響あり: 1 } }, 'C', true).impact.rank, 'C');
   assert.equal(calculate({ reach: { 有用: 5, 影響あり: 3 }, originality: { 決め手: 4 } }, 'A').reach.rank, 'A');
-  assert.equal(calculate({ reach: { 有用: 5 }, originality: { 決め手: 3 } }, 'B').reach.rank, 'C');
-  assert.equal(calculate({ reach: { 決め手: 2, 有用: 3, 影響あり: 3, 影響なし: 2 }, originality: { 決め手: 4 } }, 'A').reach.display, 'C　長所(2/3/0)｜ 短所(0/0/3/2)');
+  assert.equal(calculate({ reach: { 有用: 5 }, originality: { 決め手: 2 } }, 'B').reach.rank, 'B');
+  assert.equal(calculate({ reach: { 決め手: 2, 有用: 3, 影響あり: 3, 影響なし: 2 }, originality: { 決め手: 4 } }, 'A').reach.display, 'B　長所(0/2/3/0)｜ 短所(0/0/3/2)');
   assert.equal(calculate({ reach: { 有用: 3 } }, 'A').reach.rank, 'C');
   assert.equal(calculate({ precision: { 有用: 5 } }).precision.rank, 'A');
-  assert.equal(calculate({ precision: { 有用: 4, 影響あり: 2 } }).precision.rank, 'C');
-  assert.equal(calculate({ precision: { 決め手: 1, 有用: 3, 影響あり: 1 } }).precision.rank, 'D');
+  assert.equal(calculate({ precision: { 有用: 4, 影響あり: 2 } }).precision.rank, 'B');
+  assert.equal(calculate({ precision: { 影響あり: 2 } }).precision.rank, 'D');
+  assert.equal(calculate({ precision: { 決め手: 1, 有用: 3, 影響あり: 1 } }).precision.rank, 'C');
 });
 
-test('記事ごとの7分類を集計し、空の根拠や重要度の不整合を区別する', () => {
+test('記事ごとの8分類を集計し、空の根拠や重要度の不整合を区別する', () => {
   const context = vm.createContext({});
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/site-evaluation-ratings.js'), 'utf8'), context);
   const rating = context.OshaberiNoteEvaluationRatings;
   const reviews = ['n123', 'n234', 'n345', 'n456', 'n567'].map((id, index) => ({
     id, title: id, raw: JSON.stringify({
-      impact: evidenceEntry({ strength: '構成の具体例', strength_level: '決め手' }),
+      impact: evidenceEntry({ strength: '構成の具体例', strength_level: index === 4 ? '突出' : '決め手' }),
       reach: evidenceEntry({ weakness: '情報の不足箇所', weakness_level: ['致命的', '深刻', '影響あり', '影響なし', '影響あり'][index] }),
       precision: evidenceEntry(), originality: evidenceEntry()
     })
   }));
   const ratings = rating.aggregate(reviews);
   assert.equal(Object.hasOwn(ratings.impact, 'rank'), false);
-  assert.equal(ratings.impact.counts['決め手'], 5);
+  assert.equal(ratings.impact.counts['決め手'], 4);
+  assert.equal(ratings.impact.counts['突出'], 1);
   assert.equal(ratings.impact.groups[0].rows.length, 5);
   assert.equal(ratings.impact.groups[0].rows[0].join(' '), 'n123 決め手 構成の具体例');
   assert.match(ratings.reach.breakdown, /致命的 1件・深刻 1件・影響あり 2件・影響なし 1件/);

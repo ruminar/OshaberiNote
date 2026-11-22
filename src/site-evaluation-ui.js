@@ -436,10 +436,17 @@
     "弱みは、何が読者の理解や体験を妨げるかを具体的に説明できるときだけ記録してください。その軸と無関係な長所や、単に標準的である点は弱みに入れません。",
     "標準的な点を弱みに含めず、ランク、採点、総評、添削、代表選定は行いません。"
   ].join("\n");
+  const strengthInstruction = [
+    "強みはそのレベルに応じて「突出」「決め手」「有用」「軽微」を、strength_levelに保持。",
+    "突出は、その能力において、作者を強く特徴づける顕著な成果が確認できる場合。",
+    "決め手は、その能力の高さを明確に裏付ける、具体的で強い長所がある場合。",
+    "有用は、その能力に貢献する長所が確認できる場合。",
+    "軽微は、長所はあるが、その能力への寄与は限定的な場合。"
+  ].join("\n");
   const weaknessInstruction = "弱みはそのレベルに応じて「致命的」「深刻」「影響あり」「影響なし」を、weakness_levelに保持。致命的はその軸で記事の価値がほぼ成立しない場合、深刻は価値が大きく損なわれる場合に使ってください。";
   const extractionFormat = [
     "strengthとweaknessは根拠文の欄です。記事の具体的な記述と、なぜ評価の根拠になるかを書いてください。「有用」「軽微」「影響なし」などの分類名だけをこの2欄に入れてはいけません。",
-    "強みはそのレベルに応じて「決め手」「有用」「軽微」を、strength_levelに保持。",
+    strengthInstruction,
     weaknessInstruction,
     "根拠が空文字なら対応する重要度も空文字にしてください。根拠がある場合は対応する重要度を選んでください。",
     '1軸の構造例（例文を転用しない）: {"strength":"手順の前に必要な道具をまとめてあり、読者が準備しやすい。","weakness":"","strength_level":"有用","weakness_level":""}',
@@ -594,9 +601,11 @@
     articles.forEach(showArticle);
     const input = currentInput();
     const legacySeverity = evidence?.format === 2;
-    const savedExtraction = legacySeverity && typeof evidence.extraction === "string"
-      ? evidence.extraction.replace(/^弱みはそのレベルに応じて「(?:深刻|致命的)」「影響あり」「影響なし」を、weakness_levelに保持。$/m, weaknessInstruction)
-      : evidence?.extraction;
+    let savedExtraction = evidence?.extraction;
+    if (typeof savedExtraction === "string") {
+      savedExtraction = savedExtraction.replace(/^強みはそのレベルに応じて「決め手」「有用」「軽微」を、strength_levelに保持。$/m, strengthInstruction);
+      if (legacySeverity) savedExtraction = savedExtraction.replace(/^弱みはそのレベルに応じて「(?:深刻|致命的)」「影響あり」「影響なし」を、weakness_levelに保持。$/m, weaknessInstruction);
+    }
     if (input && (legacySeverity || evidence?.format === 3) && savedExtraction === buildExtractionPrompt(input.extraction) &&
         evidence.endpoint === input.endpoint && evidence.model === input.model &&
         Array.isArray(evidence.reviews) && evidence.reviews.length <= articles.length &&

@@ -9,10 +9,10 @@
   ];
   const modelAxes = axes.filter(([key]) => !["speed", "stamina"].includes(key));
   const evidenceKinds = ["strength", "weakness"];
-  const levels = { strength: ["決め手", "有用", "軽微"], weakness: ["致命的", "深刻", "影響あり", "影響なし"] };
+  const levels = { strength: ["突出", "決め手", "有用", "軽微"], weakness: ["致命的", "深刻", "影響あり", "影響なし"] };
   const levelLabels = Object.values(levels).flat();
   const speedThresholds = [360, 120, 60, 20];
-  const evidenceThresholds = [4, 3, 2, 1];
+  const evidenceThresholds = [3, 2, 1, 0];
   const windowDays = 56, inactiveDays = 60, day = 86400000;
 
   function grade(value, thresholds) {
@@ -114,19 +114,24 @@
   }
 
   function provisionalRank(key, counts, speedRank, hasMedia, originalityRank) {
-    const { 決め手: decisive, 有用: useful, 致命的: fatal, 深刻: severe, 影響あり: material } = counts;
-    if (fatal || severe) return decisive ? unknown : "E";
-    let score = useful === 5 && !material ? 2 : Math.trunc(decisive + (useful - material) / 3);
-    if (key === "precision" && !decisive) score = useful - material;
-    if (key === "reach" && !decisive) {
-      if (originalityRank === "A") score = Math.trunc((useful + 1) / 2);
-      if (originalityRank === "B") score = Math.trunc((useful + 1) / 3);
-      if (speedRank === "A") score++;
+    const { 突出: outstanding, 決め手: decisiveCount, 有用: useful, 致命的: fatal, 深刻: severe, 影響あり: material } = counts;
+    const decisive = outstanding + decisiveCount;
+    if (fatal) return "E";
+    if (severe) return decisive ? unknown : "E";
+    let score = decisive - severe;
+    if (!decisive) {
+      if (useful === 5 && !material) score = 2;
+      if (key === "precision") score = useful - material;
+      if (key === "reach") {
+        if (originalityRank === "A") score = Math.trunc((useful + 1) / 2);
+        if (originalityRank === "B") score = Math.trunc((useful + 1) / 3);
+        if (speedRank === "A") score++;
+      }
     }
     if (key === "impact" && hasMedia) {
       score += ["A", "B"].includes(speedRank) ? 2 : 1;
     }
-    return grade(score, evidenceThresholds);
+    return grade(Math.max(0, score), evidenceThresholds);
   }
 
   function rankEvidence(aggregated, speedRank, hasMedia) {
