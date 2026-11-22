@@ -4,15 +4,15 @@
   const unknown = "判定不能";
   const axes = [
     ["impact", "破壊力", "面白さ"], ["speed", "スピード", "読者の反応"],
-    ["reach", "射程距離", "提供価値"], ["stamina", "持続力", "投稿活動"],
+    ["reach", "射程距離", "平均本文文字数"], ["stamina", "持続力", "投稿活動"],
     ["precision", "精密動作性", "読みやすさ"], ["originality", "成長性", "独創性"]
   ];
-  const modelAxes = axes.filter(([key]) => !["speed", "stamina"].includes(key));
+  const modelAxes = axes.filter(([key]) => ["impact", "precision", "originality"].includes(key));
   const evidenceKinds = ["strength", "weakness"];
-  const levels = { strength: ["突出", "決め手", "有用", "軽微"], weakness: ["致命的", "深刻", "影響あり", "影響なし"] };
+  const levels = { strength: ["圧倒的", "顕著", "有用", "軽微"], weakness: ["致命的", "深刻", "影響あり", "影響なし"] };
+  const legacyStrengthLevels = { 突出: "圧倒的", 決め手: "顕著" };
   const levelLabels = Object.values(levels).flat();
   const speedThresholds = [360, 120, 60, 20];
-  const evidenceThresholds = [3, 2, 1, 0];
   const windowDays = 56, inactiveDays = 60, day = 86400000;
 
   function grade(value, thresholds) {
@@ -26,6 +26,25 @@
     if (!Number.isSafeInteger(total)) return { rank: unknown, reason: "スキ数の合計を正確に計算できませんでした。" };
     const average = total / counts.length;
     return { rank: grade(average, speedThresholds), reason: `クリエイターページの一覧 ${counts.length}本のスキ合計${total}件 ÷ ${counts.length}本で、平均${average.toLocaleString("ja-JP", { maximumFractionDigits: 2 })}件です。ランク境界は試用値です。` };
+  }
+
+  const bodyLength = body => [...body.replace(/\s/gu, "")].length;
+
+  function reach(articles) {
+    if (!articles.length || articles.some(article => typeof article.body !== "string")) {
+      return { rank: unknown, reason: "記事の本文文字数を確認できませんでした。" };
+    }
+    const linkCards = articles.reduce((sum, { body }) => sum + (body.match(/^\[リンクカード\][ \t]*\r?$/gm)?.length ?? 0), 0);
+    if (linkCards >= 500) {
+      return { rank: unknown, reason: `選んだ記事のリンクカードが合計${linkCards}件あり、500件以上のため射程距離は判定不能です。` };
+    }
+    const total = articles.reduce((sum, { body }) => sum + bodyLength(
+      body.replace(/^\[リンクカード\][ \t]*\r?\n(?:[ \t]*(?:種類|タイトル|著者|紹介文|URL|埋め込みURL)：[^\r\n]+(?:\r?\n|$))+/gm, "")
+    ), 0);
+    const average = total / articles.length;
+    const display = value => value.toLocaleString("ja-JP", { maximumFractionDigits: 2 });
+    return { rank: grade(average, [20000, 10000, 4000, 1000]),
+      reason: `評価した${articles.length}本の本文合計${display(total)}字 ÷ ${articles.length}本で、平均${display(average)}字です（リンクカード情報・空白・改行を除く）。` };
   }
 
   function stamina(dates, now, pinnedDates = []) {
@@ -63,12 +82,12 @@
     }));
   }
 
-  function readEvidence(raw, legacySeverity = false) {
+  function readEvidence(raw) {
     let value;
     try { value = parseJson(raw); }
     catch { throw new Error("応答が有効なJSONではありません。"); }
     const axisKeys = modelAxes.map(([key]) => key);
-    if (!exactKeys(value, axisKeys)) throw new Error("JSONに必要な4つの評価軸が揃っていないか、余分な項目があります。");
+    if (!exactKeys(value, axisKeys)) throw new Error("JSONに必要な3つの評価軸が揃っていないか、余分な項目があります。");
     return Object.fromEntries(modelAxes.map(([key, label]) => {
       const entry = value[key];
       if (!exactKeys(entry, [...evidenceKinds, ...evidenceKinds.map(kind => `${kind}_level`)])) {
@@ -80,12 +99,13 @@
         if (typeof entry[kind] !== "string") throw new Error(`${field}（${kind}）が文字列ではありません。`);
         const example = entry[kind].trim();
         const bareExample = example.replace(/^[「『"'\s]+|[」』"'。．.\s]+$/gu, "");
-        if (levelLabels.includes(bareExample)) {
+        if (levelLabels.includes(bareExample) || Object.hasOwn(legacyStrengthLevels, bareExample)) {
           throw new Error(`${field}（${kind}）に重要度のラベルだけがあり、記事に基づく根拠がありません。`);
         }
         if ([...example].length > 240) throw new Error(`${field}（${kind}）の根拠が240文字を超えています。`);
         const rawLevel = typeof entry[`${kind}_level`] === "string" ? entry[`${kind}_level`].trim() : null;
-        const level = legacySeverity && kind === "weakness" && rawLevel === "致命的" ? "深刻" : rawLevel;
+        let level = rawLevel;
+        if (kind === "strength" && Object.hasOwn(legacyStrengthLevels, rawLevel)) level = legacyStrengthLevels[rawLevel];
         if (example && level === "") throw new Error(`${field}（${kind}_level）に重要度がありません。`);
         if (level !== "" && !levels[kind].includes(level)) throw new Error(`${field}（${kind}_level）の重要度が指定の選択肢にありません。`);
         if (example) evidence.push({ kind, level, example });
@@ -95,7 +115,7 @@
   }
 
   function aggregate(reviews) {
-    const evidenceByArticle = reviews.map(({ title, raw, legacySeverity }) => ({ title, evidence: readEvidence(raw, legacySeverity) }));
+    const evidenceByArticle = reviews.map(({ title, raw }) => ({ title, evidence: readEvidence(raw) }));
     return Object.fromEntries(modelAxes.map(([key]) => {
       const counts = keyed(levelLabels, 0);
       const rows = { strength: [], weakness: [] };
@@ -113,36 +133,22 @@
     }));
   }
 
-  function provisionalRank(key, counts, speedRank, hasMedia, originalityRank) {
-    const { 突出: outstanding, 決め手: decisiveCount, 有用: useful, 致命的: fatal, 深刻: severe, 影響あり: material } = counts;
-    const decisive = outstanding + decisiveCount;
-    if (fatal) return "E";
-    if (severe) return decisive ? unknown : "E";
-    let score = decisive - severe;
-    if (!decisive) {
-      if (useful === 5 && !material) score = 2;
-      if (key === "precision") score = useful - material;
-      if (key === "reach") {
-        if (originalityRank === "A") score = Math.trunc((useful + 1) / 2);
-        if (originalityRank === "B") score = Math.trunc((useful + 1) / 3);
-        if (speedRank === "A") score++;
-      }
-    }
-    if (key === "impact" && hasMedia) {
-      score += ["A", "B"].includes(speedRank) ? 2 : 1;
-    }
-    return grade(Math.max(0, score), evidenceThresholds);
-  }
-
   function rankEvidence(aggregated, speedRank, hasMedia) {
-    const originalityRank = provisionalRank("originality", aggregated.originality.counts);
+    const balance = counts => (counts.圧倒的 + counts.顕著) - (counts.致命的 + counts.深刻);
+    const mediaBonus = hasMedia ? 1 + Number(["A", "B"].includes(speedRank)) : 0;
+    const precision = aggregated.precision.counts;
+    const ranks = {
+      impact: grade(balance(aggregated.impact.counts) + mediaBonus, [5, 3, 2, 1]),
+      precision: grade(2 * balance(precision) + precision.有用 - precision.影響あり, [6, 5, 3, 1]),
+      originality: grade(balance(aggregated.originality.counts), [4, 3, 2, 1])
+    };
     return Object.fromEntries(modelAxes.map(([key]) => {
       const axis = aggregated[key];
-      const rank = key === "originality" ? originalityRank : provisionalRank(key, axis.counts, speedRank, hasMedia, originalityRank);
+      const rank = ranks[key];
       const [strength, weakness] = evidenceKinds.map(kind => levels[kind].map(level => axis.counts[level]).join("/"));
       return [key, { ...axis, rank, display: `${rank}　長所(${strength})｜ 短所(${weakness})` }];
     }));
   }
 
-  globalThis.OshaberiNoteEvaluationRatings = Object.freeze({ axes, speed, stamina, evidenceFormat, readEvidence, aggregate, rankEvidence });
+  globalThis.OshaberiNoteEvaluationRatings = Object.freeze({ axes, speed, reach, bodyLength, stamina, evidenceFormat, readEvidence, aggregate, rankEvidence });
 })();

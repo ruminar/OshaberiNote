@@ -156,7 +156,9 @@
             <button type="button" id="evaluation-reset-extraction-prompt" class="secondary">デフォルトに戻す</button>
             <details>
               <summary>Ollamaへ送る記事評価プロンプト全文</summary>
-              <textarea id="evaluation-extraction-prompt-preview" rows="12" aria-label="Ollamaへ送る記事評価プロンプト全文" readonly></textarea>
+              <textarea id="evaluation-extraction-prompt-preview" rows="12" aria-label="Ollamaへ送る記事評価プロンプト全文" aria-describedby="evaluation-extraction-prompt-preview-help"></textarea>
+              <p id="evaluation-extraction-prompt-preview-help">この欄を編集すると、画面を開いている間は編集した全文を送信します。</p>
+              <button type="button" id="evaluation-reset-extraction-prompt-preview" class="secondary">全文を組み立て直す</button>
             </details>
           </div>
           <div class="settings-actions evaluation-navigation">

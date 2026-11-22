@@ -10,8 +10,7 @@
   const ollama = globalThis.OshaberiNoteOllama;
   const rating = globalThis.OshaberiNoteEvaluationRatings;
   const links = globalThis.OshaberiNoteChatTags.links;
-  const extractionPromptKey = "oshaberiNote.evaluation.articleAssessmentPrompt.v2";
-  const retiredExtractionSentence = "根拠があるときだけ埋め、該当なし・資料不足は空文字としてください。";
+  const extractionPromptKey = "oshaberiNote.evaluation.articleAssessmentPrompt.v3";
   const cachePrefix = "oshaberiNote.evaluation.testCache.v1:";
   const tabNames = [
     ["info", "取得情報"], ["articles", "記事選択"], ["notes", "補足情報入力"],
@@ -131,7 +130,8 @@
     byId("add").disabled = byId("candidate").disabled || slots.every(slot => slot.value.trim());
     byId("cancel").disabled = !busy;
     for (const slot of slots) slot.disabled = busy || !target;
-    for (const id of ["notes", "media-impact", "extraction-prompt", "reset-extraction-prompt"]) byId(id).disabled = busy;
+    for (const id of ["notes", "media-impact", "extraction-prompt", "reset-extraction-prompt",
+      "extraction-prompt-preview", "reset-extraction-prompt-preview"]) byId(id).disabled = busy;
     const snapshot = currentInput();
     const current = result && sameInput(snapshot, result.input);
     const key = api.storage?.local && cacheKey();
@@ -235,7 +235,7 @@
   }
 
   function showArticle(article) {
-    appendArticleResult(`${article.title}（本文 ${article.body.length.toLocaleString()}文字 · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`, article.body);
+    appendArticleResult(`${article.title}（本文 ${rating.bodyLength(article.body).toLocaleString()}文字 · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`, article.body);
   }
   byId("add").onclick = () => {
     if (byId("add").disabled) return;
@@ -289,8 +289,8 @@
   }
 
   function currentInput() {
-    const extraction = byId("extraction-prompt").value.trim();
-    if (!target || !settings?.enabled || !settings.ollamaModel || !extraction) return null;
+    const extraction = byId("extraction-prompt-preview").value;
+    if (!target || !settings?.enabled || !settings.ollamaModel || !extraction.trim()) return null;
     try {
       if (source.profile(byId("target").value) !== target.authorUrl) return null;
       const articles = selectedArticles().map(({ capturedAt, ...article }) => article);
@@ -427,30 +427,20 @@
   const defaultExtractionPrompt = [
     "この記事1本から、各評価軸の観察事実を抽出してください。",
     "破壊力（impact）は面白さ・意外性・印象の強さです。作者が読者に面白いと感じてもらうためにどのような工夫を文章にしているかを確認し、思わず笑ってしまうなど共感を呼ぶような項目が複数あれば評価を上げ、なければ下げます。",
-    "射程距離（reach）は想定読者が得られる、情報知識や利益、文学的体験、文化的価値など。独自のツールやプロンプトなどの提供も独自性に応じて高く評価する。普遍的な価値が認められるなら加算。",
     "精密動作性（precision）は明瞭さ・構成・読みやすさ。専門性や意図的な難解さ自体は弱みとしない。リンクカードのタイトルや著者名が未取得なのは、遅延読み込みが間に合っていないだけなので減点しない。",
-    "成長性（originality）は現在の記事の着眼点・構成・表現の独自性。作家性・個性。本人の体験であることや、よくある情報を明瞭に説明したことだけで強みとせず、将来の成長を予測しない。独自性が高く、情報価値があり、模倣が困難であれば加点。決め手と判断する場合、この記事がもし失われた場合にどのような影響が発生するかを考慮してください。影響がないなら決め手にはなりません。他の人に簡単にできることも決め手にはなりません。",
+    "成長性（originality）は現在の記事の着眼点・構成・表現の独自性。作家性・個性。本人の体験であることや、有識者なら知り得る情報を明瞭に説明したことだけで強みとせず、将来の成長を予測しない。独自性が高く、情報価値があり、模倣が困難であれば加点。",
     "いずれの項目においても、理解が難しいことを弱点に数えないでください。高度な情報を記事に書くことにペナルティを生じさせてはいけません。ただし、明らかに不要な理解困難さが認められる場合は、精密動作性（precision）に短所として記録してください。",
-    "同じジャンル・目的の記事と比べ、strength（長所）、weakness（短所）ごとに0～1件を記録してください。",
+    "同じジャンル・目的の記事と比べ、strength（長所）、weakness（短所）ごとに1件を記録してください。",
     "各欄には何が書かれているかと、それがなぜその軸の根拠になるかを、短い引用または具体例を使い日本語240文字以内で記録してください。",
-    "弱みは、何が読者の理解や体験を妨げるかを具体的に説明できるときだけ記録してください。その軸と無関係な長所や、単に標準的である点は弱みに入れません。",
-    "標準的な点を弱みに含めず、ランク、採点、総評、添削、代表選定は行いません。"
   ].join("\n");
-  const strengthInstruction = [
-    "強みはそのレベルに応じて「突出」「決め手」「有用」「軽微」を、strength_levelに保持。",
-    "突出は、その能力において、作者を強く特徴づける顕著な成果が確認できる場合。",
-    "決め手は、その能力の高さを明確に裏付ける、具体的で強い長所がある場合。",
-    "有用は、その能力に貢献する長所が確認できる場合。",
-    "軽微は、長所はあるが、その能力への寄与は限定的な場合。"
-  ].join("\n");
-  const weaknessInstruction = "弱みはそのレベルに応じて「致命的」「深刻」「影響あり」「影響なし」を、weakness_levelに保持。致命的はその軸で記事の価値がほぼ成立しない場合、深刻は価値が大きく損なわれる場合に使ってください。";
   const extractionFormat = [
-    "strengthとweaknessは根拠文の欄です。記事の具体的な記述と、なぜ評価の根拠になるかを書いてください。「有用」「軽微」「影響なし」などの分類名だけをこの2欄に入れてはいけません。",
-    strengthInstruction,
-    weaknessInstruction,
-    "根拠が空文字なら対応する重要度も空文字にしてください。根拠がある場合は対応する重要度を選んでください。",
+    "strengthとweaknessは根拠文の欄です。記事の具体的な記述と、なぜ評価の根拠になるかを書いてください。",
+    "長所はそのレベルに応じて「圧倒的」「顕著」「有用」「軽微」を、strength_levelに保持。",
+    "短所はそのレベルに応じて「致命的」「深刻」「影響あり」「影響なし」を、weakness_levelに保持。",
+    "長所と短所は別々に集計するので、短所の存在によって長所のレベルを下げる必要はありません。逆も然りです。",
+    "根拠がある場合は対応する重要度を選んでください。",
     '1軸の構造例（例文を転用しない）: {"strength":"手順の前に必要な道具をまとめてあり、読者が準備しやすい。","weakness":"","strength_level":"有用","weakness_level":""}',
-    "impact、reach、precision、originalityをキーとし、各値にはstrengthとweaknessとstrength_levelとweakness_levelを持つJSONを返してください。この出力形式を優先してください。"
+    "impact、precision、originalityをキーとし、各値にはstrengthとweaknessとstrength_levelとweakness_levelを持つJSONを返してください。この出力形式を優先してください。"
   ].join("\n");
   const buildExtractionPrompt = instructions => [dataRule, instructions, extractionFormat].join("\n");
 
@@ -463,7 +453,7 @@
       const { reviews } = preparedReviews;
       for (const { articleId, title, body, url } of input.articles.slice(reviews.length)) {
         showLinks(byId("status"), `記事を評価中（${reviews.length + 1} / ${input.articles.length}） ${title}`);
-        const raw = await ask(buildExtractionPrompt(input.extraction),
+        const raw = await ask(input.extraction,
           { author: input.author, notes: input.notes, article: { articleId, title, body, url } }, rating.evidenceFormat());
         try { rating.readEvidence(raw); }
         catch (error) {
@@ -482,7 +472,7 @@
 
   function showAssessment(input, reviews, evaluatedAt) {
     const speed = rating.speed(input.profileLikes);
-    const ratings = { ...rating.rankEvidence(rating.aggregate(reviews), speed.rank, input.hasMedia), speed,
+    const ratings = { ...rating.rankEvidence(rating.aggregate(reviews), speed.rank, input.hasMedia), speed, reach: rating.reach(input.articles),
       stamina: rating.stamina(input.postDates, Date.parse(evaluatedAt), input.pinnedDates) };
     const overview = `評価した記事\n${input.articles.map(article => `- ${article.title}\n  ${article.url}`).join("\n")}`;
     const table = ["| 能力 | 分類件数・ランク | 評価内容 |", "| --- | --- | --- |", ...rating.axes.map(([key, label, meaning]) => `| ${label} | ${ratings[key].display ?? ratings[key].rank} | ${meaning} |`)].join("\n");
@@ -500,7 +490,7 @@
       entry.append(heading, body);
       responses.append(entry);
     }
-    byId("article-responses").hidden = false;
+    byId("article-responses").hidden = !reviews.length;
     showLinks(byId("result"), overview);
     showRatings(ratings);
     updateReferences();
@@ -555,12 +545,17 @@
     return markdown.join("\n\n");
   }
 
+  async function promptHash(prompt) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(prompt));
+    return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+
   byId("save-cache").onclick = () => run(async signal => {
     const key = cacheKey(), articles = selectedArticles();
     if (!key || !articles.length || target?.authorUrl !== source.profile(byId("target").value)) return;
     const input = currentInput();
     const evidence = preparedReviews?.reviews.length && sameExtraction(input, preparedReviews.input) ?
-      { format: 3, extraction: buildExtractionPrompt(input.extraction), endpoint: input.endpoint, model: input.model,
+      { format: 5, extractionHash: await promptHash(input.extraction), endpoint: input.endpoint, model: input.model,
         reviews: preparedReviews.reviews, evaluatedAt: preparedReviews.evaluatedAt ?? null } : null;
     const savedAt = new Date().toISOString();
     const fingerprints = await Promise.all(articles.map(article => globalThis.OshaberiNoteArticles.fingerprint(article)));
@@ -587,6 +582,7 @@
     if (new Set(urls).size !== urls.length || urls.some((articleUrl, i) => articleUrl !== articles[i].url || hashes[i] !== fingerprints[i])) {
       throw new Error("保存済みの記事本文と識別情報が一致しません。");
     }
+    const currentPromptHash = evidence?.format === 5 ? await promptHash(byId("extraction-prompt-preview").value) : null;
     signal.throwIfAborted();
     target = profile;
     collector = undefined;
@@ -600,21 +596,15 @@
     byId("results").replaceChildren();
     articles.forEach(showArticle);
     const input = currentInput();
-    const legacySeverity = evidence?.format === 2;
-    let savedExtraction = evidence?.extraction;
-    if (typeof savedExtraction === "string") {
-      savedExtraction = savedExtraction.replace(/^強みはそのレベルに応じて「決め手」「有用」「軽微」を、strength_levelに保持。$/m, strengthInstruction);
-      if (legacySeverity) savedExtraction = savedExtraction.replace(/^弱みはそのレベルに応じて「(?:深刻|致命的)」「影響あり」「影響なし」を、weakness_levelに保持。$/m, weaknessInstruction);
-    }
-    if (input && (legacySeverity || evidence?.format === 3) && savedExtraction === buildExtractionPrompt(input.extraction) &&
+    if (input && evidence?.format === 5 && evidence.extractionHash === currentPromptHash &&
         evidence.endpoint === input.endpoint && evidence.model === input.model &&
         Array.isArray(evidence.reviews) && evidence.reviews.length <= articles.length &&
         evidence.reviews.every((review, i) => review?.id === articles[i].articleId && typeof review.raw === "string")) {
       const reviews = evidence.reviews.map((review, i) => ({
-        id: review.id, raw: review.raw, title: articles[i].title, legacySeverity: legacySeverity || review.legacySeverity === true
+        id: review.id, raw: review.raw, title: articles[i].title
       }));
       try {
-        for (const review of reviews) rating.readEvidence(review.raw, review.legacySeverity);
+        for (const review of reviews) rating.readEvidence(review.raw);
         const evaluatedAt = reviews.length === articles.length && Number.isFinite(Date.parse(evidence.evaluatedAt)) ? evidence.evaluatedAt : undefined;
         preparedReviews = { input, reviews, evaluatedAt };
       } catch { /* 本文キャッシュから新しい評価を開始できる。 */ }
@@ -684,9 +674,11 @@
   };
 
   function initializePrompt(id, key, defaultValue, previewId, buildPrompt, label) {
-    const field = byId(id);
-    let edited = false;
-    const refreshPreview = () => { byId(previewId).value = buildPrompt(field.value.trim()); };
+    const field = byId(id), preview = byId(previewId);
+    let edited = false, fullPromptEdited = false;
+    const refreshPreview = () => {
+      if (!fullPromptEdited) preview.value = field.value.trim() ? buildPrompt(field.value.trim()) : "";
+    };
     const save = () => {
       edited = true;
       const value = field.value;
@@ -700,10 +692,16 @@
     refreshPreview();
     field.oninput = save;
     byId(`reset-${id}`).onclick = () => { field.value = defaultValue; save(); };
+    preview.oninput = () => { fullPromptEdited = true; controls(); };
+    byId(`reset-${previewId}`).onclick = () => {
+      fullPromptEdited = false;
+      refreshPreview();
+      controls();
+    };
     if (api.storage?.local) void api.storage.local.get(key).then(values => {
       const saved = values[key];
       if (!edited && typeof saved === "string" && saved.length <= Number(field.getAttribute("maxlength"))) {
-        field.value = saved.replace(retiredExtractionSentence, "");
+        field.value = saved;
         refreshPreview();
       }
       controls();
