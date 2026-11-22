@@ -82,7 +82,7 @@
   }
   async function withGeneration(task) {
     const locks = globalThis.navigator?.locks;
-    if (!locks) throw new Error("このブラウザではサイト評価の同時実行を制御できません。");
+    if (!locks) throw new Error("このブラウザではクリエイター能力鑑定の同時実行を制御できません。");
     return locks.request("oshaberi-note-ollama-generation", { ifAvailable: true }, lock => {
       if (!lock) throw Object.assign(new Error("別の画面で応答を生成中です。終了後にもう一度お試しください。"), { code: "CHAT_BUSY" });
       return task(chat);

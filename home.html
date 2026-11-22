@@ -34,7 +34,7 @@
         <p id="tag-warning" class="warning" role="alert" hidden></p>
         <nav id="home-menu" aria-label="専用ホーム" hidden>
           <button type="button" id="nav-chat" aria-controls="panel-chat">おしゃべり</button>
-          <button type="button" id="nav-evaluation" aria-controls="panel-evaluation">サイト評価</button>
+          <button type="button" id="nav-evaluation" aria-controls="panel-evaluation">クリエイター能力鑑定</button>
           <button type="button" id="nav-tags" aria-controls="panel-tags">お気に入り</button>
           <button type="button" id="nav-discovery" aria-controls="panel-discovery">タグ登録支援</button>
           <button type="button" id="nav-authors" aria-controls="panel-authors">ユーザーの表示管理</button>
@@ -51,7 +51,7 @@
       </aside>
       <div class="home-content">
         <section id="panel-evaluation" aria-labelledby="evaluation-heading" hidden>
-          <h2 id="evaluation-heading">サイト評価</h2>
+          <h2 id="evaluation-heading">クリエイター能力鑑定</h2>
           <label for="evaluation-target">プロフィールURL または ユーザーID</label>
           <input id="evaluation-target" type="text" placeholder="https://note.com/ruminar">
           <div class="settings-actions">
@@ -69,7 +69,7 @@
             <progress aria-label="Ollamaの処理中"></progress>
             <span id="evaluation-progress-detail"></span>
           </div>
-          <div id="evaluation-tabs" class="settings-actions chat-tabs" role="tablist" aria-label="サイト評価"></div>
+          <div id="evaluation-tabs" class="settings-actions chat-tabs" role="tablist" aria-labelledby="evaluation-heading"></div>
           <div id="evaluation-panel-info" role="tabpanel" aria-labelledby="evaluation-tab-info">
           <p id="evaluation-profile-name"></p>
           <details>
@@ -283,7 +283,7 @@
             <input id="note-user" type="text" maxlength="256" autocomplete="off" spellcheck="false" placeholder="例：ruminar または https://note.com/ruminar" disabled>
             <p class="muted">空欄で保存すると登録を解除します。ブラウザ内にのみ保存します。</p>
             <label class="check-option" for="dashboard-disabled"><input id="dashboard-disabled" type="checkbox" aria-describedby="dashboard-help" disabled>ダッシュボードを無効化する</label>
-            <p class="muted" id="dashboard-help">アクセス状況・提案・バッジ・売上・振込・販売履歴を含むダッシュボード全体を専用ホームへ戻し、note上のダッシュボードボタンを隠します。サイト評価では数値指標と長所・短所の分類件数を隠します。</p>
+            <p class="muted" id="dashboard-help">アクセス状況・提案・バッジ・売上・振込・販売履歴を含むダッシュボード全体を専用ホームへ戻し、note上のダッシュボードボタンを隠します。クリエイター能力鑑定では数値指標と長所・短所の分類件数を隠します。</p>
             <label class="check-option" for="hide-paid-articles"><input id="hide-paid-articles" type="checkbox" aria-describedby="paid-help" disabled>有料記事を非表示</label>
             <p class="muted" id="paid-help">ONのとき有料記事を開くと、未設定の作者の表示方法を確認します。価格が表示される記事・マガジンカードと、タイトルに鍵アイコンがあるメンバーシップ限定記事を隠します。購入済み記事一覧は対象外です。ほかの一覧では購入済み・参加済みでも価格や鍵アイコンがあれば対象になります。記事内の「チップで応援する」枠も隠します。作者ホームのAmazon商品カード・ストア商品枠・有料メンバーシップ参加プランも隠します（自分と表示許可した作者は対象外）。記事への直接アクセスは制限しません。</p>
             <label class="check-option" for="hide-article-recommendations"><input id="hide-article-recommendations" type="checkbox" aria-describedby="recommendations-help" disabled>記事の「あなたへのおすすめ」を非表示にする</label>

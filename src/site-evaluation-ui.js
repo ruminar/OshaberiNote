@@ -14,8 +14,8 @@
   const cachePrefix = "oshaberiNote.evaluation.testCache.v1:";
   const tabNames = [
     ["info", "取得情報"], ["articles", "記事選択"], ["notes", "補足情報入力"],
-    ["result", "サイト評価結果"], ["detail", "サイト評価詳細"], ["discussion", "感想戦"],
-    ["extraction-prompt", "記事評価プロンプト"]
+    ["result", "評価結果"], ["detail", "評価詳細"], ["discussion", "感想戦"],
+    ["extraction-prompt", "プロンプト設定"]
   ];
   let tabIndex = 0;
   let target, collector, controller, evaluationAbort, settings, result, preparedReviews;
@@ -89,7 +89,7 @@
     if (!collector) {
       if (kind === "article") throw collectorLost();
       const owner = await api.tabs.getCurrent();
-      if (!owner) throw new Error("サイト評価をブラウザタブで開いてください。");
+      if (!owner) throw new Error("クリエイター能力鑑定をブラウザタブで開いてください。");
       signal.throwIfAborted();
       const tab = await api.tabs.create({ url, windowId: owner.windowId, index: owner.index + 1, active: false });
       collector = { id: tab.id, url };

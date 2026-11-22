@@ -302,7 +302,7 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   assert.match(defaultExtraction, /^成長性（originality）[^\n]*独自性が高く、情報価値があり、模倣が困難であれば加点。$/m);
   assert.doesNotMatch(defaultExtraction, /射程距離/);
   await new Promise(resolve => setImmediate(resolve));
-  assert.deepEqual(byId('tabs').children.map(button => button.textContent), ['取得情報', '記事選択', '補足情報入力', 'サイト評価結果', 'サイト評価詳細', '感想戦', '記事評価プロンプト']);
+  assert.deepEqual(byId('tabs').children.map(button => button.textContent), ['取得情報', '記事選択', '補足情報入力', '評価結果', '評価詳細', '感想戦', 'プロンプト設定']);
   byId('tab-extraction-prompt').onclick();
   assert.equal(byId('panel-extraction-prompt').hidden, false);
   assert.equal(byId('extraction-prompt').hasAttribute('readonly'), false);
