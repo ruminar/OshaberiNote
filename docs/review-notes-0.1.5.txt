@@ -1,0 +1,9 @@
+OshaberiNote is a desktop extension for note.com. It provides favorites, navigation, and optional Ollama-powered chat and creator evaluation.
+
+Version 0.1.5 adds “クリエイター能力鑑定” (Creator Evaluation). To test it, select this item on the extension home, enter a public note.com profile URL, and click “公開プロフィールを取得”. In “記事選択”, select three to five public articles and click “記事本文を取得”. Click “評価する” after configuring Ollama. A paid note account is not required. Favorites and navigation also work without Ollama.
+
+Install Ollama and a compatible model separately. In “LLMの設定”, click “接続・再試行” to authorize the endpoint and select a model. The default endpoint is http://127.0.0.1:11434. Ollama may require the extension page’s actual origin to be added to OLLAMA_ORIGINS. See INSTALL.md. Firefox requests Website Content consent before article content is sent.
+
+The extension opens a dedicated tab to read the public profile and user-selected articles. When the user requests an evaluation, the extension sends the selected article text, author information, and evaluation instructions to the configured Ollama endpoint. Evaluation data is saved in the browser only if the user explicitly saves a test cache. No data is sent to developer-operated servers. Ollama cloud models may communicate with external services through Ollama.
+
+The packaged JavaScript and CSS are readable and are not minified or obfuscated. This update adds no manifest permissions.
