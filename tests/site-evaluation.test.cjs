@@ -14,20 +14,25 @@ async function verifyArticleCollection(interruption) {
   const visited = [];
   const navigations = [];
   const delays = [];
+  const opened = [];
+  let fallbackReads = 0;
   let releaseDelay, clearedDelay, staleTab, headerReady = false;
+  let clock = Date.now(), temporarilyMissing = interruption === 'tab-temporary';
   let tab;
   const chrome = { tabs: {
     getCurrent: async () => ({ windowId: 7, index: 2 }),
     async create(options) {
-      assert.deepEqual(JSON.parse(JSON.stringify(options)), { url: authorUrl, windowId: 7, index: 3, active: false });
-      assert.equal(tab, undefined);
-      return (tab = { id: 8, status: 'complete', url: options.url });
+      const url = opened.length ? second : authorUrl;
+      assert.deepEqual(JSON.parse(JSON.stringify(options)), { url, windowId: 7, index: 3, active: false });
+      opened.push(url);
+      return (tab = { id: 7 + opened.length, status: 'complete', url });
     },
     async get(id) {
-      assert.equal(id, 8);
-      if (visited.at(-1) === first) {
+      assert.equal(id, tab.id);
+      if (id === 8 && visited.at(-1) === first) {
         if (interruption === 'closed') throw new Error('No tab');
         if (interruption === 'moved') return { ...tab, url: 'https://note.com/other' };
+        if (temporarilyMissing) { temporarilyMissing = false; throw new Error('No tab'); }
       }
       if (staleTab) {
         const previous = staleTab;
@@ -41,18 +46,22 @@ async function verifyArticleCollection(interruption) {
       if (url === second) assert.equal(byId('results').querySelectorAll('details').length, 1);
       if (url === second && (!interruption || interruption === 'cancelled')) staleTab = { ...tab };
       navigations.push(url);
+      if (url === second && interruption === 'stalled' && navigations.length === 2) return;
       tab.url = url;
     },
-    async sendMessage(id, { url, kind }) {
-      assert.equal(id, 8);
+    async sendMessage(id, { url, kind, allowArticleWithoutHeader }) {
+      assert.equal(id, tab.id);
       assert.equal(url, tab.url);
-      if (url === second && !headerReady) return { waiting: true, error: 'ヘッダー待ち' };
+      if (allowArticleWithoutHeader) {
+        fallbackReads++;
+        if (interruption === 'header-error') return { error: '表示中の本文と記事URLの一致を確認できません。' };
+      } else if (url === second && !headerReady) return { waiting: true, headerPending: true, error: 'ヘッダー待ち' };
       visited.push(url);
       return { value: kind === 'profile' ? { authorUrl, name: '作者', candidates: [] } : { title: '記事', body: '<script>記事本文</script> https://example.org/article' } };
     }
   } };
   const context = vm.createContext({
-    document, chrome, URL, AbortController, addEventListener() {},
+    document, chrome, URL, AbortController, Date: class extends Date { static now() { return clock; } }, addEventListener() {},
     setTimeout(callback, delay) {
       delays.push(delay);
       releaseDelay = callback;
@@ -84,20 +93,53 @@ async function verifyArticleCollection(interruption) {
     assert.deepEqual(visited, [authorUrl, first]);
     if (interruption === 'cancelled') byId('cancel').onclick();
     else { headerReady = true; releaseDelay(); }
+  } else if (interruption === 'closed') {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      assert.equal(delays.length, attempt);
+      releaseDelay();
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  } else if (interruption === 'tab-temporary' || interruption === 'stalled') {
+    assert.deepEqual(delays, [400]);
+    headerReady = true;
+    if (interruption === 'stalled') clock += 12000;
+    releaseDelay();
+  } else if (interruption?.startsWith('header-')) {
+    assert.deepEqual(delays, [400]);
+    clock += 12000;
+    releaseDelay();
   } else assert.deepEqual(delays, []);
   await collection;
-  assert.deepEqual(visited, interruption ? [authorUrl, first] : [authorUrl, first, second]);
-  assert.deepEqual(navigations, ['closed', 'moved'].includes(interruption) ? [first] : [first, second]);
-  assert.equal(byId('results').querySelectorAll('details').length, interruption ? 1 : 2);
+  const stopped = ['closed', 'moved', 'cancelled'].includes(interruption);
+  assert.deepEqual(visited, stopped || interruption === 'header-error' ? [authorUrl, first] : [authorUrl, first, second]);
+  assert.deepEqual(navigations, interruption === 'stalled' ? [first, second, second] : ['closed', 'moved'].includes(interruption) ? [first] : [first, second]);
+  assert.equal(byId('results').querySelectorAll('details').length, stopped ? 1 : 2);
   assert.match(byId('results').textContent, /<script>記事本文<\/script>/);
   assert.equal(byId('results').querySelector('script'), null);
   assert.equal(byId('results').querySelector('a').href, 'https://example.org/article');
   if (interruption === 'cancelled') {
     assert.equal(clearedDelay, 2);
     assert.match(byId('status').textContent, /取得を中止/);
-  } else if (interruption) {
-    assert.match(byId('status').textContent, /「公開プロフィールを取得」からやり直し/);
+  } else if (stopped) {
+    assert.match(byId('status').textContent, /「記事本文を取得」で未取得の記事から再開/);
+    assert.equal(byId('collect').disabled, false);
+  }
+  if (interruption?.startsWith('header-')) assert.equal(fallbackReads, 1);
+  if (interruption === 'header-error') {
+    assert.match(byId('results').textContent, /記事URLの一致を確認できません/);
+    assert.equal(byId('collect').disabled, false);
+  }
+  if (['closed', 'header-error'].includes(interruption)) {
+    headerReady = true;
+    await byId('collect').onclick();
+    assert.deepEqual(visited, [authorUrl, first, second]);
+    assert.deepEqual(opened, interruption === 'closed' ? [authorUrl, second] : [authorUrl]);
+    assert.equal(byId('results').querySelectorAll('details').length, 2);
+  }
+  if (!stopped || interruption === 'closed') {
     assert.equal(byId('collect').disabled, true);
+    await byId('collect').onclick();
+    assert.deepEqual(visited, [authorUrl, first, second]);
   }
 }
 
@@ -105,6 +147,10 @@ test('サイト評価は右隣の取得タブ1つで対象作者の記事だけ�
 test('取得用タブが閉じられた場合は取得済み結果を残して中断する', () => verifyArticleCollection('closed'));
 test('取得用タブが別ページへ移った場合は新しいタブを開かない', () => verifyArticleCollection('moved'));
 test('次の記事のヘッダー待機中に中止すると取得済み結果だけが残る', () => verifyArticleCollection('cancelled'));
+test('タブの照会が一時失敗した場合も同じタブを使って取得を続ける', () => verifyArticleCollection('tab-temporary'));
+test('遷移先が表示されなかった場合は同じタブで遷移を一度やり直す', () => verifyArticleCollection('stalled'));
+test('記事ヘッダーが確認できなくても画面を再読み込みせず本文取得を試す', () => verifyArticleCollection('header-fallback'));
+test('取得できた記事は開かず、失敗した記事だけを再取得する', () => verifyArticleCollection('header-error'));
 
 test('公式ヘッダーのnoteロゴが揃うまで本文抽出を保留する', () => {
   const url = 'https://note.com/creator/n/n123', homeUrl = 'chrome-extension://test/home.html';
@@ -123,19 +169,20 @@ test('公式ヘッダーのnoteロゴが揃うまで本文抽出を保留する'
     OshaberiNoteUi: { isOfficialHeaderLogo: node => node === anchor && headerReady }
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/site-evaluation-source.js'), 'utf8'), context);
-  const read = () => {
+  const read = (allowArticleWithoutHeader = false) => {
     let response;
-    listener({ type: 'site-evaluation-read', kind: 'article', url }, { id: 'test', url: homeUrl }, value => { response = value; });
+    listener({ type: 'site-evaluation-read', kind: 'article', url, allowArticleWithoutHeader }, { id: 'test', url: homeUrl }, value => { response = value; });
     return response;
   };
   assert.equal(read().waiting, true);
   assert.equal(extracted, 0);
+  assert.equal(read(true).value.title, '記事');
   headerReady = true;
   const { value } = read();
   assert.equal(value.title, '記事');
   assert.equal(Object.hasOwn(value, 'likeCount'), false);
   assert.equal(value.publishedAt, '2026-11-19T12:00:00+09:00');
-  assert.equal(extracted, 1);
+  assert.equal(extracted, 2);
 });
 
 test('公開プロフィールは公式ヘッダーが揃ってから、遅れて反映されたスキ数を取得する', () => {

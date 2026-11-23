@@ -20,7 +20,8 @@
   let tabIndex = 0;
   let target, collector, controller, evaluationAbort, settings, result, preparedReviews;
   let collected = new Map(), discussion = [], promptWrites = Promise.resolve();
-  const matches = (value, url) => value?.replace(/\/$/, "") === url;
+  const collectionRows = new Map();
+  const matches = (value, url) => Boolean(url && value?.replace(/\/$/, "") === url);
 
   async function openLink(event, url) {
     if (event.type === "auxclick" && event.button !== 1) return;
@@ -58,7 +59,7 @@
   function collectorLost() {
     collector = undefined;
     controls();
-    return new Error("取得用タブが閉じられたか、別のページに移動しました。「公開プロフィールを取得」からやり直してください。");
+    return new Error("取得用タブが閉じられたか、別のページに移動しました。「記事本文を取得」で未取得の記事から再開できます。");
   }
 
   function waitForPage(signal) {
@@ -76,18 +77,48 @@
     });
   }
 
-  async function read(url, kind, signal) {
+  async function findCollectorTab(id, signal) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      signal.throwIfAborted();
+      const tab = await api.tabs.get(id).catch(() => null);
+      signal.throwIfAborted();
+      if (tab) return tab;
+      if (attempt < 2) await waitForPage(signal);
+    }
+    return null;
+  }
+
+  async function navigateCollector(id, url, previousUrl, signal) {
+    try { await api.tabs.update(id, { url }); }
+    catch {
+      await waitForPage(signal);
+      const tab = await findCollectorTab(id, signal);
+      if (!tab || (tab.pendingUrl && !matches(tab.pendingUrl, url))) throw collectorLost();
+      if (matches(tab.url, url) || matches(tab.pendingUrl, url)) return;
+      if (!matches(tab.url, previousUrl)) throw collectorLost();
+      try { await api.tabs.update(id, { url }); }
+      catch { throw collectorLost(); }
+    }
+    signal.throwIfAborted();
+  }
+
+  async function read(url, kind, signal, mayOpen = kind === "profile") {
     let previousUrl;
     if (collector) {
-      const tab = await api.tabs.get(collector.id).catch(() => null);
+      let tab = await findCollectorTab(collector.id, signal);
+      const deadline = Date.now() + 12000;
+      while (tab && matches(tab.pendingUrl, collector.url) && Date.now() < deadline) {
+        await waitForPage(signal);
+        tab = await findCollectorTab(collector.id, signal);
+      }
       if (!tab || !matches(tab.url, collector.url) || tab.pendingUrl) {
-        if (kind === "article") throw collectorLost();
+        if (!mayOpen) throw collectorLost();
         collector = undefined;
       }
     }
     signal.throwIfAborted();
     if (!collector) {
-      if (kind === "article") throw collectorLost();
+      if (!mayOpen) throw collectorLost();
       const owner = await api.tabs.getCurrent();
       if (!owner) throw new Error("クリエイター能力鑑定をブラウザタブで開いてください。");
       signal.throwIfAborted();
@@ -95,37 +126,57 @@
       collector = { id: tab.id, url };
     } else if (collector.url !== url) {
       previousUrl = collector.url;
-      try { await api.tabs.update(collector.id, { url }); }
-      catch { throw collectorLost(); }
+      await navigateCollector(collector.id, url, previousUrl, signal);
       collector.url = url;
     }
-    const deadline = Date.now() + 12000;
+    const id = collector.id;
     let reason = "取得用タブの表示を確認できません。";
-    let arrived = false;
-    while (Date.now() < deadline) {
-      signal.throwIfAborted();
-      const tab = await api.tabs.get(collector.id).catch(() => null);
-      if (!tab) throw collectorLost();
-      if (matches(tab.url, url)) arrived = true;
-      // tabs.updateの直後は、読み込み開始前の旧URLとcompleteが返ることがある。
-      const starting = !arrived && previousUrl && matches(tab.url, previousUrl);
-      if (tab.status === "complete" && !matches(tab.url, url) && !tab.pendingUrl && !starting) throw collectorLost();
-      if (tab.status === "complete" && matches(tab.url, url) && !tab.pendingUrl) {
-        const reply = await api.tabs.sendMessage(collector.id, { type: "site-evaluation-read", url, kind }, { frameId: 0 }).catch(() => null);
-        signal.throwIfAborted();
-        if (reply?.value) return reply.value;
-        if (reply?.error) reason = reply.error;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const deadline = Date.now() + 12000;
+      let arrived = false, replied = false, headerPending = false, tab;
+      do {
+        tab = await findCollectorTab(id, signal);
+        if (!tab || (tab.pendingUrl && !matches(tab.pendingUrl, url))) throw collectorLost();
+        if (matches(tab.url, url)) arrived = true;
+        // Chromeでは遷移開始前の旧URLがcompleteのまま返ることがある。
+        const starting = !arrived && matches(tab.url, previousUrl);
+        if (tab.status === "complete" && !matches(tab.url, url) && !tab.pendingUrl && !starting) throw collectorLost();
+        if (tab.status === "complete" && matches(tab.url, url) && !tab.pendingUrl) {
+          const reply = await api.tabs.sendMessage(id, { type: "site-evaluation-read", url, kind }, { frameId: 0 }).catch(() => null);
+          signal.throwIfAborted();
+          if (reply?.value) return reply.value;
+          if (reply) { replied = true; headerPending = reply.headerPending === true; }
+          if (reply?.error) reason = reply.error;
+        }
+        await waitForPage(signal);
+      } while (Date.now() < deadline);
+      if (kind === "article" && headerPending) {
+        tab = await findCollectorTab(id, signal);
+        if (!tab || !matches(tab.url, url) || tab.pendingUrl) throw collectorLost();
+        if (tab.status === "complete") {
+          const reply = await api.tabs.sendMessage(id, { type: "site-evaluation-read", url, kind, allowArticleWithoutHeader: true }, { frameId: 0 }).catch(() => null);
+          signal.throwIfAborted();
+          if (reply?.value) return reply.value;
+          if (reply?.error) reason = reply.error;
+        }
       }
-      await waitForPage(signal);
+      if (replied || attempt > 0) {
+        if (!arrived && !tab.pendingUrl && matches(tab.url, previousUrl)) collector.url = previousUrl;
+        break;
+      }
+      // 待機の間に利用者がタブを閉じたり移動したりしていないか再確認する。
+      tab = await findCollectorTab(id, signal);
+      if (!tab || (tab.pendingUrl && !matches(tab.pendingUrl, url)) ||
+          (!matches(tab.url, url) && (arrived || !matches(tab.url, previousUrl)) && !matches(tab.pendingUrl, url))) throw collectorLost();
+      await navigateCollector(id, url, previousUrl, signal);
     }
-    if (!arrived) collector = undefined;
     throw new Error(reason);
   }
 
   function controls() {
     const busy = Boolean(controller || evaluationAbort);
     byId("target").disabled = byId("profile").disabled = busy;
-    byId("collect").disabled = busy || !target || !collector;
+    byId("collect").disabled = busy || !target || !slots.some(slot => slot.value.trim()) || Boolean(selectedArticles().length);
     byId("candidate").disabled = busy || !byId("candidate").value;
     byId("add").disabled = byId("candidate").disabled || slots.every(slot => slot.value.trim());
     byId("cancel").disabled = !busy;
@@ -207,6 +258,7 @@
     const next = await read(url, "profile", signal);
     if (target?.authorUrl !== url) {
       for (const slot of slots) slot.value = "";
+      collectionRows.clear();
       byId("results").replaceChildren();
       byId("notes").value = "";
       byId("media-impact").checked = false;
@@ -231,15 +283,24 @@
     ].join("\n"));
   }
 
-  function appendArticleResult(summary, content) {
+  function articleResult(summary, content) {
     const entry = document.createElement("details"), title = document.createElement("summary"), body = document.createElement("pre");
     showLinks(title, summary);
     showLinks(body, content);
-    entry.append(title, body); byId("results").append(entry);
+    entry.append(title, body);
+    return entry;
   }
 
-  function showArticle(article) {
-    appendArticleResult(`${article.title}（本文 ${rating.bodyLength(article.body).toLocaleString()}文字 · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`, article.body);
+  function articleResultFor(article) {
+    return articleResult(`${article.title}（本文 ${rating.bodyLength(article.body).toLocaleString()}文字 · 投稿日 ${article.publishedAt?.slice(0, 10) ?? "不明"}）`, article.body);
+  }
+  function renderCollectionRows() {
+    const urls = new Set(slots.flatMap(slot => {
+      if (!slot.value.trim()) return [];
+      try { return [source.articleFor(slot.value.trim(), target.authorUrl).url]; }
+      catch { return []; }
+    }));
+    byId("results").replaceChildren(...[...urls].filter(url => collectionRows.has(url)).map(url => collectionRows.get(url)));
   }
   byId("add").onclick = () => {
     if (byId("add").disabled) return;
@@ -248,6 +309,7 @@
     if (!empty || !url) return;
     empty.value = url;
     refreshCandidates(true);
+    renderCollectionRows();
     controls();
   };
   byId("collect").onclick = () => run(async signal => {
@@ -260,21 +322,25 @@
       selected.set(item.articleId, item);
     }
     if (!selected.size) throw new Error("取得する記事を指定してください。");
-    byId("results").replaceChildren();
-    collected.clear();
-    let index = 0, captured = 0;
-    for (const { url } of selected.values()) {
+    const urls = [...selected.values()].map(({ url }) => url);
+    const pending = urls.filter(url => !collected.has(url));
+    if (!pending.length) return;
+    for (const url of pending) collectionRows.delete(url);
+    renderCollectionRows();
+    let captured = urls.length - pending.length;
+    for (const [index, url] of pending.entries()) {
       signal.throwIfAborted();
-      byId("status").textContent = `記事を取得中（${++index} / ${selected.size}）`;
+      byId("status").textContent = `未取得の記事を取得中（${index + 1} / ${pending.length}）`;
       try {
-        const article = await read(url, "article", signal);
+        const article = await read(url, "article", signal, index === 0);
         collected.set(url, { ...article, capturedAt: new Date().toISOString() });
-        showArticle(article); captured++;
+        collectionRows.set(url, articleResultFor(article)); captured++;
       } catch (error) {
         signal.throwIfAborted();
         if (!collector) throw error;
-        appendArticleResult(`取得できませんでした · ${url}`, error.message);
+        collectionRows.set(url, articleResult(`取得できませんでした · ${url}`, error.message));
       }
+      renderCollectionRows();
     }
     byId("status").textContent = `${selected.size}件のうち${captured}件の本文を取得しました。`;
   });
@@ -644,8 +710,9 @@
     byId("notes").value = notes;
     byId("media-impact").checked = hasMedia === true;
     showProfile(profile);
-    byId("results").replaceChildren();
-    articles.forEach(showArticle);
+    collectionRows.clear();
+    for (const article of articles) collectionRows.set(article.url, articleResultFor(article));
+    renderCollectionRows();
     const input = currentInput();
     if (input && evidence?.format === 5 && evidence.extractionHash === currentPromptHash &&
         evidence.endpoint === input.endpoint && evidence.model === input.model &&
@@ -813,7 +880,10 @@
     platform.subscribe(value => { changed = true; updateSettings(value); });
     void platform.load().then(value => { if (!changed) updateSettings(value); }).catch(() => {});
   }
-  for (const slot of slots) slot.oninput = () => { if (target) refreshCandidates(); controls(); };
+  for (const slot of slots) slot.oninput = () => {
+    if (target) { refreshCandidates(); renderCollectionRows(); }
+    controls();
+  };
   for (const input of [byId("target"), byId("notes"), byId("question")]) input.oninput = controls;
   byId("media-impact").onchange = controls;
   byId("cancel").onclick = () => controller?.abort();
