@@ -203,12 +203,14 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   const cached = new Map();
   const chrome = {
     storage: { local: {
-      get: async key => ({ [key]: Object.hasOwn(savedPrompts, key) ? savedPrompts[key] : structuredClone(cached.get(key)) }),
+      get: async key => key === null
+        ? { ...savedPrompts, ...Object.fromEntries(cached) }
+        : { [key]: Object.hasOwn(savedPrompts, key) ? savedPrompts[key] : structuredClone(cached.get(key)) },
       set: async values => {
         if (Object.hasOwn(values, cacheKey)) cached.set(cacheKey, structuredClone(values[cacheKey]));
         else promptWrites.push({ ...values });
       },
-      remove: async key => { cached.delete(key); }
+      remove: async keys => { for (const key of [].concat(keys)) cached.delete(key); }
     } },
     tabs: {
       getCurrent: async () => ({ windowId: 7, index: 2 }),
@@ -564,6 +566,29 @@ test('記事ごとに根拠と重要度を1回で取得し、結果を通信な�
   assert.equal(cached.size, 0);
   await byId('load-cache').onclick();
   assert.match(byId('status').textContent, /テスト用キャッシュがありません/);
+  const dialog = byId('cache-delete-dialog');
+  await byId('remove-all-cache').onclick();
+  assert.equal(Boolean(dialog.open), false);
+  assert.match(byId('status').textContent, /削除する保存済みキャッシュはありません/);
+  cached.set(cacheKey, originalCache);
+  cached.set(cacheKey.replace(':creator', ':another'), originalCache);
+  const unrelated = 'oshaberiNote.chatState';
+  cached.set(unrelated, { keep: true });
+  byId('target').value = ''; byId('target').oninput();
+  assert.equal(byId('remove-all-cache').disabled, false);
+  await byId('remove-all-cache').onclick();
+  assert.equal(dialog.open, true);
+  assert.match(byId('cache-delete-message').textContent, /2人分/);
+  byId('cache-delete-no').onclick();
+  assert.equal(dialog.open, false);
+  assert.equal(cached.size, 3);
+  await byId('remove-all-cache').onclick();
+  await byId('cache-delete-yes').onclick();
+  assert.equal(dialog.open, false);
+  assert.deepEqual([...cached.keys()], [unrelated]);
+  assert.match(byId('status').textContent, /2人分を削除しました/);
+  assert.equal(byId('ratings').hidden, false);
+  byId('target').value = authorUrl; byId('target').oninput();
   assert.equal(noteReads, readsBeforeCache);
   byId('notes').value = '新しい観点'; byId('notes').oninput();
   assert.equal(byId('run').disabled, false);

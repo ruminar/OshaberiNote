@@ -135,12 +135,13 @@
       catch (error) { status.textContent = error.message || "状態を確認できません。"; }
       finally { busy = false; update(state); }
     };
-    save.onclick = async () => {
+    save.setAttribute("title", "CtrlまたはShift＋クリックで先頭に追加");
+    save.onclick = async event => {
       if (save.disabled || !opened) return;
       const tags = candidates.filter(tag => selected.has(tag)), groupId = select.value, before = generation;
       busy = true; status.textContent = "保存中…"; update(state);
       try {
-        const result = await actions.save(groupId, tags);
+        const result = await actions.save(groupId, tags, core.favoriteClickPosition(event));
         actions.onSaved?.(result);
         if (before !== generation) return;
         const report = result.bulkTagReport;

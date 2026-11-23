@@ -231,7 +231,7 @@
     const discovery = globalThis.OshaberiNoteTagDiscovery;
     let discoveryUrl;
     const tagDialog = discovery && actions.bulkAddTags ? discovery.createDialog(doc, {
-      save: (groupId, tags) => actions.bulkAddTags(groupId, tags, discoveryUrl),
+      save: (groupId, tags, position) => actions.bulkAddTags(groupId, tags, discoveryUrl, position),
       refresh: actions.refreshTagDiscovery
     }) : null;
     let profileLayout;
@@ -258,6 +258,53 @@
     let host, menu, signature, favoriteScrollHost;
     const favoriteScroll = "data-oshaberi-note-favorite-scroll", favoriteScrollList = "data-oshaberi-note-favorite-scroll-list";
     const favoriteScrollContainer = "data-oshaberi-note-favorite-scroll-host";
+    const favoriteScrollKey = "oshaberi-note:favorites-scroll";
+    const favoritePositions = new Map();
+    let renderedFavorites, lastFavoriteGroupId;
+    try {
+      const saved = JSON.parse(win.sessionStorage?.getItem(favoriteScrollKey) || "{}");
+      for (const id of core.groupIds) {
+        const top = saved?.[id];
+        if (Number.isFinite(top) && top >= 0) favoritePositions.set(id, top);
+      }
+    } catch { /* セッション領域を使えない場合は同じ文書内で保持する。 */ }
+    function rememberFavoritePosition() {
+      if (!renderedFavorites || renderedFavorites.pending) return;
+      const { list, groupId } = renderedFavorites;
+      if (list.isConnected && list.clientHeight > 0) favoritePositions.set(groupId, Math.max(0, list.scrollTop));
+    }
+    function saveFavoritePositions() {
+      rememberFavoritePosition();
+      if (!favoritePositions.size) return;
+      try { win.sessionStorage?.setItem(favoriteScrollKey, JSON.stringify(Object.fromEntries(favoritePositions))); }
+      catch { /* 同じ文書内の復元は続ける。 */ }
+    }
+    win.addEventListener?.("pagehide", saveFavoritePositions);
+    function restoreFavoritePosition() {
+      if (!renderedFavorites?.pending || !(renderedFavorites.list.clientHeight > 0)) return;
+      const { list, groupId, reveal } = renderedFavorites;
+      renderedFavorites.pending = false;
+      list.scrollTop = favoritePositions.get(groupId) ?? 0;
+      const active = reveal && list.querySelector('[aria-current="page"]');
+      if (active) {
+        // ページ本体を動かさず、お気に入り一覧の内側だけを調整する。
+        const top = list.getBoundingClientRect().top + list.clientTop;
+        const bottom = top + list.clientHeight;
+        const rect = active.getBoundingClientRect();
+        if (rect.top < top) list.scrollTop += rect.top - top;
+        else if (rect.bottom > bottom) list.scrollTop += rect.bottom - bottom;
+      }
+    }
+    function trackFavoriteList(list, groupId) {
+      renderedFavorites = {
+        list, groupId, pending: true,
+        reveal: !favoritePositions.has(groupId) || (lastFavoriteGroupId !== undefined && lastFavoriteGroupId !== groupId)
+      };
+      lastFavoriteGroupId = groupId;
+      list.addEventListener("scroll", () => {
+        if (renderedFavorites?.list === list) rememberFavoritePosition();
+      }, { passive: true });
+    }
     function syncFavoriteScroll() {
       const list = menu?.querySelector(`[${favoriteScrollList}]`);
       const next = list ? host : undefined;
@@ -733,14 +780,15 @@
           if (event.key === "Escape") { event.preventDefault(); block.hidden = true; toggle.setAttribute("aria-expanded", "false"); toggle.focus(); }
         };
         select.onchange = () => { context.groupId = select.value; status.textContent = ""; repaint(); };
-        button.onclick = async () => {
+        button.onclick = async event => {
           if (favoriteProfile !== context || context.busy || context.uncertain || button.disabled) return;
+          const position = core.favoriteClickPosition(event);
           context.busy = true; const groupId = context.groupId, user = context.owner; status.textContent = "保存しています…"; repaint();
           try {
-            if (article) await actions.addCurrentArticle(groupId, user.articleId, user.url, user.title);
-            else if (membership) await actions.addCurrentMembership(groupId, user.userId, user.displayName);
-            else if (magazine) await actions.addCurrentMagazine(groupId, user.userId, user.magazineId, user.displayName);
-            else await actions.addCurrentUser(groupId, user.userId, user.displayName);
+            if (article) await actions.addCurrentArticle(groupId, user.articleId, user.url, user.title, position);
+            else if (membership) await actions.addCurrentMembership(groupId, user.userId, user.displayName, position);
+            else if (magazine) await actions.addCurrentMagazine(groupId, user.userId, user.magazineId, user.displayName, position);
+            else await actions.addCurrentUser(groupId, user.userId, user.displayName, position);
             if (favoriteProfile === context) status.textContent = "お気に入りに追加しました。";
           }
           catch (error) { context.uncertain = error.code === "UNCONFIRMED"; if (favoriteProfile === context) status.textContent = `${error.message || "保存できませんでした。"} 「状態を再確認」で確認してください。`; refresh.hidden = false; }
@@ -776,6 +824,8 @@
       const registered = article ? Boolean(registeredGroup) : group?.tags.some(item => core.favoriteKey(item) === key);
       context.button.textContent = context.busy ? "保存中…" : registered ? article ? `${core.groupName(registeredGroup)}に登録済み` : "登録済み" : article ? "この記事を追加" : membership ? "このメンバーシップを追加" : magazine ? "このマガジンを追加" : "この作者を追加";
       context.button.disabled = !group || registered || context.busy || context.uncertain || Boolean(settings.tagWarning);
+      if (registered) context.button.removeAttribute("title");
+      else context.button.setAttribute("title", "CtrlまたはShift＋クリックで先頭に追加");
       context.select.disabled = context.busy || context.uncertain || Boolean(settings.tagWarning);
       context.refresh.disabled = context.busy || !actions.refresh;
     }
@@ -848,18 +898,18 @@
       syncHeaderSidebars(targets, url);
     }
     function repaint() { if (!disposed && currentSettings) update(currentSettings, currentUrl); }
-    async function addTag(tag) {
+    async function addTag(tag, position) {
       if (adding || uncertain || !currentSettings?.enabled || !core.usesTags(currentSettings) ||
           currentSettings.tagWarning || core.addableTag(currentUrl) !== tag) return;
       adding = true; actionMessage = "保存中…"; repaint();
       const groupId = currentSettings.selectedTagGroupId, selectionRevision = currentSettings.groupSelectionRevision;
-      try { await actions.addCurrentTag(groupId, selectionRevision); actionMessage = `# ${tag}を${core.groupName(currentSettings.tagGroups.find(group => group.id === groupId))}に追加しました。`; }
+      try { await actions.addCurrentTag(groupId, selectionRevision, position); actionMessage = `# ${tag}を${core.groupName(currentSettings.tagGroups.find(group => group.id === groupId))}に追加しました。`; }
       catch (error) {
         uncertain = error.code === "UNCONFIRMED";
         actionMessage = error.message || "保存できませんでした。";
       } finally { adding = false; repaint(); }
     }
-    async function addSearchedUser(userId) {
+    async function addSearchedUser(userId, position) {
       if (adding || uncertain || !currentSettings?.enabled || !core.usesTags(currentSettings) || !actions.addSearchedUser ||
           currentSettings.tagWarning || currentSettings.groupSelectionInvalid || core.searchedAuthor(currentUrl)?.toLowerCase() !== userId.toLowerCase()) return;
       const group = core.selectedGroup(currentSettings), key = `user:${userId.toLowerCase()}`;
@@ -868,7 +918,7 @@
       const name = searchAuthor(userId, currentSettings).name || "";
       adding = true; actionMessage = "保存中…"; repaint();
       try {
-        await actions.addSearchedUser(group.id, selectionRevision, userId, name);
+        await actions.addSearchedUser(group.id, selectionRevision, userId, name, position);
         if (currentUrl === source) actionMessage = `${name || userId}を${core.groupSymbols[core.groupIds.indexOf(group.id)]} ${core.groupName(group)}に追加しました。`;
       } catch (error) {
         uncertain = error.code === "UNCONFIRMED";
@@ -1875,6 +1925,7 @@
     }
     function restore() {
       clearMenuFavoriteDrag();
+      rememberFavoritePosition(); renderedFavorites = undefined;
       favoriteScrollHost?.removeAttribute(favoriteScrollContainer); favoriteScrollHost = undefined;
       menu?.remove(); menu = undefined; host = undefined; signature = undefined;
       for (const element of originals) element.removeAttribute(hidden);
@@ -1912,12 +1963,18 @@
     function closeMobile(focus = false) {
       clearMenuFavoriteDrag();
       if (!mobile) return;
+      if (host === mobile.panel && !mobile.panel.hidden && renderedFavorites && !renderedFavorites.pending) {
+        rememberFavoritePosition();
+        renderedFavorites.pending = true;
+        renderedFavorites.reveal = false;
+      }
       mobile.panel.hidden = true; mobile.button.setAttribute("aria-expanded", "false");
       if (focus) mobile.button.focus();
     }
     function removeMobile() {
       clearMenuFavoriteDrag();
       if (!mobile) return;
+      if (host === mobile.panel) rememberFavoritePosition();
       const focusInside = mobile.panel.contains(doc.activeElement) || doc.activeElement === mobile.button;
       mobile.button.remove(); mobile.panel.remove(); mobile.parent.removeAttribute("data-oshaberi-note-mobile-logo");
       if (focusInside && mobile.logo.isConnected) mobile.logo.focus();
@@ -1941,6 +1998,7 @@
         button.onclick = () => {
           if (!panel.hidden) { closeMobile(); return; }
           panel.hidden = false; button.setAttribute("aria-expanded", "true");
+          restoreFavoritePosition();
         };
         const escape = event => { if (event.key === "Escape") { event.preventDefault(); closeMobile(true); } };
         button.onkeydown = escape; panel.onkeydown = escape;
@@ -2168,6 +2226,7 @@
       }
       if (signature !== nextSignature) {
         clearMenuFavoriteDrag();
+        rememberFavoritePosition(); renderedFavorites = undefined;
         menu.replaceChildren();
         if (severe) {
           const profile = doc.createElement("a"), destination = core.profileUrl(settings.noteUserId);
@@ -2187,9 +2246,9 @@
             const add = doc.createElement("button"); add.type = "button"; add.textContent = "＠";
             add.className = "oshaberi-note-favorite-toggle"; add.setAttribute("data-author-search-add", "");
             const label = `${authorCard.name || activeAuthor}を${core.groupSymbols[core.groupIds.indexOf(group.id)]} ${core.groupName(group)}に追加`;
-            add.setAttribute("aria-label", label); add.setAttribute("title", label);
+            add.setAttribute("aria-label", label); add.setAttribute("title", `${label}（CtrlまたはShift＋クリックで先頭に追加）`);
             add.disabled = adding || uncertain || Boolean(settings.tagWarning) || Boolean(settings.groupSelectionInvalid);
-            add.onclick = () => { void addSearchedUser(activeAuthor); };
+            add.onclick = event => { void addSearchedUser(activeAuthor, core.favoriteClickPosition(event)); };
             row.append(add, following); menu.append(row);
           } else menu.append(following);
           if (activeAuthor) {
@@ -2216,10 +2275,10 @@
                 button.textContent = "＃";
                 button.className = "oshaberi-note-favorite-toggle";
                 const label = `# ${addableTag}：${adding ? "保存中…" : "タグをお気に入りに追加"}`;
-                button.setAttribute("aria-label", label); button.setAttribute("title", label);
+                button.setAttribute("aria-label", label); button.setAttribute("title", `${label}（CtrlまたはShift＋クリックで先頭に追加）`);
                 button.disabled = !normalized || adding || uncertain || Boolean(settings.tagWarning) || settings.groupSelectionInvalid || !actions.addCurrentTag;
                 button.setAttribute("data-tag-add", "");
-                button.onclick = () => { void addTag(addableTag); };
+                button.onclick = event => { void addTag(addableTag, core.favoriteClickPosition(event)); };
                 const row = doc.createElement("div"); row.className = "oshaberi-note-profile-actions";
                 row.append(button, following); menu.prepend(row);
               }
@@ -2248,6 +2307,7 @@
             menu.append(selector);
             const name = doc.createElement("div"); name.className = "oshaberi-note-group-name"; name.textContent = core.groupName(group); name.setAttribute("title", name.textContent); menu.append(name);
             const list = doc.createElement("ul"); list.setAttribute(favoriteScrollList, ""); menu.append(list);
+            trackFavoriteList(list, group.id);
             if (menuFavoriteDropEnabled) bindMenuFavoriteListDrop(list);
             for (const tag of group.tags) {
               const item = doc.createElement("li"), link = doc.createElement("a");
@@ -2286,6 +2346,7 @@
         }
       }
       for (const element of originals) if (!element.isConnected || element.parentElement !== host) { element.removeAttribute(hidden); originals.delete(element); }
+      restoreFavoritePosition();
       pruneProfileLayout();
     }
     return Object.freeze({
@@ -2306,6 +2367,7 @@
         profilePromotionsDirty = true;
       },
       stop() {
+        win.removeEventListener?.("pagehide", saveFavoritePositions);
         syncSearchArticleFilter({ enabled: false }, currentUrl);
         clearRelatedTopics(); relatedSearchKey = undefined; relatedOpen = false;
         syncRelatedRoot(false);

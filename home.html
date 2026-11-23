@@ -78,6 +78,7 @@
               <button type="button" id="evaluation-save-cache" class="secondary" disabled>現在の資料を保存</button>
               <button type="button" id="evaluation-load-cache" class="secondary" disabled>指定した作者の資料を読み込む</button>
               <button type="button" id="evaluation-remove-cache" class="secondary" disabled>指定した作者の資料を削除</button>
+              <button type="button" id="evaluation-remove-all-cache" class="secondary" aria-haspopup="dialog" aria-controls="evaluation-cache-delete-dialog" disabled>保存済みキャッシュをすべて削除</button>
               <button type="button" id="evaluation-replay-cache" class="secondary" disabled>保存済みの鑑定を再集計</button>
             </div>
             <p>本文や根拠メモをこのブラウザに保存します。読み込み時にnoteへ接続しません。</p>
@@ -332,6 +333,14 @@
     <p class="muted">ブラウザの拡張アイコンを押すと、ONに戻してこの画面を開きます。</p>
     <footer>非公式拡張 · 0.1.4 · note株式会社とは関係ありません。<br>この画面は拡張内にあり、noteの通常ホームを読み込みません。記事の取得・表示・操作はnote公式画面で行います。</footer>
   </main>
+  <dialog id="evaluation-cache-delete-dialog" class="chat-tag-dialog" aria-labelledby="evaluation-cache-delete-heading" aria-describedby="evaluation-cache-delete-message">
+    <h2 id="evaluation-cache-delete-heading">保存済みキャッシュをすべて削除</h2>
+    <p id="evaluation-cache-delete-message"></p>
+    <div class="settings-actions">
+      <button type="button" id="evaluation-cache-delete-yes">はい</button>
+      <button type="button" id="evaluation-cache-delete-no" class="secondary" autofocus>いいえ</button>
+    </div>
+  </dialog>
   <dialog id="chat-article-dialog" class="chat-tag-dialog" aria-labelledby="chat-article-heading">
     <h2 id="chat-article-heading">この記事について</h2>
     <p id="chat-article-title"></p>

@@ -7,11 +7,11 @@
   const discovery = globalThis.OshaberiNoteTagDiscovery;
   let chatTagSelection = false, registrationValid = () => true;
   const tagDialog = discovery?.createDialog(document, {
-    async save(groupId, tags) {
+    async save(groupId, tags, position) {
       if (busy || uncertain || !registrationValid()) throw new Error("状態を再確認してから登録してください。");
       busy = true; controls(); const before = revision;
       try {
-        const result = await platform.bulkAddTags(groupId, tags);
+        const result = await platform.bulkAddTags(groupId, tags, undefined, position);
         if (before === revision) show(result);
         return { ...state, bulkTagReport: result.bulkTagReport };
       } finally { busy = false; controls(); }

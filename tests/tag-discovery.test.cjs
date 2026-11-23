@@ -7,7 +7,7 @@ function runtime(){const c=vm.createContext({URL,console});for(const name of ['c
 function storage(initial){const f=runtime();let raw=initial||f.core.defaultSettings(),writes=0;const options={};const controller=f.c.OshaberiNoteRouting.createController({load:async()=>raw,store:async value=>{if(options.fail)throw Error('保存失敗');writes++;raw=plain(value);},setRules:async()=>{}});return {...f,controller,options,get raw(){return raw;},get writes(){return writes;}};}
 function dialogFixture(options={}){
  const f=storage(options.initial),doc=documentFromHtml();doc.body=doc.root;let calls=0;
- const dialog=f.discovery.createDialog(doc,{save:async(groupId,tags)=>{calls++;await options.gate;if(options.unconfirmed)throw Object.assign(Error('結果不明'),{code:'UNCONFIRMED'});return f.controller.tag({type:'ADD_TAGS',groupId,tags});},refresh:()=>f.controller.getState()});
+ const dialog=f.discovery.createDialog(doc,{save:async(groupId,tags,position)=>{calls++;await options.gate;if(options.unconfirmed)throw Object.assign(Error('結果不明'),{code:'UNCONFIRMED'});return f.controller.tag({type:'ADD_TAGS',groupId,tags,position});},refresh:()=>f.controller.getState()});
  dialog.open(options.tags||['A','B'],f.core.readSettings(f.raw));
  const buttons=()=>doc.querySelectorAll('button');
  return {...f,doc,dialog,buttons,find:text=>buttons().find(b=>b.textContent===text),get calls(){return calls;},get raw(){return f.raw;},get writes(){return f.writes;}};
@@ -56,6 +56,17 @@ test('ダイアログは連打を止め、結果不明では再確認まで再�
  f.find('すべてON').onclick();const save=f.find('選択した2件を登録'),pending=save.onclick();save.onclick();assert.equal(f.calls,1);assert.equal(save.disabled,true);release();await pending;
  assert.equal(save.disabled,true);assert.equal(f.find('状態を再確認').hidden,false);options.unconfirmed=false;await f.find('状態を再確認').onclick();assert.equal(save.disabled,false);
  await save.onclick();assert.equal(f.calls,2);f.dialog.update({...f.core.readSettings(f.raw),enabled:false});assert.equal(f.find('選択した0件を登録').disabled,true);
+});
+test('共通登録はCtrlとShiftで既存項目の前に選択順で追加する', async () => {
+ for (const modifier of ['ctrlKey', 'shiftKey']) {
+  const { core } = runtime(), initial = core.defaultSettings();
+  initial.tagGroups[0].tags = ['既存'];
+  const f = dialogFixture({ initial });
+  f.find('すべてON').onclick();
+  await f.find('選択した2件を登録').onclick({ [modifier]: true });
+  assert.deepEqual(f.raw.tagGroups[0].tags, ['A', 'B', '既存']);
+  await assert.rejects(f.controller.tag({type:'ADD_TAGS', groupId:'group1', tags:['C'], position:'middle'}), /追加位置/);
+ }
 });
 test('設定のタグ登録支援は同じダイアログで保存し、プロンプトをクリップボードだけにコピーする',async()=>{
  const f=homeFixture();await flush();const n=f.nodes;n.get('nav-discovery').onclick();assert.equal(n.get('panel-discovery').hidden,false);
@@ -109,6 +120,9 @@ test('背景メッセージは専用ホームと現在記事だけを許可し�
  const send=(patch,sender)=>new Promise(resolve=>{if(!handler({type:'bulk-add-tags',patch},sender,resolve))resolve(false);});
  assert.equal(await send({groupId:'group1',tags:['A']},{}),false);
  assert.equal((await send({groupId:'group1',tags:['A']},{home:true})).ok,true);
+ assert.equal((await send({groupId:'group1',tags:['First'],position:'start'},{home:true})).ok,true);
+ assert.equal((await send({groupId:'group1',tags:['ArticleFirst'],position:'start',pageUrl:'https://note.com/test/n/n123'},{note:true})).ok,true);
+ assert.deepEqual(f.raw.tagGroups[0].tags,['ArticleFirst','First','A']);
  assert.equal((await send({groupId:'group2',tags:['B'],pageUrl:'https://note.com/test/n/n123'},{note:true})).ok,true);
  assert.deepEqual(f.raw.tagGroups[1].tags,['B']);
  assert.equal((await send({groupId:'group1',tags:['C'],pageUrl:'https://note.com/test'},{note:true})).code,'CONFLICT');

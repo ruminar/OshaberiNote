@@ -474,7 +474,7 @@ test('モバイルでもグループ操作とタグ追加を既存処理へ送�
  const panel=f.doc.querySelector('[class="oshaberi-note-mobile-panel"]');
  f.doc.querySelector('[class="oshaberi-note-mobile-toggle"]').fire('click');
  panel.querySelector('[data-group-id="group2"]').fire('click');await flush();assert.equal(selected,'group2');assert.equal(panel.hidden,false);
- panel.querySelector('[data-tag-add]').fire('click');await flush();assert.deepEqual(plain(added),['group1',0]);
+ panel.querySelector('[data-tag-add]').fire('click',{ctrlKey:true});await flush();assert.deepEqual(plain(added),['group1',0,'start']);
  f.ui.update(settings,'https://note.com/search?q=%23AI&context=user');assert.equal(panel.hidden,true);
  assert.equal(panel.querySelector('ul').querySelector('a').getAttribute('aria-current'),'page');
  assert.equal(panel.querySelector('[data-tag-add]'),null);
@@ -951,7 +951,7 @@ test('表示中の日本語タグを左メニューで追加し、二重クリ�
  const f=uiFixture(sidebarHtml,{async addCurrentTag(){calls++;await new Promise(resolve=>{complete=resolve;});settings=f.core.readSettings({...groups(),...groups(['みじんこ123'])});f.ui.update(settings,url);}});
  let settings=f.core.readSettings({...groups(),});f.ui.update(settings,url);
  const button=f.doc.querySelector('[data-tag-add]');assert.match(button.getAttribute('aria-label'),/みじんこ123/);assert.equal(button.disabled,false);
- assert.equal(button.textContent,'＃');assert.equal(button.getAttribute('title'),button.getAttribute('aria-label'));
+ assert.equal(button.textContent,'＃');assert.match(button.getAttribute('title'),/CtrlまたはShift＋クリックで先頭に追加/);
  const row=button.parentElement;assert.equal(row.className,'oshaberi-note-profile-actions');
  assert.equal(row.children[0],button);assert.equal(row.children[1].className,'oshaberi-note-navigation-following');
  button.onclick();button.onclick();assert.equal(calls,1);assert.equal(f.doc.querySelector('[data-tag-add]').disabled,true);
@@ -1029,7 +1029,7 @@ test('ホームの4番号・改名・グループ別の名前下書き保持・�
 test('サイドバーのグループ選択はページ遷移せず保存結果を反映し、追加に選択IDとrevisionを送る',async()=>{
  let settings,added;const f=uiFixture(sidebarHtml,{async selectGroup(groupId){settings={...settings,tagSchemaVersion:2,selectedTagGroupId:groupId,groupSelectionRevision:1};f.ui.update(settings,'https://note.com/tag/A');},async addCurrentTag(...args){added=args;}});
  settings=f.core.readSettings({...groups(),});f.ui.update(settings,'https://note.com/tag/A');f.doc.querySelector('[data-group-id="group2"]').onclick();await flush();
- assert.equal(f.doc.querySelector('[data-group-id="group2"]').getAttribute('aria-pressed'),'true');f.doc.querySelector('[data-tag-add]').onclick();await flush();assert.deepEqual(added,['group2',1]);
+ assert.equal(f.doc.querySelector('[data-group-id="group2"]').getAttribute('aria-pressed'),'true');f.doc.querySelector('[data-tag-add]').onclick();await flush();assert.deepEqual(added,['group2',1,'end']);
 });
 
 test('ロゴ識別は公式headerのnote SVGだけ。本文内・通常ホームリンクは除外',()=>{
@@ -2490,7 +2490,7 @@ test('作者検索の＠はTL直前の同じ行。作者名と選択グループ
  settings=f.core.readSettings(back.stored);appendSearchAvatar(f,'sample_author','Sample');f.ui.update(settings,searchedFavoriteUrl);
  const button=f.doc.querySelector('[data-author-search-add]'),row=button.parentElement;
  assert.equal(button.textContent,'＠');assert.equal(row.children[0],button);assert.equal(row.children[1].textContent,'フォロー中のTL');assert.equal(row.className,'oshaberi-note-profile-actions');
- assert.equal(button.getAttribute('title'),'Sampleを① グループ1に追加');assert.equal(button.getAttribute('aria-label'),button.getAttribute('title'));
+ assert.match(button.getAttribute('title'),/^Sampleを① グループ1に追加.*先頭に追加/);assert.equal(button.getAttribute('aria-label'),'Sampleを① グループ1に追加');
  button.onclick();await flush();assert.deepEqual(calls,[{groupId:'group1',selectionRevision:0,...searchedFavorite}].map(({type,...value})=>value));
  assert.deepEqual(back.stored.tagGroups[0].tags,[searchedFavorite]);assert.equal(f.doc.querySelector('[data-author-search-add]'),null);assert.match(f.doc.querySelector('[role="status"]').textContent,/Sampleを① グループ1に追加/);
  const exported=f.core.parseSettingsExport(f.core.exportSettings(settings));assert.deepEqual(plain(exported.tagGroups[0].tags),[searchedFavorite]);
@@ -2507,8 +2507,8 @@ test('作者検索の追加は2段の⑧と狭幅でも利用でき、作者情�
  const back=fixture({...groups(),tagSchemaVersion:7,tagGroups:Array.from({length:8},(_,i)=>({id:'group'+(i+1),name:'',tags:[]})),favoriteGroupDisplay:'double',selectedTagGroupId:'group8'}),calls=[];
  const f=uiFixture(logoHeaderHtml+categorySidebarHtml,{async addSearchedUser(...args){calls.push(args);}});f.doc.getElementById('category-sidebar').width=0;f.win.wide=false;
  f.ui.update(f.core.readSettings(back.stored),searchedFavoriteUrl);const panel=f.doc.querySelector('[class="oshaberi-note-mobile-panel"]'),button=panel.querySelector('[data-author-search-add]');
- assert.equal(button.getAttribute('title'),'sample_authorを⑧ グループ8に追加');assert.equal(panel.querySelector('[data-oshaberi-note-author-card]').querySelector('img'),null);
- button.onclick();await flush();assert.deepEqual(calls,[['group8',0,'sample_author','']]);
+ assert.match(button.getAttribute('title'),/^sample_authorを⑧ グループ8に追加.*先頭に追加/);assert.equal(panel.querySelector('[data-oshaberi-note-author-card]').querySelector('img'),null);
+ button.onclick({shiftKey:true});await flush();assert.deepEqual(calls,[['group8',0,'sample_author','','start']]);
 });
 test('保存中の連打・グループ操作を抑止し、失敗では作者追加ボタンを残す',async()=>{
  let release,count=0;const f=uiFixture(categorySidebarHtml,{addSearchedUser:()=>{count++;return new Promise((resolve,reject)=>{release=()=>reject(Error('保存失敗'));});},selectGroup:async()=>{throw Error('must not select');}}),settings=f.core.readSettings(groups());

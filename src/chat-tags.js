@@ -63,7 +63,7 @@
         buttons[index].disabled = blocked || !group || registered;
       }
     }
-    async function register(groupId) {
+    async function register(groupId, position) {
       if (!selected || saving || uncertain) return;
       const settings = getSettings(), tag = selected.tag;
       const group = settings && core.availableGroups(settings).find(item => item.id === groupId);
@@ -71,7 +71,7 @@
       saving = true; refresh();
       byId("chat-tag-status").textContent = "登録しています…";
       try {
-        const next = await platform.tag({ type: "ADD_TAG", groupId, tag });
+        const next = await platform.tag({ type: "ADD_TAG", groupId, tag, position });
         onSaved(next);
         byId("chat-tag-status").textContent = `「#${tag}」を${core.groupName(next.tagGroups.find(item => item.id === groupId))}に登録しました。`;
       } catch (error) {
@@ -88,7 +88,8 @@
         const groupId = group.id, button = doc.createElement("button"); button.type = "button";
         button.setAttribute("data-chat-tag-group", groupId);
         button.textContent = `${signs[index]}グループ${index + 1}に登録`;
-        button.onclick = () => { void register(groupId); };
+        button.setAttribute("title", "CtrlまたはShift＋クリックで先頭に追加");
+        button.onclick = event => { void register(groupId, core.favoriteClickPosition(event)); };
         byId("chat-tag-groups").append(button); buttons.push(button);
       }
     }

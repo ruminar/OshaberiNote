@@ -430,9 +430,10 @@
   function settingsToken(settings) {
     return JSON.stringify([transferSettings(settings), settings.favoriteGroupDisplay ?? "normal", settings.theme ?? "system", settings.ollamaUrl, settings.ollamaModel, settings.ollamaSystemPrompt ?? "", settings.groupSelectionRevision, settings.tagGroupsRevision, settings.authorDisplayRevision ?? 0]);
   }
+  function favoriteClickPosition(event) { return event?.ctrlKey || event?.shiftKey ? "start" : "end"; }
   globalThis.OshaberiNote = Object.freeze({ settingsKey, isHome, isDashboard, shouldRedirect, normalizeUserId, readSettings, profileUrl,
     modeOf, usesTags, usesFollowing, availableGroups, expandGroups, groupSymbols,
     exportSettings, parseSettingsExport, settingsToken, normalizeOllamaUrl, validateModel, validateSystemPrompt, authorId, authorName, isSelf, authorRule, authorLabel, sortAuthors,
-    favorite, favoriteKey, favoriteLabel, favoriteUrl, authorSearchUrl, searchedAuthor, favoriteUser, favoriteMagazine, favoriteMembership, favoriteArticle, articleAddress, favoriteSchema, bookIconPath, membershipIconPath, membershipPage, questionPage,
+    favorite, favoriteKey, favoriteLabel, favoriteUrl, favoriteClickPosition, authorSearchUrl, searchedAuthor, favoriteUser, favoriteMagazine, favoriteMembership, favoriteArticle, articleAddress, favoriteSchema, bookIconPath, membershipIconPath, membershipPage, questionPage,
     normalizeTag, normalizeTagCandidates, addableTag, inspectTags, tagUrl, articleSearchTabUrl, pageKind, hasFavoriteMenu, isArticle, isPreviewArticle, groupIds, groupName, normalizeGroupName, selectedGroup, defaultSettings });
 })();

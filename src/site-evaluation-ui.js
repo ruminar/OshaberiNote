@@ -138,6 +138,7 @@
     const selected = key && target?.authorUrl === source.profile(byId("target").value) && selectedArticles();
     byId("save-cache").disabled = busy || !selected?.length;
     byId("load-cache").disabled = byId("remove-cache").disabled = busy || !key;
+    byId("remove-all-cache").disabled = busy || !api.storage?.local;
     byId("replay-cache").disabled = busy || !preparedReviews?.evaluatedAt || !sameExtraction(snapshot, preparedReviews.input);
     byId("run").disabled = busy || !snapshot || Boolean(current);
     byId("stop").disabled = !evaluationAbort;
@@ -667,6 +668,30 @@
     if (!key) return;
     await api.storage.local.remove(key);
     byId("status").textContent = "指定した作者のテスト用キャッシュを削除しました。";
+  });
+
+  const cacheDeleteDialog = byId("cache-delete-dialog");
+  byId("cache-delete-no").onclick = () => cacheDeleteDialog.close();
+  byId("remove-all-cache").onclick = () => run(async signal => {
+    const storage = api.storage.local;
+    const storedKeys = storage.getKeys ? await storage.getKeys() : Object.keys(await storage.get(null));
+    signal.throwIfAborted();
+    const keys = storedKeys.filter(key => key.startsWith(cachePrefix));
+    if (!keys.length) {
+      byId("status").textContent = "削除する保存済みキャッシュはありません。";
+      return;
+    }
+    byId("cache-delete-message").textContent = `保存済みの鑑定キャッシュ${keys.length}人分をすべて削除しますか？`;
+    byId("cache-delete-yes").onclick = () => {
+      if (!cacheDeleteDialog.open) return;
+      cacheDeleteDialog.close();
+      return run(async () => {
+        try { await storage.remove(keys); }
+        catch { throw new Error("保存済みキャッシュを削除できませんでした。"); }
+        byId("status").textContent = `保存済みの鑑定キャッシュ${keys.length}人分を削除しました。`;
+      });
+    };
+    cacheDeleteDialog.showModal();
   });
 
   byId("replay-cache").onclick = () => {

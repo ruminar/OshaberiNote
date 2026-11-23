@@ -7,6 +7,46 @@ const items = ["SampleTag", { type: "user", userId: "sample_author", displayName
   { type: "magazine", userId: "sample_author", magazineId: "m123", displayName: "Magazine" },
   { type: "membership", userId: "sample_author", displayName: "Membership" },
   { type: "article", articleId: "n123", url: "https://note.com/sample_author/n/n123", title: "Article" }];
+const favoriteList = f => f.menu().querySelector("[data-oshaberi-note-favorite-scroll-list]");
+
+test("一覧の再描画とグループ切り替え後にスクロール位置を復元する", async () => {
+  const groups = settingsData().tagGroups;
+  groups[0].tags = Array.from({ length: 16 }, (_, i) => `Tag${i}`);
+  groups[1].tags = Array.from({ length: 16 }, (_, i) => `Other${i}`);
+  const storage = new Map(), sessionStorage = { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) };
+  const f = await fixture({ tagGroups: groups }, { scrollLayout: true, sessionStorage });
+  const firstList = favoriteList(f);
+  firstList.scrollTop = 270;
+  const url = firstList.children[8].querySelector("a").href;
+  f.url = url; f.update();
+  assert.notEqual(favoriteList(f), firstList);
+  assert.equal(favoriteList(f).scrollTop, 270);
+  f.group("group2").onclick(); await flush();
+  assert.equal(favoriteList(f).scrollTop, 0);
+  favoriteList(f).scrollTop = 120;
+  f.group("group1").onclick(); await flush();
+  assert.equal(favoriteList(f).scrollTop, 270);
+  f.windowEvents.get("pagehide")();
+  const next = await fixture({ tagGroups: groups }, { url, scrollLayout: true, sessionStorage, mobile: true });
+  const toggle = next.doc.querySelector('[class="oshaberi-note-mobile-toggle"]');
+  toggle.onclick();
+  assert.equal(favoriteList(next).scrollTop, 270);
+  favoriteList(next).scrollTop = 225;
+  toggle.onclick(); toggle.onclick();
+  assert.equal(favoriteList(next).scrollTop, 225);
+  next.ui.stop();
+  assert.equal(next.windowEvents.has("pagehide"), false);
+});
+
+test("タグページの登録ボタンはCtrlで先頭に追加し、通常クリックで末尾に追加する", async () => {
+  const f = await fixture();
+  f.url = f.core.tagUrl("NewFirst"); f.update();
+  f.menu().querySelector("[data-tag-add]").onclick({ ctrlKey: true }); await flush();
+  assert.equal(f.state.tagGroups[0].tags[0], "NewFirst");
+  f.url = f.core.tagUrl("NewLast"); f.update();
+  f.menu().querySelector("[data-tag-add]").onclick(); await flush();
+  assert.equal(f.state.tagGroups[0].tags.at(-1), "NewLast");
+});
 const html = '<header data-header-state="navbar"><div><a href="/" target="_self"><svg role="img" aria-label="note"></svg></a></div></header><div class="min-h-screen lg:grid lg:grid-cols-[202px_minmax(0,1fr)]"><div id="sidebar" class="sticky top-3 hidden h-full max-h-screen w-[11.375rem] overflow-y-auto pr-4 lg:block"><div><nav aria-label="カテゴリナビゲーション" class="flex flex-col gap-4"><a href="https://note.com/trend"></a></nav></div></div><main><article></article></main></div>';
 async function fixture(patch = {}, options = {}) {
   const c = vm.createContext({ URL, console });
@@ -14,6 +54,28 @@ async function fixture(patch = {}, options = {}) {
   const core = c.OshaberiNote; let stored = { ...settingsData(plain(items)), tagSchemaVersion: 6, ...patch }, state = core.readSettings(stored);
   let url = options.url || "https://note.com/following", handler, writes = 0, checks = 0;
   const calls = [], doc = documentFromHtml(html), win = { wide: !options.mobile, matchMedia: q => ({ matches: q.includes("max-width") ? !win.wide : win.wide }), getComputedStyle: () => ({ display: "block" }) };
+  const windowEvents = new Map();
+  win.addEventListener = (type, listener) => windowEvents.set(type, listener);
+  win.removeEventListener = type => windowEvents.delete(type);
+  win.sessionStorage = options.sessionStorage;
+  if (options.scrollLayout) {
+    const create = doc.createElement.bind(doc);
+    doc.createElement = tag => {
+      const element = create(tag);
+      if (tag === "ul") {
+        element.scrollTop = element.clientTop = 0;
+        Object.defineProperty(element, "clientHeight", { get: () => element.closest('[class="oshaberi-note-mobile-panel"]')?.hidden ? 0 : 120 });
+        element.getBoundingClientRect = () => ({ top: 100, bottom: 220 });
+      }
+      if (tag === "a") element.getBoundingClientRect = () => {
+        const row = element.parentElement, list = row?.parentElement;
+        if (list?.tagName !== "UL") return { width: 180 };
+        const top = 100 + list.children.indexOf(row) * 40 - list.scrollTop;
+        return { top, bottom: top + 40, width: 180 };
+      };
+      return element;
+    };
+  }
   if (options.mobile) doc.getElementById("sidebar").width = 0;
   c.OshaberiNoteBackgroundPlatform = {
     load: async () => stored, store: async value => { await options.saveGate; if (options.saveError) throw Error("save failed"); stored = plain(value); writes++; }, setRules: async () => {},
@@ -38,6 +100,7 @@ async function fixture(patch = {}, options = {}) {
       return apply("menu-favorite-drop", { operation, selectionRevision, pageUrl });
     },
     selectGroup: groupId => apply("select-tag-group", { groupId, pageUrl: url }),
+    addCurrentTag: (groupId, selectionRevision, position) => apply("add-current-tag", { groupId, selectionRevision, position, pageUrl: url }),
     async refresh() { state = core.readSettings(stored); ui.update(state, url); }
   });
   ui.update(state, url);
@@ -45,7 +108,7 @@ async function fixture(patch = {}, options = {}) {
   const group = id => menu()?.querySelector(`[data-group-id="${id}"]`);
   const rows = () => menu()?.querySelectorAll('[data-menu-favorite-item]') || [];
   const drag = (index = 0) => { const row = rows()[index], dataTransfer = { setData() {} }; const event = row.fire("dragstart", { dataTransfer }); return { row, dataTransfer, event }; };
-  return { c, core, doc, win, ui, options, calls, send, menu, group, rows, drag,
+  return { c, core, doc, win, ui, options, calls, send, menu, group, rows, drag, windowEvents,
     get state() { return stored; }, get writes() { return writes; }, get checks() { return checks; },
     update() { ui.update(state, url); }, set url(value) { url = value; },
     changed(patch) { stored = { ...stored, ...patch }; state = core.readSettings(stored); ui.update(state, url); }
