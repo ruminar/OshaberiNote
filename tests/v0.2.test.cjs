@@ -17,6 +17,43 @@ function fixture(initial={},options={}) {
  function restart(){return context.OshaberiNoteRouting.createController({load:async()=>stored,store:async next=>{if(options.fail)throw Error('save failed');stored=plain(next);writes++;},setRules:async next=>{rules=plain(next);}});}
  return {core:context.OshaberiNote,controller:restart(),restart,options,get stored(){return stored;},get rules(){return rules;},get writes(){return writes;}};
 }
+test('お気に入りの全削除は確認後に選択中のグループだけを空にする', async () => {
+ const tagGroups = Array.from({length:8}, (_,i) => ({id:`group${i+1}`, name:'', tags:[]}));
+ tagGroups[0].tags = ['Keep'];
+ tagGroups[7] = {id:'group8', name:'読みたいもの', tags:['Tag', {type:'user',userId:'writer',displayName:'作者'}]};
+ const h = homeFixture({hash:'#tags', state:{tagGroups, tagSchemaVersion:7, favoriteGroupDisplay:'double'}});
+ await flush();
+ const clear = h.nodes.get('clear-favorite-group'), dialog = h.nodes.get('clear-favorite-dialog');
+ assert.equal(clear.textContent, '①の項目を全削除');
+ h.nodes.get('edit-groups').querySelector('[data-group-id="group8"]').onclick();
+ await flush();
+ assert.equal(clear.textContent, '⑧の項目を全削除');
+ clear.onclick();
+ assert.equal(dialog.open, true);
+ assert.match(h.nodes.get('clear-favorite-message').textContent, /⑧ 読みたいものの2件/);
+ h.nodes.get('clear-favorite-cancel').onclick();
+ assert.equal(dialog.open, false);
+ assert.deepEqual(h.state.tagGroups, tagGroups);
+ clear.onclick();
+ await h.nodes.get('clear-favorite-accept').onclick();
+ assert.deepEqual(h.state.tagGroups, tagGroups.map(group => group.id === 'group8' ? {...group,tags:[]} : group));
+ assert.equal(h.state.selectedTagGroupId, 'group8');
+ assert.equal(clear.disabled, true);
+ assert.match(h.nodes.get('favorite-operation-status').textContent, /⑧の項目をすべて削除/);
+});
+
+test('お気に入りの全削除は確認後に項目やグループ選択が変わった場合に保存しない', async () => {
+ const f = fixture(groups(['Keep']));
+ const operation = {type:'CLEAR_TAG_GROUP', groupId:'group1', expectedTagGroupsRevision:0, expectedGroupSelectionRevision:0};
+ await f.controller.tag({type:'ADD_TAG',groupId:'group1',tag:'New'});
+ await assert.rejects(f.controller.tag(operation), {code:'CONFLICT'});
+ await f.controller.tag({type:'SELECT_TAG_GROUP',groupId:'group2'});
+ await f.controller.tag({type:'SELECT_TAG_GROUP',groupId:'group1'});
+ await assert.rejects(f.controller.tag({...operation,expectedTagGroupsRevision:f.stored.tagGroupsRevision}), {code:'CONFLICT'});
+ assert.equal(f.writes, 3);
+ assert.deepEqual(f.stored.tagGroups[0].tags, ['Keep','New']);
+});
+
 test('タグ正規化は前後空白と#だけ。大小・全半角・内部空白・Unicode表現を保存',()=>{
  const {core}=fixture();
  assert.equal(core.normalizeTag('  #ComfyUI  '),'ComfyUI');
@@ -2371,6 +2408,47 @@ function accountMenuFixture(html=accountMenuHtml){
  return f;
 }
 const accountHidden='data-oshaberi-note-account-menu-hidden';
+test('ダッシュボード非表示時だけアカウントメニューに本人の記事検索を追加する', () => {
+ const html = accountMenuHtml.replace(
+  '<a href="/sample"><span data-name="avatar"></span></a><a href="https://note.com/settings/account"></a>',
+  '<ul><li><a href="/sample"><span data-name="avatar"><img alt="サンプルさん"></span></a></li></ul><div id="account-controls"><a href="https://note.com/dashboard"></a><a href="https://note.com/settings/account"></a></div>'
+ );
+ const f = accountMenuFixture(html), url = 'https://note.com/following';
+ const settings = f.core.readSettings({...groups(),noteUserId:'different_id',dashboardDisabled:true});
+ const row = f.doc.getElementById('account-controls'), profile = f.doc.querySelector('a[href="/sample"]');
+ const shortcut = () => f.doc.querySelector('[class~="oshaberi-note-account-search"]');
+ f.ui.update({...settings,dashboardDisabled:false},url);
+ assert.equal(shortcut(), null);
+ f.ui.update(settings,url);
+ const link = shortcut();
+ assert.equal(row.children[0], link);
+ assert.equal(row.children[2].href,'https://note.com/settings/account');
+ assert.equal(link.textContent,'＠サンプルさん');
+ const destination = new URL(link.href);
+ assert.equal(destination.searchParams.get('q')?.trim(),'from:@sample');
+ assert.equal(destination.searchParams.get('sort'),'new');
+ assert.equal(profile.href,'https://note.com/sample');
+ const refresh = () => { f.ui.invalidatePaidCards(); f.ui.update(settings,url); };
+ profile.href = '/second_user';
+ profile.querySelector('img').removeAttribute('alt');
+ refresh();
+ assert.equal(shortcut(),link);
+ assert.equal(link.textContent,'＠second_user');
+ assert.equal(link.href,f.core.authorSearchUrl('second_user'));
+ const menu = f.doc.getElementById('account-menu');
+ menu.remove(); refresh();
+ assert.equal(link.parentElement,null);
+ f.doc.root.append(menu); refresh();
+ assert.equal(f.doc.querySelectorAll('[class~="oshaberi-note-account-search"]').length,1);
+ f.ui.update({...settings,enabled:false},url);
+ assert.equal(shortcut(),null);
+ f.ui.update(settings,url);
+ f.ui.update({...settings,dashboardDisabled:false},url);
+ assert.equal(shortcut(),null);
+ f.ui.update(settings,url);
+ f.ui.stop();
+ assert.equal(shortcut(),null);
+});
 test('アカウントメニューは有料非表示とおすすめ非表示を個別に適用し、全モードで履歴・ヘルプ・ログアウトを残す',()=>{
  for(const mode of ['normal','social','severe'])for(const paid of [false,true])for(const recommendations of [false,true]){
   const f=accountMenuFixture(),settings=f.core.readSettings({...groups(),mode,hidePaidArticles:paid,hideArticleRecommendations:recommendations});f.ui.update(settings,'https://note.com/search');
