@@ -115,6 +115,21 @@
     if (userId !== value.userId || displayName !== value.displayName) throw new Error("お気に入りユーザーの保存値が正しくありません。");
     return { type: "user", userId, displayName };
   }
+  function bulkFavorite(value) {
+    if (typeof value === "string") return normalizeTag(value);
+    if (value?.displayName !== "") throw new Error("一括登録にはタグ名またはユーザーIDを指定してください。");
+    return favoriteUser(value);
+  }
+  function bulkFavoriteCandidates(values) {
+    const items = new Map();
+    for (const value of values) {
+      try {
+        const item = bulkFavorite(value), key = favoriteKey(item);
+        if (!items.has(key)) items.set(key, item);
+      } catch { /* 無効な候補は除外する。 */ }
+    }
+    return [...items.values()];
+  }
   function favoriteMagazine(value) {
     if (!exactKeys(value, ["type", "userId", "magazineId", "displayName"]) || value.type !== "magazine") throw new Error("お気に入りマガジンの形式が正しくありません。");
     const userId = authorId(value.userId), displayName = authorName(value.displayName);
@@ -435,5 +450,5 @@
     modeOf, usesTags, usesFollowing, availableGroups, expandGroups, groupSymbols,
     exportSettings, parseSettingsExport, settingsToken, normalizeOllamaUrl, validateModel, validateSystemPrompt, authorId, authorName, isSelf, authorRule, authorLabel, sortAuthors,
     favorite, favoriteKey, favoriteLabel, favoriteUrl, favoriteClickPosition, authorSearchUrl, searchedAuthor, favoriteUser, favoriteMagazine, favoriteMembership, favoriteArticle, articleAddress, favoriteSchema, bookIconPath, membershipIconPath, membershipPage, questionPage,
-    normalizeTag, normalizeTagCandidates, addableTag, inspectTags, tagUrl, articleSearchTabUrl, pageKind, hasFavoriteMenu, isArticle, isPreviewArticle, groupIds, groupName, normalizeGroupName, selectedGroup, defaultSettings });
+    normalizeTag, normalizeTagCandidates, bulkFavorite, bulkFavoriteCandidates, addableTag, inspectTags, tagUrl, articleSearchTabUrl, pageKind, hasFavoriteMenu, isArticle, isPreviewArticle, groupIds, groupName, normalizeGroupName, selectedGroup, defaultSettings });
 })();

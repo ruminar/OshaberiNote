@@ -7,11 +7,13 @@
   const discovery = globalThis.OshaberiNoteTagDiscovery;
   let chatTagSelection = false, registrationValid = () => true;
   const tagDialog = discovery?.createDialog(document, {
-    async save(groupId, tags, position) {
+    async save(groupId, items, position) {
       if (busy || uncertain || !registrationValid()) throw new Error("状態を再確認してから登録してください。");
       busy = true; controls(); const before = revision;
       try {
-        const result = await platform.bulkAddTags(groupId, tags, undefined, position);
+        const result = items.some(item => typeof item !== "string")
+          ? await platform.tag({ type: "ADD_FAVORITES", groupId, items, position })
+          : await platform.bulkAddTags(groupId, items, undefined, position);
         if (before === revision) show(result);
         return { ...state, bulkTagReport: result.bulkTagReport };
       } finally { busy = false; controls(); }
@@ -495,9 +497,9 @@
   byId("tag-discovery-check").onclick = () => {
     if (byId("tag-discovery-check").disabled) return;
     try {
-      const tags = discovery.extract(byId("tag-discovery-text").value);
-      byId("tag-discovery-status").textContent = tags.length ? "" : discovery.emptyMessage;
-      if (tags.length && tagDialog.open(tags, state)) { chatTagSelection = false; registrationValid = () => true; }
+      const items = discovery.extract(byId("tag-discovery-text").value, { includeUsers: true });
+      byId("tag-discovery-status").textContent = items.length ? "" : discovery.mixedEmptyMessage;
+      if (items.length && tagDialog.open(items, state)) { chatTagSelection = false; registrationValid = () => true; }
     } catch (error) { byId("tag-discovery-status").textContent = error.message; }
   };
   byId("tag-discovery-clear").onclick = () => {

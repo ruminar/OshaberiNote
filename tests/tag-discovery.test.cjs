@@ -26,6 +26,38 @@ test('プロンプトは保存済み全グループのタグだけを含み、�
  settings.tagGroups.push({id:'group5',name:'',tags:['隠れたタグ','AI',{type:'article',title:'秘密記事',url:'https://note.com/secret/n/n123',articleId:'n123'}]});
  const text=discovery.prompt(settings);assert.equal((text.match(/\[#AI\]/g)||[]).length,1);assert.ok(text.includes('[#隠れたタグ]'));assert.ok(!text.includes('secret'));assert.ok(!text.includes('秘密'));assert.match(discovery.prompt(core.defaultSettings()),/追記/);
 });
+test('貼り付け欄だけが明示的なユーザーIDを取り込み、同じIDの大文字小文字違いをまとめる',()=>{
+ const {discovery}=runtime();
+ const input='#先頭 [@First_ID][#小説]\n[@first_id]\n[@Second] @bare [@not valid] [@settings] [@日本語] [@link](https://note.com/link)';
+ assert.deepEqual(plain(discovery.extract(input,{includeUsers:true})),[
+  '先頭',{type:'user',userId:'First_ID',displayName:''},'小説',{type:'user',userId:'Second',displayName:''}
+ ]);
+ assert.deepEqual(plain(discovery.extract(input)),['先頭','小説']);
+});
+test('貼り付け欄はタグとユーザーを選択先の先頭に入力順で登録する',async()=>{
+ const initial=runtime().core.defaultSettings();
+ const saved={type:'user',userId:'Owner',displayName:'保存済み'};
+ initial.tagSchemaVersion=3;
+ initial.tagGroups[1].tags=['既存タグ',saved];
+ const f=homeFixture({state:initial,hash:'#discovery'});await flush();
+ f.nodes.get('tag-discovery-text').value='[@new_user][#小説][@owner]';
+ f.nodes.get('tag-discovery-check').onclick();
+ const dialog=f.document.querySelector('[class="oshaberi-note-tag-dialog"]');
+ const candidates=dialog.querySelectorAll('[data-tag-candidate], [data-user-candidate]');
+ assert.deepEqual(candidates.map(button=>button.textContent),['＠new_user','#小説','＠owner']);
+ assert.ok(candidates.every(button=>button.getAttribute('aria-pressed')==='false'));
+ const select=dialog.querySelector('select');select.value='group2';select.onchange();
+ assert.match(candidates[2].getAttribute('title'),/登録済み/);
+ const button=text=>dialog.querySelectorAll('button').find(item=>item.textContent===text);
+ button('すべてON').onclick();
+ await button('選択した3件を登録').onclick({shiftKey:true});
+ const expected=[{type:'user',userId:'new_user',displayName:''},'小説','既存タグ',saved];
+ assert.deepEqual(f.state.tagGroups[1].tags,expected);
+ assert.deepEqual(f.state.tagGroups[0].tags,[]);
+ assert.match(dialog.querySelector('[role="status"]').textContent,/2件追加・1件登録済み/);
+ const core=f.c.OshaberiNote;
+ assert.deepEqual(plain(core.parseSettingsExport(core.exportSettings(core.readSettings(f.state))).tagGroups[1].tags),expected);
+});
 test('一括保存は1回で既存5種類を維持し、登録済みを除いて追記・移行できる',async()=>{
  const f=storage(),s=f.raw;
  s.tagGroups[0].tags=['A',{type:'user',userId:'test',displayName:''},{type:'magazine',userId:'test',magazineId:'m123',displayName:''},{type:'membership',userId:'test',displayName:''},{type:'article',articleId:'n123',url:'https://note.com/test/n/n123',title:'題'}];s.tagSchemaVersion=6;

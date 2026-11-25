@@ -143,18 +143,32 @@
       }),
       tag: (operation, options = {}) => run(async () => {
         const singleAddTypes = ["ADD_TAG", "ADD_USER", "ADD_MAGAZINE", "ADD_MEMBERSHIP", "ADD_ARTICLE"];
-        if (!operation || !["ADD_TAGS", ...singleAddTypes, "REMOVE_TAG", "MOVE_TAG", "TRANSFER_TAG", "SELECT_TAG_GROUP", "RENAME_TAG_GROUP", "CLEAR_TAG_GROUP"].includes(operation.type) ||
-            Object.keys(operation).some(key => !(operation.type === "CLEAR_TAG_GROUP"
-              ? ["type", "groupId", "expectedTagGroupsRevision", "expectedGroupSelectionRevision"]
-              : ["type", "tags", "tag", "beforeTag", "groupId", "targetGroupId", "name", "expectedName", "userId", "magazineId", "displayName", "articleId", "url", "title", "position"]).includes(key)) ||
-            !core.groupIds.includes(operation.groupId)) throw new Error("グループを指定して画面を再読み込みしてください。");
+        const bulk = ["ADD_TAGS", "ADD_FAVORITES"].includes(operation?.type);
+        const completeName = operation?.type === "COMPLETE_USER_NAME";
+        const specificKeys = {
+          CLEAR_TAG_GROUP: ["type", "groupId", "expectedTagGroupsRevision", "expectedGroupSelectionRevision"],
+          ADD_FAVORITES: ["type", "groupId", "items", "position"],
+          COMPLETE_USER_NAME: ["type", "userId", "displayName"]
+        };
+        const keys = Object.hasOwn(specificKeys, operation?.type) ? specificKeys[operation.type] :
+          ["type", "tags", "tag", "beforeTag", "groupId", "targetGroupId", "name", "expectedName", "userId", "magazineId", "displayName", "articleId", "url", "title", "position"];
+        if (!operation || (!bulk && !completeName && ![...singleAddTypes, "REMOVE_TAG", "MOVE_TAG", "TRANSFER_TAG", "SELECT_TAG_GROUP", "RENAME_TAG_GROUP", "CLEAR_TAG_GROUP"].includes(operation.type)) ||
+            Object.keys(operation).some(key => !keys.includes(key)) || (!completeName && !core.groupIds.includes(operation.groupId))) {
+          throw new Error("グループを指定して画面を再読み込みしてください。");
+        }
         if (operation.position !== undefined &&
-            ((operation.type !== "ADD_TAGS" && !singleAddTypes.includes(operation.type)) ||
+            ((!bulk && !singleAddTypes.includes(operation.type)) ||
               !["start", "end"].includes(operation.position))) throw new Error("お気に入りの追加位置を確認してください。");
         if (operation.type === "ADD_TAG") core.normalizeTag(operation.tag);
-        if (operation.type === "ADD_TAGS" && (!Array.isArray(operation.tags) || !operation.tags.length || operation.tags.some(tag => typeof tag !== "string") || JSON.stringify(operation.tags).length > 1048576)) throw new Error("登録するタグ候補を確認してください（1,048,576文字以内）。");
+        const items = operation.type === "ADD_TAGS" ? operation.tags : operation.items;
+        if (bulk && (!Array.isArray(items) || !items.length || (operation.type === "ADD_TAGS" && items.some(item => typeof item !== "string")) ||
+            JSON.stringify(items).length > 1048576)) throw new Error("登録する候補を確認してください（1,048,576文字以内）。");
         if (["REMOVE_TAG", "MOVE_TAG", "TRANSFER_TAG"].includes(operation.type)) core.favorite(operation.tag);
         if (operation.type === "ADD_USER" && (!options.validateCurrent || !options.currentUser || core.authorId(operation.userId).toLowerCase() !== options.currentUser.toLowerCase())) throw new Error("作者ページから登録してください。");
+        if (completeName && (!options.validateCurrent || !options.currentUser ||
+            core.authorId(operation.userId).toLowerCase() !== options.currentUser.toLowerCase() || !core.authorName(operation.displayName))) {
+          throw new Error("検索結果の作者名を確認してください。");
+        }
         if (operation.type === "ADD_MAGAZINE" && (!options.validateCurrent || !options.currentUser || core.authorId(operation.userId).toLowerCase() !== options.currentUser.toLowerCase() || operation.magazineId !== options.currentMagazineId)) throw new Error("マガジンのページから登録してください。");
         if (operation.type === "ADD_MEMBERSHIP" && (!options.validateCurrent || options.currentMembership !== true || !options.currentUser || core.authorId(operation.userId).toLowerCase() !== options.currentUser.toLowerCase())) throw new Error("メンバーシップのページから登録してください。");
         if (operation.type === "ADD_ARTICLE") {
@@ -168,7 +182,7 @@
         if (!core.usesTags(settings)) throw failure("現在のモードではタグを編集できません。状態を再確認してください。", "MODE_RESTRICTED");
         if (settings.tagWarning) throw failure(settings.tagWarning, "INVALID_TAGS");
         const available = core.availableGroups(settings);
-        if (!available.some(group => group.id === operation.groupId) ||
+        if ((!completeName && !available.some(group => group.id === operation.groupId)) ||
             (operation.type === "TRANSFER_TAG" && !available.some(group => group.id === operation.targetGroupId))) throw failure("非表示のグループは操作できません。表示設定を確認してください。", "MODE_RESTRICTED");
         if (settings.groupSelectionInvalid && operation.type !== "SELECT_TAG_GROUP") throw failure("グループを選び直してください。", "CONFLICT");
         if (options.selectionRevision !== undefined && (settings.groupSelectionRevision !== options.selectionRevision || settings.selectedTagGroupId !== operation.groupId)) throw failure("選択グループが変わりました。状態を再確認してください。", "CONFLICT");
@@ -180,17 +194,31 @@
           if (JSON.stringify(next).length > 1048576) throw new Error("設定データが大きすぎます。登録を整理してください。");
           await port.store(next); return core.readSettings(next);
         }
-        if (operation.type === "ADD_TAGS") {
-          const normalized = operation.tags.flatMap(tag => { try { return [core.normalizeTag(tag)]; } catch { return []; } });
-          const candidates = core.normalizeTagCandidates(normalized), report = { added: 0, duplicates: normalized.length - candidates.length, skipped: operation.tags.length - normalized.length };
-          const seen = new Set(group.tags.filter(item => typeof item === "string"));
+        if (completeName) {
+          const key = `user:${options.currentUser.toLowerCase()}`, displayName = core.authorName(operation.displayName);
+          let changed = false;
+          for (const current of groups.slice(0, available.length)) {
+            const index = current.tags.findIndex(item => item?.type === "user" && !item.displayName && core.favoriteKey(item) === key);
+            if (index < 0) continue;
+            current.tags[index] = { ...current.tags[index], displayName };
+            changed = true;
+          }
+          return changed ? storeGroups() : settings;
+        }
+        if (bulk) {
+          const report = { added: 0, duplicates: 0, skipped: 0 };
+          const seen = new Set(group.tags.map(core.favoriteKey));
           const added = [];
           let size = JSON.stringify({ ...storedValue(raw, settings), tagSchemaVersion: core.favoriteSchema(groups, settings.tagSchemaVersion), tagGroups: groups, tagGroupsRevision: increment(settings.tagGroupsRevision) }).length;
-          for (const tag of candidates) {
-            if (seen.has(tag)) { report.duplicates++; continue; }
-            const extra = JSON.stringify(tag).length + (group.tags.length || added.length ? 1 : 0);
+          for (const value of items) {
+            let item;
+            try { item = core.bulkFavorite(value); } catch { report.skipped++; continue; }
+            const key = core.favoriteKey(item);
+            if (seen.has(key)) { report.duplicates++; continue; }
+            seen.add(key);
+            const extra = JSON.stringify(item).length + (group.tags.length || added.length ? 1 : 0);
             if (size + extra > 1048576) { report.skipped++; continue; }
-            added.push(tag); seen.add(tag); size += extra;
+            added.push(item); size += extra;
           }
           report.added = added.length;
           if (added.length) group.tags = operation.position === "start" ? added.concat(group.tags) : group.tags.concat(added);
