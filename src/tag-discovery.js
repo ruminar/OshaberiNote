@@ -4,8 +4,9 @@
   const core = globalThis.OshaberiNote;
   const emptyMessage = "タグ候補がありません。[#タグ名] の形式で入力してください。";
   const mixedEmptyMessage = "候補がありません。[#タグ名] または [@ユーザーID] の形式で入力してください。";
+  const inputLimit = 1048576;
   function extract(text, { includeUsers = false } = {}) {
-    if (typeof text !== "string" || text.length > 1048576) throw new Error("提案文は1,048,576文字以内で入力してください。");
+    if (typeof text !== "string" || text.length > inputLimit) throw new Error("提案文は1,048,576文字以内で入力してください。");
     // URL・コード・Markdownリンク先は候補ではない。見出しの # + 空白も拾わない。
     const mask = value => " ".repeat(value.length);
     const input = text.replace(/!?\[[^\]\n]*\]\([^\s)]*\)/g, mask)
@@ -23,6 +24,23 @@
       return tag && !/^[#@&]/.test(tag) && !/[<>]/.test(tag) ? [tag] : [];
     });
     return core.bulkFavoriteCandidates(items);
+  }
+  function shareList(items, type) {
+    const lines = [];
+    let length = 0, skipped = 0;
+    for (const item of items) {
+      if ((typeof item === "string" ? "tag" : item.type) !== type) continue;
+      const line = type === "tag" ? `[#${item}]` : `[@${item.userId}]`;
+      const nextLength = length + line.length + (lines.length ? 1 : 0);
+      if (nextLength > inputLimit) { skipped++; continue; }
+      // 貼り戻したときに別のタグとして読まれる表記をコピーしない。
+      if (type === "tag") {
+        const parsed = extract(line);
+        if (parsed.length !== 1 || parsed[0] !== item) { skipped++; continue; }
+      }
+      lines.push(line); length = nextLength;
+    }
+    return { text: lines.join("\n"), count: lines.length, skipped };
   }
   function prompt(settings) {
     const tags = core.normalizeTagCandidates(settings.tagGroups.flatMap(group => group.tags.filter(item => typeof item === "string")));
@@ -83,11 +101,11 @@
     const all = doc.createElement("button"), none = doc.createElement("button"), save = doc.createElement("button"), close = doc.createElement("button"), refresh = doc.createElement("button");
     for (const button of [all, none, save, close, refresh]) button.type = "button";
     all.textContent = "すべてON"; none.textContent = "すべてOFF"; close.textContent = "閉じる"; refresh.textContent = "状態を再確認"; refresh.hidden = true;
-    tools.append(all, none);
+    tools.append(all, none, count);
     const label = doc.createElement("label"), select = doc.createElement("select");
     label.textContent = "登録先グループ"; select.setAttribute("aria-label", "タグの一括登録先グループ"); label.append(select);
     const controls = doc.createElement("div"); controls.className = "oshaberi-note-tag-tools"; controls.append(save, close, refresh);
-    dialog.append(title, tools, list, count, label, status, controls);
+    dialog.append(title, tools, label, controls, status, list);
     let state, selected = new Set(), candidates = [], busy = false, uncertain = false, opened = false, focusBefore, generation = 0, groupSignature;
     function update(value) {
       state = value;
@@ -181,12 +199,13 @@
         if (core.availableGroups(value).some(group => group.id === value.selectedTagGroupId)) select.value = value.selectedTagGroupId;
         update(value); focusBefore = doc.activeElement; opened = true; dialog.hidden = false;
         if (typeof dialog.showModal === "function") { if (!dialog.open) dialog.showModal(); } else dialog.setAttribute("open", "");
-        (list.children[0] || close).focus(); return true;
+        list.scrollTop = 0; dialog.scrollTop = 0;
+        (all.disabled ? close : all).focus(); return true;
       },
       update(value) { if (opened) update(value); },
       close: () => finish(true),
       dispose() { finish(true); dialog.remove(); }
     });
   }
-  globalThis.OshaberiNoteTagDiscovery = Object.freeze({ extract, prompt, articleTags, createDialog, emptyMessage, mixedEmptyMessage });
+  globalThis.OshaberiNoteTagDiscovery = Object.freeze({ extract, shareList, prompt, articleTags, createDialog, emptyMessage, mixedEmptyMessage });
 })();

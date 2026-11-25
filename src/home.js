@@ -26,7 +26,7 @@
   const dirty = new Set();
   let favoriteDestination = "", renderedGroupId;
   const favoriteScrolls = new Map();
-  let copying = false, copyingPrompt = false, validatedText, parsedImport;
+  let copying = false, copyingPrompt = false, copyingFavorites = false, validatedText, parsedImport;
   function transferControls() {
     const text = byId("settings-json").value;
     if (text !== validatedText) {
@@ -110,7 +110,10 @@
     for (const id of ["normal", "save"]) byId(id).disabled = blocked;
     for (const id of Object.values(fields)) byId(id).disabled = !state || uncertain || (busy && ["settings", "import"].includes(pendingState));
     byId("favorite-destination").disabled = tagBlocked;
-    byId("clear-favorite-group").disabled = tagBlocked || !core.selectedGroup(state)?.tags.length;
+    const items = tagBlocked ? [] : core.selectedGroup(state)?.tags ?? [];
+    byId("clear-favorite-group").disabled = !items.length;
+    byId("copy-group-tags").disabled = copyingFavorites || !discovery || !items.some(item => typeof item === "string");
+    byId("copy-group-users").disabled = copyingFavorites || !discovery || !items.some(item => item?.type === "user");
     byId("group-name").disabled = !state || uncertain || !core.usesTags(state) || Boolean(state.tagWarning) || (busy && pendingState === "import");
     byId("save-group-name").disabled = tagBlocked;
     for (const id of ["edit-groups"]) byId(id).querySelectorAll("button").forEach(button => { button.disabled = blocked || (state && !core.usesTags(state)) || Boolean(state?.tagWarning); });
@@ -420,6 +423,24 @@
     event.preventDefault(); const group = core.selectedGroup(state), value = draft(group.id);
     void perform(() => platform.tag({ type: "RENAME_TAG_GROUP", groupId: group.id, name: byId("group-name").value, expectedName: value.nameDirty ? value.expectedName : group.name }), { rename: { groupId: group.id, name: value.name } });
   };
+  async function copyGroupList(button, type, label) {
+    if (button.disabled) return;
+    const group = core.selectedGroup(state);
+    const { text, count, skipped } = discovery.shareList(group.tags, type);
+    const status = byId("favorite-operation-status");
+    if (!count) { status.textContent = `${label}${skipped}件を共有形式にできませんでした。`; return; }
+    copyingFavorites = true; controls();
+    let message;
+    try {
+      await navigator.clipboard.writeText(text);
+      message = `${label}を${count}件クリップボードにコピーしました。${skipped ? `共有形式にできなかった${skipped}件は省きました。` : ""}`;
+    } catch { message = `${label}をコピーできませんでした。`; }
+    finally { copyingFavorites = false; controls(); }
+    if (core.selectedGroup(state)?.id === group.id) status.textContent = message;
+  }
+  const copyGroupTags = byId("copy-group-tags"), copyGroupUsers = byId("copy-group-users");
+  copyGroupTags.onclick = () => copyGroupList(copyGroupTags, "tag", "タグ");
+  copyGroupUsers.onclick = () => copyGroupList(copyGroupUsers, "user", "ユーザーID");
   for (const name of views) byId(`nav-${name}`).onclick = () => selectView(name);
   byId("home-menu").onkeydown = event => {
     const visible = !state ? ["settings"] : !core.usesTags(state) ? ["settings", "authors", "transfer"] : views;

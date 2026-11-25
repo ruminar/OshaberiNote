@@ -34,6 +34,32 @@ test('貼り付け欄だけが明示的なユーザーIDを取り込み、同じ
  ]);
  assert.deepEqual(plain(discovery.extract(input)),['先頭','小説']);
 });
+test('共有テキストは取り込み可能なタグだけを登録順に出力する',()=>{
+ const {discovery}=runtime();
+ const result=discovery.shareList(['長い タグ','途中]まで','(括弧あり)','C++','改行\nタグ','www.example.test','x'.repeat(1048576),'小説'],'tag');
+ assert.equal(result.skipped,5);
+ assert.equal(result.count,3);
+ assert.deepEqual(plain(discovery.extract(result.text,{includeUsers:true})),['長い タグ','C++','小説']);
+});
+test('選択中グループのタグとユーザーIDを分けてコピーする',async()=>{
+ const initial=runtime().core.defaultSettings();
+ initial.tagSchemaVersion=4;
+ initial.tagGroups[0].tags=['Tag','途中]まで',{type:'user',userId:'example',displayName:'共有しない名前'},{type:'magazine',userId:'mag_owner',magazineId:'m123',displayName:'マガジン'}];
+ initial.tagGroups[1].tags=[{type:'user',userId:'second',displayName:''}];
+ const f=homeFixture({state:initial,hash:'#tags'});await flush();
+ const tags=f.nodes.get('copy-group-tags'), users=f.nodes.get('copy-group-users'), status=f.nodes.get('favorite-operation-status');
+ await tags.onclick();
+ assert.match(status.textContent,/タグを1件.*できなかった1件/);
+ await users.onclick();
+ assert.deepEqual(f.copies,['[#Tag]','[@example]']);
+ f.nodes.get('edit-groups').querySelector('[data-group-id="group2"]').onclick();await flush();
+ assert.equal(tags.disabled,true);assert.equal(users.disabled,false);
+ await tags.onclick();await users.onclick();
+ assert.deepEqual(f.copies,['[#Tag]','[@example]','[@second]']);
+ f.options.copyError=true;await users.onclick();
+ assert.match(status.textContent,/コピーできませんでした/);
+ assert.deepEqual(f.state.tagGroups,plain(initial.tagGroups));
+});
 test('貼り付け欄はタグとユーザーを選択先の先頭に入力順で登録する',async()=>{
  const initial=runtime().core.defaultSettings();
  const saved={type:'user',userId:'Owner',displayName:'保存済み'};
@@ -88,6 +114,19 @@ test('ダイアログは連打を止め、結果不明では再確認まで再�
  f.find('すべてON').onclick();const save=f.find('選択した2件を登録'),pending=save.onclick();save.onclick();assert.equal(f.calls,1);assert.equal(save.disabled,true);release();await pending;
  assert.equal(save.disabled,true);assert.equal(f.find('状態を再確認').hidden,false);options.unconfirmed=false;await f.find('状態を再確認').onclick();assert.equal(save.disabled,false);
  await save.onclick();assert.equal(f.calls,2);f.dialog.update({...f.core.readSettings(f.raw),enabled:false});assert.equal(f.find('選択した0件を登録').disabled,true);
+});
+test('候補が384件でも登録操作は一覧の上にあり、先頭の操作にフォーカスする',()=>{
+ const f=dialogFixture({tags:Array.from({length:384},(_,i)=>`候補${i+1}`)});
+ const dialog=f.doc.querySelector('dialog'),list=dialog.querySelector('[class="oshaberi-note-tag-candidates"]');
+ assert.equal(dialog.children.at(-1),list);
+ assert.equal(list.children.length,384);
+ assert.equal(list.scrollTop,0);
+ for (const control of [dialog.querySelector('select'),dialog.querySelector('[aria-live="polite"]'),dialog.querySelector('[role="status"]'),
+  f.find('すべてON'),f.find('すべてOFF'),f.find('選択した0件を登録'),f.find('閉じる')]) {
+  assert.ok(dialog.contains(control));
+  assert.equal(list.contains(control),false);
+ }
+ assert.equal(f.doc.activeElement,f.find('すべてON'));
 });
 test('共通登録はCtrlとShiftで既存項目の前に選択順で追加する', async () => {
  for (const modifier of ['ctrlKey', 'shiftKey']) {

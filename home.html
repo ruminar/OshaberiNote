@@ -209,7 +209,11 @@
           <form id="group-name-form" class="tag-form">
             <label for="group-name">グループ名</label>
             <input id="group-name" type="text" autocomplete="off" disabled>
-            <button id="save-group-name" type="submit" disabled>名前を保存</button>
+            <div class="group-name-actions">
+              <button id="save-group-name" type="submit" disabled>名前を保存</button>
+              <button id="copy-group-tags" class="secondary group-copy" type="button" title="このグループのタグをコピー" aria-label="このグループのタグをコピー" disabled>＃</button>
+              <button id="copy-group-users" class="secondary group-copy" type="button" title="このグループのユーザーIDをコピー" aria-label="このグループのユーザーIDをコピー" disabled>＠</button>
+            </div>
           </form>
           <p class="muted">削除・移動・並べ替えは操作ごとに保存します。ドラッグ、または上下ボタンで並べ替えできます。</p>
           <div class="favorite-transfer-toolbar">
