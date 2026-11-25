@@ -1,0 +1,9 @@
+OshaberiNote is a desktop extension for note.com. It provides favorites, navigation, and optional Ollama-powered chat and creator evaluation.
+
+Version 0.1.6 improves favorites. To test it without Ollama, open the extension home and choose “タグ登録支援”. Paste [#sample] and [@example_user], click “確認”, select candidates, and register them to a group. Open “お気に入り” and select that group. The “＃” and “＠” buttons copy tags and user IDs respectively. The “項目を全削除” button asks for confirmation before clearing the selected group.
+
+To test the account-menu shortcut, turn on “ダッシュボードを無効化する”, then open the account menu while signed in to note.com. The new “＠” shortcut uses the menu’s profile link to search for the signed-in user’s posts in newest-first order. A paid note account is unnecessary.
+
+For AI features, install Ollama and a compatible model separately. In “LLMの設定”, choose “接続・再試行” and select a model. The default endpoint is http://127.0.0.1:11434. See INSTALL.md for OLLAMA_ORIGINS setup. User-provided chat input and explicitly selected article content go to the configured Ollama endpoint. Ollama cloud models may communicate with external services through Ollama. Firefox requests Website Content consent before sending article content.
+
+This update adds no manifest permissions. The packaged JavaScript and CSS are readable and are not minified or obfuscated.
